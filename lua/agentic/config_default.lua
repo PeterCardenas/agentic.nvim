@@ -47,6 +47,7 @@
 --- @field widget table<string, agentic.UserConfig.KeymapValue>
 --- @field prompt table<string, agentic.UserConfig.KeymapValue>
 --- @field diff_preview table<string, string>
+--- @field chat_navigation table<string, string>
 
 --- Window options passed to nvim_set_option_value
 --- Overrides default options (wrap, linebreak, winfixbuf, winfixheight)
@@ -187,6 +188,13 @@ local ConfigDefault = {
             },
             switch_provider = "<localLeader>s",
             switch_model = "<localLeader>m",
+            cycle_windows = {
+                {
+                    "<Tab>",
+                    mode = { "i", "n" },
+                },
+            },
+            toggle_prompt_code = "<leader>af", -- Global keymap to toggle between prompt and code window
         },
 
         --- Keys bindings for the prompt buffer
@@ -222,6 +230,12 @@ local ConfigDefault = {
         diff_preview = {
             next_hunk = "]c",
             prev_hunk = "[c",
+        },
+
+        --- Keys bindings for chat prompt navigation
+        chat_navigation = {
+            next_prompt = "]p",
+            prev_prompt = "[p",
         },
     },
 

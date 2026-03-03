@@ -271,6 +271,172 @@ function ChatWidget:_initialize()
     end
 end
 
+--- Cycle through widget windows in order: chat -> todos -> code -> files -> input
+function ChatWidget:_cycle_windows()
+    local current_win = vim.api.nvim_get_current_win()
+
+    -- Define the window cycle order
+    local cycle_order = { "chat", "todos", "code", "files", "input" }
+
+    -- Find current position in cycle
+    local current_idx = nil
+    for i, panel_name in ipairs(cycle_order) do
+        local winid = self.win_nrs[panel_name]
+        if winid and winid == current_win then
+            current_idx = i
+            break
+        end
+    end
+
+    -- If not in any widget window, start from chat
+    if not current_idx then
+        current_idx = 0
+    end
+
+    -- Find next valid window
+    for offset = 1, #cycle_order do
+        local next_idx = (current_idx + offset - 1) % #cycle_order + 1
+        local next_panel = cycle_order[next_idx]
+        local next_winid = self.win_nrs[next_panel]
+
+        if next_winid and vim.api.nvim_win_is_valid(next_winid) then
+            vim.api.nvim_set_current_win(next_winid)
+            return
+        end
+    end
+end
+
+--- Focus on the prompt (input) window
+function ChatWidget:focus_prompt()
+    local input_winid = self.win_nrs.input
+
+    if not input_winid or not vim.api.nvim_win_is_valid(input_winid) then
+        Logger.notify("Prompt window is not open", vim.log.levels.INFO)
+        return
+    end
+
+    vim.api.nvim_set_current_win(input_winid)
+end
+
+--- Get all line numbers where user prompts end (marked by "### 󱚠 Agent")
+--- @return integer[] positions 1-indexed line numbers
+function ChatWidget:_get_prompt_positions()
+    local bufnr = self.buf_nrs.chat
+    if not bufnr or not vim.api.nvim_buf_is_valid(bufnr) then
+        return {}
+    end
+
+    local line_count = vim.api.nvim_buf_line_count(bufnr)
+    local positions = {}
+
+    for i = 0, line_count - 1 do
+        local line = vim.api.nvim_buf_get_lines(bufnr, i, i + 1, false)[1] or ""
+        if line:match("^###%s*󱚠%s*Agent") then
+            table.insert(positions, i + 1)
+        end
+    end
+
+    return positions
+end
+
+--- Navigate to next or previous user prompt in chat buffer
+--- @param direction "next"|"prev"
+function ChatWidget:_navigate_prompt(direction)
+    local chat_winid = self.win_nrs.chat
+    if not chat_winid or not vim.api.nvim_win_is_valid(chat_winid) then
+        Logger.notify("Chat window is not open", vim.log.levels.INFO)
+        return
+    end
+
+    local positions = self:_get_prompt_positions()
+    if #positions == 0 then
+        Logger.notify("No prompts found in chat", vim.log.levels.INFO)
+        return
+    end
+
+    local cursor = vim.api.nvim_win_get_cursor(chat_winid)
+    local current_line = cursor[1]
+
+    local current_index = -1
+    local is_exactly_on_prompt = false
+
+    for i, pos in ipairs(positions) do
+        if pos == current_line then
+            current_index = i - 1
+            is_exactly_on_prompt = true
+            break
+        elseif pos < current_line then
+            current_index = i - 1
+        else
+            break
+        end
+    end
+
+    local new_index
+    if direction == "next" then
+        new_index = (current_index + 1) % #positions
+    else
+        if is_exactly_on_prompt then
+            new_index = current_index <= 0 and #positions - 1
+                or current_index - 1
+        else
+            new_index = current_index < 0 and #positions - 1 or current_index
+        end
+    end
+
+    local target_line = positions[new_index + 1]
+
+    vim.api.nvim_win_call(chat_winid, function()
+        vim.cmd(string.format("normal! %dGzz", target_line))
+    end)
+end
+
+--- Navigate to next user prompt
+function ChatWidget:navigate_next_prompt()
+    self:_navigate_prompt("next")
+end
+
+--- Navigate to previous user prompt
+function ChatWidget:navigate_prev_prompt()
+    self:_navigate_prompt("prev")
+end
+
+--- Toggle between full width and configured width
+function ChatWidget:_toggle_full_width()
+    -- Get or initialize the stored width for this tabpage
+    if vim.t[self.tab_page_id].agentic_stored_width == nil then
+        vim.t[self.tab_page_id].agentic_stored_width = Config.windows.width
+    end
+
+    local current_width = Config.windows.width
+    local stored_width = vim.t[self.tab_page_id].agentic_stored_width
+
+    -- Toggle between full width and stored width
+    if current_width == "100%" then
+        Config.windows.width = stored_width
+    else
+        vim.t[self.tab_page_id].agentic_stored_width = current_width
+        Config.windows.width = "100%"
+    end
+
+    -- Re-render the widget with new width
+    local previous_mode = vim.fn.mode()
+    local previous_buf = vim.api.nvim_get_current_buf()
+
+    self:hide()
+    self:show({ focus_prompt = false })
+
+    vim.schedule(function()
+        local win = vim.fn.bufwinid(previous_buf)
+        if win ~= -1 then
+            vim.api.nvim_set_current_win(win)
+        end
+        if previous_mode == "i" then
+            vim.cmd("startinsert")
+        end
+    end)
+end
+
 function ChatWidget:_bind_keymaps()
     BufHelpers.multi_keymap_set(
         Config.keymaps.prompt.submit,
@@ -316,6 +482,16 @@ function ChatWidget:_bind_keymaps()
             end,
             { desc = "Agentic: Switch provider" }
         )
+
+        -- Tab to cycle through windows
+        BufHelpers.multi_keymap_set(
+            Config.keymaps.widget.cycle_windows,
+            bufnr,
+            function()
+                self:_cycle_windows()
+            end,
+            { desc = "Agentic: Cycle through windows" }
+        )
     end
 
     -- Add keybindings to chat, todos, code, and files buffers to jump back to input and start insert mode
@@ -330,8 +506,6 @@ function ChatWidget:_bind_keymaps()
                 "I",
                 "c",
                 "C",
-                "x",
-                "X",
             }) do
                 BufHelpers.keymap_set(bufnr, "n", key, function()
                     self:move_cursor_to(
@@ -342,6 +516,32 @@ function ChatWidget:_bind_keymaps()
             end
         end
     end
+
+    -- Add 'x' keymap only to chat buffer to toggle full width
+    BufHelpers.keymap_set(self.buf_nrs.chat, "n", "x", function()
+        self:_toggle_full_width()
+    end, { desc = "Agentic: Toggle full width" })
+
+    -- Add prompt navigation keymaps to chat buffer
+    BufHelpers.keymap_set(
+        self.buf_nrs.chat,
+        "n",
+        Config.keymaps.chat_navigation.next_prompt,
+        function()
+            self:navigate_next_prompt()
+        end,
+        { desc = "Agentic: Navigate to next prompt" }
+    )
+
+    BufHelpers.keymap_set(
+        self.buf_nrs.chat,
+        "n",
+        Config.keymaps.chat_navigation.prev_prompt,
+        function()
+            self:navigate_prev_prompt()
+        end,
+        { desc = "Agentic: Navigate to previous prompt" }
+    )
 
     DiffPreview.setup_diff_navigation_keymaps(self.buf_nrs)
 end

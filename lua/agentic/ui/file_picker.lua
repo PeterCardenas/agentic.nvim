@@ -47,11 +47,6 @@ function FilePicker:new(bufnr)
     return instance
 end
 
---- Completion menu accept sequence
---- Space after <C-y> ensures completion menu closes and user is ready to start a new completion
-local COMPLETION_ACCEPT =
-    vim.api.nvim_replace_termcodes("<C-y> ", true, true, true)
-
 --- Sets up omnifunc completion and @ trigger detection
 --- @param bufnr number
 function FilePicker:_setup_completion(bufnr)
@@ -64,14 +59,16 @@ function FilePicker:_setup_completion(bufnr)
         Config.keymaps.prompt.accept_completion,
         bufnr,
         function()
-            if vim.fn.pumvisible() == 1 then
-                return COMPLETION_ACCEPT
-            end
-
-            return ""
+            -- Exit insert mode and cycle through windows
+            return vim.api.nvim_replace_termcodes(
+                "<Esc><Tab>",
+                true,
+                true,
+                true
+            )
         end,
         {
-            desc = "Agentic accept completion",
+            desc = "Agentic cycle windows",
             expr = true,
             replace_keycodes = false,
         }

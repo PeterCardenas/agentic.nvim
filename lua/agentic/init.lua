@@ -192,6 +192,32 @@ function Agentic.restore_session()
     SessionRestore.show_picker(tab_page_id, current_session)
 end
 
+--- Toggle between prompt and code window
+--- If cursor is in the prompt window, jump to the code window
+--- Otherwise, jump to the prompt window
+--- If the widget is not open, this does nothing
+function Agentic.toggle_prompt_code()
+    SessionRegistry.get_session_for_tab_page(nil, function(session)
+        if not session.widget:is_open() then
+            return
+        end
+
+        local current_win = vim.api.nvim_get_current_win()
+        local input_winid = session.widget.win_nrs.input
+
+        -- If currently in prompt, go to code window
+        if current_win == input_winid then
+            local code_winid = session.widget:find_first_non_widget_window()
+            if code_winid then
+                vim.api.nvim_set_current_win(code_winid)
+            end
+        else
+            -- Otherwise, go to prompt
+            session.widget:focus_prompt()
+        end
+    end)
+end
+
 --- Used to make sure we don't set multiple signal handlers or autocmds, if the user calls setup multiple times
 local traps_set = false
 local cleanup_group = vim.api.nvim_create_augroup("AgenticCleanup", {
@@ -235,6 +261,14 @@ function Agentic.setup(opts)
             vim.v.fcs_choice = "reload"
         end,
     })
+
+    -- Set up global keymap for toggling between prompt and code window
+    vim.keymap.set(
+        "n",
+        Config.keymaps.widget.toggle_prompt_code,
+        Agentic.toggle_prompt_code,
+        { desc = "Agentic: Toggle prompt/code", silent = true }
+    )
 
     vim.api.nvim_create_autocmd("VimLeavePre", {
         group = cleanup_group,
