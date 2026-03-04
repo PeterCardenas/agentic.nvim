@@ -568,12 +568,40 @@ function ACPClient:create_session(handlers, callback)
             return
         end
 
-        if result.sessionId then
-            self:_subscribe(result.sessionId, handlers)
+        local function cb(res, e)
+            if result.sessionId then
+                self:_subscribe(result.sessionId, handlers)
+            end
+
+            --- @cast result agentic.acp.SessionCreationResponse
+            callback(result, nil)
         end
 
-        --- @cast result agentic.acp.SessionCreationResponse
-        callback(result, nil)
+        if self.provider_config.default_model then
+            self:_send_request("session/set_model", {
+                sessionId = result.sessionId,
+                modelId = self.provider_config.default_model,
+            }, function(_set_model_result, set_model_err)
+                if set_model_err then
+                    Logger.notify(
+                        "Failed to set default model: "
+                            .. (
+                                set_model_err.message
+                                or vim.inspect(set_model_err)
+                            ),
+                        vim.log.levels.ERROR,
+                        { title = "🐞 Session creation error" }
+                    )
+
+                    callback(nil, set_model_err)
+                    return
+                end
+
+                cb(result, nil)
+            end)
+        else
+            cb(result, nil)
+        end
     end)
 end
 
@@ -979,3 +1007,4 @@ return ACPClient
 --- @field max_reconnect_attempts? number Maximum reconnection attempts
 --- @field auth_method? string Authentication method
 --- @field default_mode? string Default mode ID to set on session creation
+--- @field default_model? string Default model ID to set on session creation
