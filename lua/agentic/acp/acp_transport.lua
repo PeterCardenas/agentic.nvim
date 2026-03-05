@@ -232,26 +232,6 @@ function M.create_stdio_transport(config, callbacks)
     end
 
     function transport:stop()
-        if self.process and not self.process:is_closing() then
-            local process = self.process
-            self.process = nil
-
-            if not process then
-                return
-            end
-
-            -- Try to terminate gracefully
-            pcall(function()
-                process:kill(15)
-            end)
-            -- then force kill, it'll fail harmlessly if already exited
-            pcall(function()
-                process:kill(9)
-            end)
-
-            process:close()
-        end
-
         if self.stdin then
             self.stdin:close()
             self.stdin = nil
@@ -260,6 +240,53 @@ function M.create_stdio_transport(config, callbacks)
         if self.stdout then
             self.stdout:close()
             self.stdout = nil
+        end
+
+        if self.process and not self.process:is_closing() then
+            local process = self.process
+            self.process = nil
+
+            if not process then
+                return
+            end
+
+            local pid = process:get_pid()
+            local process_ids = { pid }
+            local process_queue = { pid }
+
+            -- Find all child processes recursively using pgrep
+            repeat
+                local next_pid = table.remove(process_queue, 1)
+                local result = vim.system({ "pgrep", "-P", tostring(next_pid) })
+                    :wait(5000)
+                if result.code == 0 then
+                    local lines =
+                        vim.split(result.stdout or "", "\n", { plain = true })
+                    for _, line in ipairs(lines) do
+                        local child_pid = tonumber(line)
+                        if child_pid then
+                            process_ids[#process_ids + 1] = child_pid
+                            process_queue[#process_queue + 1] = child_pid
+                        end
+                    end
+                end
+            until #process_queue == 0
+
+            -- Kill all processes bottom-up (children first) to avoid orphans
+            for i = #process_ids, 1, -1 do
+                local success = pcall(function()
+                    uv.kill(process_ids[i], 15) -- SIGTERM
+                end)
+                if not success then
+                    Logger.debug(
+                        "Failed to kill process: " .. tostring(process_ids[i])
+                    )
+                else
+                    Logger.debug("Killed process: " .. tostring(process_ids[i]))
+                end
+            end
+
+            process:close()
         end
 
         callbacks.on_state_change("disconnected")
