@@ -132,7 +132,7 @@ tools like `nvm`, `fnm`, etc...
 | [gemini-cli][gemini-cli]             | `pnpm add -g @google/gemini-cli`<br/> **OR** `npm i -g @google/gemini-cli`<br/> **OR** `brew install --cask gemini`                                                                            |
 | [codex-acp][codex-acp]               | `pnpm add -g @zed-industries/codex-acp`<br/> **OR** `npm i -g @zed-industries/codex-acp`<br/> **OR** [Download binary][codex-acp-releases]                                                     |
 | [opencode][opencode]                 | `pnpm add -g opencode-ai`<br/> **OR** `npm i -g opencode-ai`<br/> **OR** `brew install opencode`<br/> **OR** `curl -fsSL https://opencode.ai/install \| bash`                                  |
-| [cursor-agent][cursor-agent]         | `pnpm add -g @blowmage/cursor-agent-acp`<br/> **OR** `npm i -g @blowmage/cursor-agent-acp`                                                                                                     |
+| [cursor-agent][cursor-agent]       | `curl https://cursor.com/install -fsS \| bash`<br/> **OR** `pnpm add -g @blowmage/cursor-agent-acp`<br/> **OR** `npm i -g @blowmage/cursor-agent-acp`                                          |
 | [auggie][auggie]                     | `pnpm add -g @augmentcode/auggie`<br/> **OR** `npm i -g @augmentcode/auggie`<br/> **OR** See [Auggie docs][auggie-docs]                                                                        |
 | [mistral-vibe][mistral-vibe]         | `curl -LsSf https://mistral.ai/vibe/install.sh \| bash`<br/> **OR** `uv tool install mistral-vibe`<br/> **OR** `pip install mistral-vibe`<br/> **OR** [Download binary][mistral-vibe-releases] |
 

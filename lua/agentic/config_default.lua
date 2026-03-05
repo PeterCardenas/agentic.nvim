@@ -103,9 +103,10 @@ local ConfigDefault = {
 
         ["cursor-acp"] = {
             name = "Cursor Agent ACP",
-            command = "cursor-agent-acp",
-            args = {},
+            command = "agent",
+            args = { "acp" },
             env = {},
+            auth_method = "cursor_login",
         },
 
         ["auggie-acp"] = {

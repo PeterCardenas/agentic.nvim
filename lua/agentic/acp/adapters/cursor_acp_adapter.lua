@@ -1,5 +1,12 @@
 local ACPClient = require("agentic.acp.acp_client")
+local FileSystem = require("agentic.utils.file_system")
 local Logger = require("agentic.utils.logger")
+
+--- @class agentic.acp.CursorRawInput : agentic.acp.RawInput
+--- @field content? string For creating new files instead of new_string
+
+--- @class agentic.acp.CursorToolCallMessage : agentic.acp.ToolCallMessage
+--- @field rawInput? agentic.acp.CursorRawInput
 
 --- Cursor-specific adapter that extends ACPClient with Cursor-specific behaviors
 --- @class agentic.acp.CursorACPAdapter : agentic.acp.ACPClient
@@ -70,11 +77,31 @@ function CursorACPAdapter:__handle_session_update(params)
     ACPClient.__handle_session_update(self, params)
 end
 
+--- Extract diff from content array (standard ACP diff content type)
+--- @param update agentic.acp.ToolCallMessage
+--- @return agentic.ui.MessageWriter.ToolCallDiff|nil diff
+--- @return string|nil path
+function CursorACPAdapter:_extract_content_diff(update)
+    local content = update.content and update.content[1]
+    if not content or content.type ~= "diff" then
+        return nil, nil
+    end
+
+    --- @type agentic.ui.MessageWriter.ToolCallDiff
+    local diff = {
+        new = self:safe_split(content.newText),
+        old = self:safe_split(content.oldText),
+    }
+
+    return diff, content.path
+end
+
 --- @protected
 --- @param session_id string
---- @param update agentic.acp.ToolCallMessage
+--- @param update agentic.acp.CursorToolCallMessage
 function CursorACPAdapter:__handle_tool_call(session_id, update)
     local kind = update.kind
+
     --- @type agentic.ui.MessageWriter.ToolCallBlock
     local message = {
         tool_call_id = update.toolCallId,
@@ -83,7 +110,65 @@ function CursorACPAdapter:__handle_tool_call(session_id, update)
         argument = update.title,
     }
 
-    -- TODO: implement Cursor-agent tool calls
+    if update.rawInput and not vim.tbl_isempty(update.rawInput) then
+        -- rawInput available: extract provider-specific fields
+        if kind == "read" or kind == "edit" then
+            local file_path = update.rawInput.file_path
+            if file_path and file_path ~= "" then
+                message.argument = FileSystem.to_smart_path(file_path)
+            end
+
+            if kind == "edit" then
+                local new_string = update.rawInput.content
+                    or update.rawInput.new_string
+                local old_string = update.rawInput.old_string
+
+                message.diff = {
+                    new = self:safe_split(new_string),
+                    old = self:safe_split(old_string),
+                    all = update.rawInput.replace_all or false,
+                }
+            end
+        elseif kind == "fetch" then
+            if update.rawInput.query then
+                message.kind = "WebSearch"
+                message.argument = update.rawInput.query
+            elseif update.rawInput.url then
+                message.argument = update.rawInput.url
+
+                if update.rawInput.prompt then
+                    message.argument = string.format(
+                        "%s %s",
+                        message.argument,
+                        update.rawInput.prompt
+                    )
+                end
+            else
+                message.argument = "unknown fetch"
+            end
+        else
+            local command = update.rawInput.command
+            if type(command) == "table" then
+                command = table.concat(command, " ")
+            end
+
+            message.argument = command or update.title or ""
+            message.body = self:extract_content_body(update)
+        end
+    elseif update.content and #update.content > 0 then
+        -- No rawInput: try content-based diff (standard ACP format)
+        if kind == "edit" then
+            local diff, path = self:_extract_content_diff(update)
+            if diff then
+                message.diff = diff
+                if path then
+                    message.argument = FileSystem.to_smart_path(path)
+                end
+            end
+        else
+            message.body = self:extract_content_body(update)
+        end
+    end
 
     self:__with_subscriber(session_id, function(subscriber)
         subscriber.on_tool_call(message)
