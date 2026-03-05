@@ -6,6 +6,16 @@ local SessionRegistry = require("agentic.session_registry")
 --- @class agentic.SessionRestore
 local SessionRestore = {}
 
+--- Lazily load fzf-lua module
+--- @return table|nil fzf_lua module or nil if not available
+local function load_fzf_lua()
+    local ok, fzf = pcall(require, "fzf-lua")
+    if not ok then
+        return nil
+    end
+    return fzf
+end
+
 --- Checks if the current session has messages or we can safely restore into it if it's empty
 --- @param current_session agentic.SessionManager|nil
 --- @return boolean has_conflict
@@ -56,19 +66,95 @@ local function restore_with_conflict_check(
     has_conflict
 )
     if has_conflict then
-        vim.ui.select({
+        local fzf = load_fzf_lua()
+
+        local options = {
             "Cancel",
             "Clear current session and restore",
-        }, {
-            prompt = "Current session has messages. What would you like to do?",
-        }, function(choice)
+        }
+
+        local on_choice = function(choice)
             if choice == "Clear current session and restore" then
                 do_restore(session_id, tab_page_id, has_conflict)
             end
-        end)
+        end
+
+        if not fzf then
+            -- Fallback to vim.ui.select if fzf-lua is not available
+            vim.ui.select(options, {
+                prompt = "Current session has messages. What would you like to do?",
+            }, on_choice)
+        else
+            fzf.fzf_exec(options, {
+                prompt = "Current session has messages> ",
+                winopts = {
+                    height = 0.2,
+                    width = 0.5,
+                    row = 0.5,
+                    col = 0.5,
+                },
+                actions = {
+                    ["default"] = function(selected)
+                        if selected and #selected > 0 then
+                            on_choice(selected[1])
+                        end
+                    end,
+                },
+            })
+        end
     else
         do_restore(session_id, tab_page_id, has_conflict)
     end
+end
+
+--- Show session picker using fzf-lua (with fallback to vim.ui.select)
+--- @param items table[] List of session items with display and session_id fields
+--- @param on_choice fun(choice: table|nil) Callback when user selects an item
+local function show_fzf_picker(items, on_choice)
+    local fzf = load_fzf_lua()
+
+    if not fzf then
+        -- Fallback to vim.ui.select if fzf-lua is not available
+        vim.ui.select(items, {
+            prompt = "Select session to restore:",
+            format_item = function(item)
+                return item.display
+            end,
+        }, on_choice)
+        return
+    end
+
+    local entries = {}
+    for _, item in ipairs(items) do
+        table.insert(entries, item.display)
+    end
+
+    fzf.fzf_exec(entries, {
+        prompt = "Select session to restore> ",
+        winopts = {
+            height = 0.4,
+            width = 0.6,
+            row = 0.5,
+            col = 0.5,
+        },
+        actions = {
+            ["default"] = function(selected)
+                if not selected or #selected == 0 then
+                    on_choice(nil)
+                    return
+                end
+
+                -- Find the item that matches the selected display string
+                for _, item in ipairs(items) do
+                    if item.display == selected[1] then
+                        on_choice(item)
+                        return
+                    end
+                end
+                on_choice(nil)
+            end,
+        },
+    })
 end
 
 --- Show session picker and restore selected session
@@ -92,12 +178,7 @@ function SessionRestore.show_picker(tab_page_id, current_session)
             })
         end
 
-        vim.ui.select(items, {
-            prompt = "Select session to restore:",
-            format_item = function(item)
-                return item.display
-            end,
-        }, function(choice)
+        show_fzf_picker(items, function(choice)
             if choice then
                 restore_with_conflict_check(
                     choice.session_id,
