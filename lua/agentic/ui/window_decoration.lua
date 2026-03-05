@@ -215,7 +215,7 @@ local function set_buffer_name(bufnr, header_text, tab_page_id)
         buf_name = header_text
     end
 
-    vim.api.nvim_buf_set_name(bufnr, buf_name)
+    pcall(vim.api.nvim_buf_set_name, bufnr, buf_name)
 end
 
 --- Renders a header for a window, handling user customization, winbar, and buffer naming
