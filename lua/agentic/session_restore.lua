@@ -125,8 +125,8 @@ local function show_fzf_picker(items, on_choice)
     end
 
     local entries = {}
-    for _, item in ipairs(items) do
-        table.insert(entries, item.display)
+    for i, item in ipairs(items) do
+        table.insert(entries, string.format("%d. %s", i, item.display))
     end
 
     fzf.fzf_exec(entries, {
@@ -144,12 +144,10 @@ local function show_fzf_picker(items, on_choice)
                     return
                 end
 
-                -- Find the item that matches the selected display string
-                for _, item in ipairs(items) do
-                    if item.display == selected[1] then
-                        on_choice(item)
-                        return
-                    end
+                local idx = tonumber(selected[1]:match("^(%d+)%."))
+                if idx and items[idx] then
+                    on_choice(items[idx])
+                    return
                 end
                 on_choice(nil)
             end,
@@ -170,7 +168,7 @@ function SessionRestore.show_picker(tab_page_id, current_session)
         local items = {}
         for _, s in ipairs(sessions) do
             local date = os.date("%Y-%m-%d %H:%M", s.timestamp or 0)
-            local title = s.title or "(no title)"
+            local title = (s.title or "(no title)"):gsub("\n", " ")
 
             table.insert(items, {
                 display = string.format("%s - %s", date, title),
