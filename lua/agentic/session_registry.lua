@@ -3,6 +3,16 @@ local Config = require("agentic.config")
 local DefaultConfig = require("agentic.config_default")
 local ACPHealth = require("agentic.acp.acp_health")
 
+--- Lazily load fzf-lua module
+--- @return table|nil fzf_lua module or nil if not available
+local function load_fzf_lua()
+    local ok, fzf = pcall(require, "fzf-lua")
+    if not ok then
+        return nil
+    end
+    return fzf
+end
+
 --- @class agentic.SessionRegistry
 --- @field sessions table<integer, agentic.SessionManager|nil> Weak map: tab_page_id -> SessionManager instance
 local SessionRegistry = {
@@ -108,26 +118,65 @@ function SessionRegistry.select_provider(on_selected)
 
     vim.list_extend(sorted_providers, not_installed)
 
-    vim.ui.select(sorted_providers, {
-        prompt = "Select an ACP provider for the new session:",
-        --- @param item _ProviderStatus
-        format_item = function(item)
-            local label = item.name
+    --- @param item _ProviderStatus
+    --- @return string
+    local function format_provider(item)
+        local label = item.name
 
-            if label == Config.provider then
-                label = label .. " (current)"
-            elseif label == DefaultConfig.provider then
-                label = label .. " (default)"
-            end
+        if label == Config.provider then
+            label = label .. " (current)"
+        elseif label == DefaultConfig.provider then
+            label = label .. " (default)"
+        end
 
-            label = label
-                .. (item.installed and " ✓ available" or " ✗ not installed")
+        label = label
+            .. (item.installed and " ✓ available" or " ✗ not installed")
 
-            return label
-        end,
-    }, function(selected_provider)
-        on_selected(selected_provider and selected_provider.name)
-    end)
+        return label
+    end
+
+    local fzf = load_fzf_lua()
+
+    if not fzf then
+        vim.ui.select(sorted_providers, {
+            prompt = "Select an ACP provider for the new session:",
+            format_item = format_provider,
+        }, function(selected_provider)
+            on_selected(selected_provider and selected_provider.name)
+        end)
+        return
+    end
+
+    local entries = {}
+    for _, provider in ipairs(sorted_providers) do
+        table.insert(entries, format_provider(provider))
+    end
+
+    fzf.fzf_exec(entries, {
+        prompt = "Select Provider> ",
+        winopts = {
+            height = 0.4,
+            width = 0.6,
+            row = 0.5,
+            col = 0.5,
+        },
+        actions = {
+            ["default"] = function(selected)
+                if not selected or #selected == 0 then
+                    on_selected(nil)
+                    return
+                end
+
+                for _, provider in ipairs(sorted_providers) do
+                    if format_provider(provider) == selected[1] then
+                        on_selected(provider.name)
+                        return
+                    end
+                end
+                on_selected(nil)
+            end,
+        },
+    })
 end
 
 return SessionRegistry
