@@ -610,6 +610,14 @@ function ChatWidget:_create_new_buf(opts)
         vim.api.nvim_set_option_value(key, value, { buf = bufnr })
     end
 
+    -- Guard against external plugins/autocommands re-listing agentic buffers
+    vim.api.nvim_create_autocmd("BufWinEnter", {
+        buffer = bufnr,
+        callback = function()
+            vim.bo[bufnr].buflisted = false
+        end,
+    })
+
     return bufnr
 end
 
