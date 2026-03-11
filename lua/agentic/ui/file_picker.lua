@@ -73,51 +73,6 @@ function FilePicker:_setup_completion(bufnr)
             replace_keycodes = false,
         }
     )
-
-    local last_at_pos = nil
-
-    vim.api.nvim_create_autocmd("TextChangedI", {
-        buffer = bufnr,
-        callback = function()
-            local cursor = vim.api.nvim_win_get_cursor(0)
-            local line = vim.api.nvim_get_current_line()
-            local before_cursor = line:sub(1, cursor[2])
-
-            -- Match @ at start of line or after whitespace (space/tab)
-            local at_match = before_cursor:match("^@[^%s]*$")
-                or before_cursor:match("[%s]@[^%s]*$")
-
-            if at_match then
-                local at_pos = before_cursor:reverse():find("@")
-                local current_pos = cursor[2] - at_pos
-
-                -- Only scan if this is a new @ position
-                if current_pos ~= last_at_pos then
-                    last_at_pos = current_pos
-                    self:scan_files()
-                end
-
-                if self._files and #self._files > 0 then
-                    -- Set popup menu width a % of editor width
-                    -- Neovim will auto-reposition ("nudge") the menu to fit on screen
-                    vim.opt_local.pumwidth = math.floor(vim.o.columns * 0.6)
-
-                    vim.api.nvim_feedkeys(
-                        vim.api.nvim_replace_termcodes(
-                            "<C-x><C-o>",
-                            true,
-                            false,
-                            true
-                        ),
-                        "n",
-                        false
-                    )
-                end
-            else
-                last_at_pos = nil
-            end
-        end,
-    })
 end
 
 function FilePicker:scan_files()
