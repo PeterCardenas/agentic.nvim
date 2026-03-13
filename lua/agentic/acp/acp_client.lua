@@ -544,7 +544,7 @@ function ACPClient:create_session(handlers, callback)
 
     self:_send_request("session/new", {
         cwd = cwd,
-        mcpServers = {},
+        mcpServers = self.provider_config.mcp_servers or {},
     }, function(result, err)
         if err then
             Logger.notify(
@@ -1008,3 +1008,4 @@ return ACPClient
 --- @field auth_method? string Authentication method
 --- @field default_mode? string Default mode ID to set on session creation
 --- @field default_model? string Default model ID to set on session creation
+--- @field mcp_servers? agentic.acp.McpServer[] MCP servers to connect on session creation
