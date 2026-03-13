@@ -173,6 +173,13 @@ function Agentic.switch_provider(opts)
     end)
 end
 
+--- Switch to a different model via fzf-lua picker.
+function Agentic.switch_model()
+    SessionRegistry.get_session_for_tab_page(nil, function(session)
+        session:switch_model()
+    end)
+end
+
 --- Stops the agent's current generation or tool execution
 --- The session remains active and ready for the next prompt
 --- Safe to call multiple times or when no generation is active
@@ -268,6 +275,14 @@ function Agentic.setup(opts)
         Config.keymaps.widget.toggle_prompt_code,
         Agentic.toggle_prompt_code,
         { desc = "Agentic: Toggle prompt/code", silent = true }
+    )
+
+    -- Set up global keymap for switching models
+    vim.keymap.set(
+        "n",
+        Config.keymaps.widget.switch_model_global,
+        Agentic.switch_model,
+        { desc = "Agentic: Switch model", silent = true }
     )
 
     vim.api.nvim_create_autocmd("VimLeavePre", {

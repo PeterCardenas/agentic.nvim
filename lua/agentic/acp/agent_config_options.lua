@@ -2,6 +2,16 @@ local BufHelpers = require("agentic.utils.buf_helpers")
 local Config = require("agentic.config")
 local Logger = require("agentic.utils.logger")
 
+--- Lazily load fzf-lua module
+--- @return table|nil fzf_lua module or nil if not available
+local function load_fzf_lua()
+    local ok, fzf = pcall(require, "fzf-lua")
+    if not ok then
+        return nil
+    end
+    return fzf
+end
+
 --- @class agentic.acp.AgentConfigOptions
 --- @field mode? agentic.acp.ConfigOption
 --- @field model? agentic.acp.ConfigOption
@@ -246,27 +256,68 @@ function AgentConfigOptions:_show_selector(target, prompt, handle_change)
         return false
     end
 
-    vim.ui.select(target.options, {
-        prompt = prompt,
-        format_item = function(item)
-            --- @cast item agentic.acp.ConfigOption.Option -- need to cast because `select` has a Generic, but not for `format_item`
-            local prefix = item.value == target.currentValue and "● " or "  "
+    local fzf = load_fzf_lua()
 
-            if item.description and item.description ~= "" then
-                return string.format(
-                    "%s%s: %s",
-                    prefix,
-                    item.name,
-                    item.description
-                )
-            end
-            return prefix .. item.name
-        end,
-    }, function(selected_mode)
-        if selected_mode and selected_mode.value ~= target.currentValue then
-            handle_change(selected_mode.value, false)
+    --- @param item agentic.acp.ConfigOption.Option
+    --- @return string
+    local function format_option(item)
+        local prefix = item.value == target.currentValue and "● " or "  "
+
+        if item.description and item.description ~= "" then
+            return string.format(
+                "%s%s: %s",
+                prefix,
+                item.name,
+                item.description
+            )
         end
-    end)
+        return prefix .. item.name
+    end
+
+    local on_select = function(selected)
+        if selected and selected.value ~= target.currentValue then
+            handle_change(selected.value, false)
+        end
+    end
+
+    if not fzf then
+        vim.ui.select(target.options, {
+            prompt = prompt,
+            format_item = format_option,
+        }, on_select)
+        return true
+    end
+
+    local entries = {}
+    for _, option in ipairs(target.options) do
+        table.insert(entries, format_option(option))
+    end
+
+    fzf.fzf_exec(entries, {
+        prompt = prompt:gsub(":$", "") .. "> ",
+        winopts = {
+            height = 0.4,
+            width = 0.6,
+            row = 0.5,
+            col = 0.5,
+        },
+        actions = {
+            ["default"] = function(selected)
+                if not selected or #selected == 0 then
+                    on_select(nil)
+                    return
+                end
+
+                for _, option in ipairs(target.options) do
+                    if format_option(option) == selected[1] then
+                        on_select(option)
+                        return
+                    end
+                end
+                on_select(nil)
+            end,
+        },
+    })
 
     return true
 end

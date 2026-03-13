@@ -1,7 +1,17 @@
 --- Manages agent models for ACP sessions
---- Provides model selection via vim.ui.select
+--- Provides model selection via fzf-lua (with fallback to vim.ui.select)
 
 local Logger = require("agentic.utils.logger")
+
+--- Lazily load fzf-lua module
+--- @return table|nil fzf_lua module or nil if not available
+local function load_fzf_lua()
+    local ok, fzf = pcall(require, "fzf-lua")
+    if not ok then
+        return nil
+    end
+    return fzf
+end
 
 --- @class agentic.acp.AgentModels
 --- @field _models agentic.acp.Model[]
@@ -44,30 +54,70 @@ function AgentModels:show_model_selector(set_model_callback)
         return false
     end
 
-    vim.ui.select(self._models, {
-        prompt = "Select Model:",
-        format_item = function(item)
-            --- @cast item agentic.acp.Model
-            local prefix = item.modelId == self.current_model_id and "● "
-                or "  "
-            if item.description and item.description ~= "" then
-                return string.format(
-                    "%s%s: %s",
-                    prefix,
-                    item.name,
-                    item.description
-                )
-            end
-            return prefix .. item.name
-        end,
-    }, function(selected_model)
+    local fzf = load_fzf_lua()
+
+    --- @param item agentic.acp.Model
+    --- @return string
+    local function format_model(item)
+        local prefix = item.modelId == self.current_model_id and "● " or "  "
+        if item.description and item.description ~= "" then
+            return string.format(
+                "%s%s: %s",
+                prefix,
+                item.name,
+                item.description
+            )
+        end
+        return prefix .. item.name
+    end
+
+    local on_select = function(selected_model)
         if
             selected_model
             and selected_model.modelId ~= self.current_model_id
         then
             set_model_callback(selected_model.modelId)
         end
-    end)
+    end
+
+    if not fzf then
+        vim.ui.select(self._models, {
+            prompt = "Select Model:",
+            format_item = format_model,
+        }, on_select)
+        return true
+    end
+
+    local entries = {}
+    for _, model in ipairs(self._models) do
+        table.insert(entries, format_model(model))
+    end
+
+    fzf.fzf_exec(entries, {
+        prompt = "Select Model> ",
+        winopts = {
+            height = 0.4,
+            width = 0.6,
+            row = 0.5,
+            col = 0.5,
+        },
+        actions = {
+            ["default"] = function(selected)
+                if not selected or #selected == 0 then
+                    on_select(nil)
+                    return
+                end
+
+                for _, model in ipairs(self._models) do
+                    if format_model(model) == selected[1] then
+                        on_select(model)
+                        return
+                    end
+                end
+                on_select(nil)
+            end,
+        },
+    })
 
     return true
 end

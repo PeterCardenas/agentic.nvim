@@ -805,6 +805,13 @@ function SessionManager:_cancel_session()
     self._history_to_send = nil
 end
 
+--- Show the model selector picker and switch to the selected model.
+function SessionManager:switch_model()
+    self.config_options:show_model_selector(function(model_id, is_legacy)
+        self:_handle_model_change(model_id, is_legacy)
+    end)
+end
+
 --- Switch to a different ACP provider while preserving chat UI and history.
 --- Reads Config.provider (already set by caller) for the target provider.
 function SessionManager:switch_provider()

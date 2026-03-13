@@ -196,6 +196,7 @@ local ConfigDefault = {
                 },
             },
             toggle_prompt_code = "<leader>af", -- Global keymap to toggle between prompt and code window
+            switch_model_global = "<leader>am", -- Global keymap to switch model
         },
 
         --- Keys bindings for the prompt buffer
