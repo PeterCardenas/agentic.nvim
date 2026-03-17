@@ -16,6 +16,7 @@ describe("agentic.acp.SlashCommands", function()
     end)
 
     after_each(function()
+        States.setSlashCommands({})
         if bufnr and vim.api.nvim_buf_is_valid(bufnr) then
             vim.api.nvim_buf_delete(bufnr, { force = true })
         end
@@ -31,7 +32,7 @@ describe("agentic.acp.SlashCommands", function()
                     { name = "review", description = "Review code" },
                 }
 
-                SlashCommands.setCommands(bufnr, commands_mock)
+                SlashCommands.setCommands(commands_mock)
 
                 local commands = States.getSlashCommands()
 
@@ -60,7 +61,7 @@ describe("agentic.acp.SlashCommands", function()
                 { name = "plan", description = "Create a plan" },
             }
 
-            SlashCommands.setCommands(bufnr, commands_mock)
+            SlashCommands.setCommands(commands_mock)
 
             local commands = States.getSlashCommands()
 
@@ -84,7 +85,7 @@ describe("agentic.acp.SlashCommands", function()
                 { name = "has space", description = "Invalid command" },
             }
 
-            SlashCommands.setCommands(bufnr, commands_mock)
+            SlashCommands.setCommands(commands_mock)
 
             local commands = States.getSlashCommands()
 
@@ -101,7 +102,7 @@ describe("agentic.acp.SlashCommands", function()
                 { name = "clear", description = "Clear session" },
             }
 
-            SlashCommands.setCommands(bufnr, commands_mock)
+            SlashCommands.setCommands(commands_mock)
             local commands = States.getSlashCommands()
 
             assert.equal(2, #commands) -- plan + /new
@@ -119,7 +120,7 @@ describe("agentic.acp.SlashCommands", function()
             }
 
             ---@diagnostic disable-next-line: param-type-mismatch
-            SlashCommands.setCommands(bufnr, commands_mock)
+            SlashCommands.setCommands(commands_mock)
             local commands = States.getSlashCommands()
 
             assert.equal(2, #commands) -- valid + /new
@@ -131,7 +132,7 @@ describe("agentic.acp.SlashCommands", function()
                 { name = "plan", description = "Create a plan" },
             }
 
-            SlashCommands.setCommands(bufnr, commands_mock)
+            SlashCommands.setCommands(commands_mock)
             local commands = States.getSlashCommands()
 
             for _, cmd in ipairs(commands) do
@@ -167,25 +168,18 @@ describe("agentic.acp.SlashCommands", function()
                 { name = "plan", description = "Create a plan" },
             }
 
-            SlashCommands.setCommands(bufnr, commands_mock)
+            SlashCommands.setCommands(commands_mock)
 
             local result = SlashCommands.complete_func(0, "pl")
             assert.is_table(result)
             assert.is_true(#result > 0)
         end)
 
-        it("returns empty table when no instance for buffer", function()
-            local new_bufnr = vim.api.nvim_create_buf(false, true)
-            vim.api.nvim_set_current_buf(new_bufnr)
-
+        it("returns empty table when no commands set", function()
             local result = SlashCommands.complete_func(0, "test")
 
             assert.is_table(result)
             assert.equal(0, #result)
-
-            if vim.api.nvim_buf_is_valid(new_bufnr) then
-                vim.api.nvim_buf_delete(new_bufnr, { force = true })
-            end
         end)
     end)
 
@@ -196,7 +190,7 @@ describe("agentic.acp.SlashCommands", function()
                 { name = "plan", description = "Create a plan" },
             }
 
-            SlashCommands.setCommands(bufnr, commands_mock)
+            SlashCommands.setCommands(commands_mock)
 
             local feedkeys_spy = spy.on(vim.api, "nvim_feedkeys")
 
@@ -237,7 +231,7 @@ describe("agentic.acp.SlashCommands", function()
                 { name = "plan", description = "Create a plan" },
             }
 
-            SlashCommands.setCommands(bufnr, commands)
+            SlashCommands.setCommands(commands)
 
             local feedkeys_spy = spy.on(vim.api, "nvim_feedkeys")
 
@@ -258,7 +252,7 @@ describe("agentic.acp.SlashCommands", function()
                 { name = "plan", description = "Create a plan" },
             }
 
-            SlashCommands.setCommands(bufnr, commands)
+            SlashCommands.setCommands(commands)
 
             local feedkeys_spy = spy.on(vim.api, "nvim_feedkeys")
 
@@ -279,7 +273,7 @@ describe("agentic.acp.SlashCommands", function()
                 { name = "plan", description = "Create a plan" },
             }
 
-            SlashCommands.setCommands(bufnr, commands)
+            SlashCommands.setCommands(commands)
 
             local feedkeys_spy = spy.on(vim.api, "nvim_feedkeys")
 
@@ -295,32 +289,29 @@ describe("agentic.acp.SlashCommands", function()
         end)
     end)
 
-    describe("instance management", function()
-        it("allows independent commands per buffer instance", function()
+    describe("shared state", function()
+        it("commands are shared across all buffers", function()
             local bufnr2 = vim.api.nvim_create_buf(false, true)
             SlashCommands.setup_completion(bufnr2)
 
             --- @type agentic.acp.AvailableCommand[]
-            local commands1 = {
+            local commands = {
                 { name = "plan", description = "Create a plan" },
             }
 
-            --- @type agentic.acp.AvailableCommand[]
-            local commands2 = {
-                { name = "review", description = "Review code" },
-            }
+            SlashCommands.setCommands(commands)
 
-            SlashCommands.setCommands(bufnr, commands1)
-            SlashCommands.setCommands(bufnr2, commands2)
-
+            -- Commands are accessible from any buffer context
+            vim.api.nvim_set_current_buf(bufnr)
             local commands_buf1 = States.getSlashCommands()
+
             vim.api.nvim_set_current_buf(bufnr2)
             local commands_buf2 = States.getSlashCommands()
 
             assert.equal(2, #commands_buf1) -- plan + /new
-            assert.equal(2, #commands_buf2) -- review + /new
+            assert.equal(2, #commands_buf2) -- plan + /new
             assert.equal("plan", commands_buf1[1].word)
-            assert.equal("review", commands_buf2[1].word)
+            assert.equal("plan", commands_buf2[1].word)
 
             if vim.api.nvim_buf_is_valid(bufnr2) then
                 vim.api.nvim_buf_delete(bufnr2, { force = true })

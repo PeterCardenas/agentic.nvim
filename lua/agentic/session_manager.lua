@@ -128,7 +128,6 @@ function SessionManager:new(tab_page_id)
     self.permission_manager = PermissionManager:new(self.message_writer)
 
     FilePicker:new(self.widget.buf_nrs.input)
-    SlashCommands.setup_completion(self.widget.buf_nrs.input)
 
     self.config_options = AgentConfigOptions:new(
         self.widget.buf_nrs,
@@ -225,10 +224,7 @@ function SessionManager:_on_session_update(update)
             })
         end
     elseif update.sessionUpdate == "available_commands_update" then
-        SlashCommands.setCommands(
-            self.widget.buf_nrs.input,
-            update.availableCommands
-        )
+        SlashCommands.setCommands(update.availableCommands)
     elseif update.sessionUpdate == "current_mode_update" then
         -- only for legacy modes, not for config_options
         if
@@ -815,7 +811,7 @@ function SessionManager:_cancel_session()
 
     self.session_id = nil
     self.permission_manager:clear()
-    SlashCommands.setCommands(self.widget.buf_nrs.input, {})
+    SlashCommands.setCommands({})
 
     self.chat_history = ChatHistory:new()
     self._history_to_send = nil

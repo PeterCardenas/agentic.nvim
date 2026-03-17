@@ -567,12 +567,11 @@ function ACPClient:create_session(handlers, callback)
             callback(nil, err)
             return
         end
+        if result.sessionId then
+            self:_subscribe(result.sessionId, handlers)
+        end
 
         local function cb(res, e)
-            if result.sessionId then
-                self:_subscribe(result.sessionId, handlers)
-            end
-
             --- @cast result agentic.acp.SessionCreationResponse
             callback(result, nil)
         end
