@@ -122,6 +122,13 @@ local function get_or_create_window(
 )
     local cached_winid = win_nrs[panel_name]
     if cached_winid and vim.api.nvim_win_is_valid(cached_winid) then
+        -- Ensure correct buffer is displayed (may differ after session reset)
+        if vim.api.nvim_win_get_buf(cached_winid) ~= bufnr then
+            vim.wo[cached_winid].winfixbuf = false
+            vim.api.nvim_win_set_buf(cached_winid, bufnr)
+            vim.wo[cached_winid].winfixbuf = true
+            WindowDecoration.render_header(bufnr, panel_name)
+        end
         return cached_winid
     end
 

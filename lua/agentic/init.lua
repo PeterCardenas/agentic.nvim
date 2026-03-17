@@ -118,14 +118,44 @@ function Agentic.add_buffer_diagnostics(opts)
 end
 
 --- Destroys the current Chat session and starts a new one
+--- If the widget is already open, reuses existing windows instead of creating new ones
 --- @param opts agentic.ui.NewSessionOpts|nil
 function Agentic.new_session(opts)
     if opts and opts.provider then
         Config.provider = opts.provider
     end
 
+    local tab_page_id = vim.api.nvim_get_current_tabpage()
+    local old_session = SessionRegistry.sessions[tab_page_id]
+
+    --- @type agentic.ui.ChatWidget.WinNrs|nil
+    local saved_win_nrs
+
+    -- If widget is already open, preserve windows for reuse
+    if old_session and old_session.widget:is_open() then
+        saved_win_nrs = {}
+        for name, winid in pairs(old_session.widget.win_nrs) do
+            if winid and vim.api.nvim_win_is_valid(winid) then
+                saved_win_nrs[name] = winid
+                -- Disable winfixbuf so Neovim can switch buffers during cleanup
+                vim.wo[winid].winfixbuf = false
+            end
+        end
+        -- Detach windows from old widget so destroy() won't close them
+        old_session.widget.win_nrs = {}
+    end
+
     local session = SessionRegistry.new_session()
     if session then
+        -- Transfer preserved windows to new widget
+        if saved_win_nrs then
+            for name, winid in pairs(saved_win_nrs) do
+                if vim.api.nvim_win_is_valid(winid) then
+                    session.widget.win_nrs[name] = winid
+                end
+            end
+        end
+
         if not opts or opts.auto_add_to_context ~= false then
             session:add_selection_or_file_to_session()
         end

@@ -401,40 +401,56 @@ function ChatWidget:navigate_prev_prompt()
     self:_navigate_prompt("prev")
 end
 
---- Toggle between full width and configured width
+--- Toggle maximize: close other windows or restore them
 function ChatWidget:_toggle_full_width()
-    -- Get or initialize the stored width for this tabpage
-    if vim.t[self.tab_page_id].agentic_stored_width == nil then
-        vim.t[self.tab_page_id].agentic_stored_width = Config.windows.width
-    end
+    local stored = vim.t[self.tab_page_id].agentic_maximized_windows
 
-    local current_width = Config.windows.width
-    local stored_width = vim.t[self.tab_page_id].agentic_stored_width
+    if stored and #stored > 0 then
+        -- Restore: re-open the previously closed windows
+        vim.t[self.tab_page_id].agentic_maximized_windows = nil
 
-    -- Toggle between full width and stored width
-    if current_width == "100%" then
-        Config.windows.width = stored_width
+        local restored_any = false
+        for _, entry in ipairs(stored) do
+            local bufnr = entry.bufnr
+            if bufnr and vim.api.nvim_buf_is_valid(bufnr) then
+                local ok = pcall(vim.api.nvim_open_win, bufnr, false, {
+                    split = "left",
+                    win = -1,
+                })
+                if ok then
+                    restored_any = true
+                end
+            end
+        end
+
+        -- If no windows were restored (e.g. dashboard buffers got wiped),
+        -- fall back to opening a usable window
+        if not restored_any then
+            self:open_left_window()
+        end
     else
-        vim.t[self.tab_page_id].agentic_stored_width = current_width
-        Config.windows.width = "100%"
+        -- Maximize: close all non-widget windows and save them
+        local all_windows = vim.api.nvim_tabpage_list_wins(self.tab_page_id)
+
+        local widget_win_ids = {}
+        for _, winid in pairs(self.win_nrs) do
+            if winid then
+                widget_win_ids[winid] = true
+            end
+        end
+
+        --- @type { bufnr: integer }[]
+        local to_restore = {}
+        for _, winid in ipairs(all_windows) do
+            if not widget_win_ids[winid] then
+                local bufnr = vim.api.nvim_win_get_buf(winid)
+                table.insert(to_restore, { bufnr = bufnr })
+                pcall(vim.api.nvim_win_close, winid, true)
+            end
+        end
+
+        vim.t[self.tab_page_id].agentic_maximized_windows = to_restore
     end
-
-    -- Re-render the widget with new width
-    local previous_mode = vim.fn.mode()
-    local previous_buf = vim.api.nvim_get_current_buf()
-
-    self:hide()
-    self:show({ focus_prompt = false })
-
-    vim.schedule(function()
-        local win = vim.fn.bufwinid(previous_buf)
-        if win ~= -1 then
-            vim.api.nvim_set_current_win(win)
-        end
-        if previous_mode == "i" then
-            vim.cmd("startinsert")
-        end
-    end)
 end
 
 function ChatWidget:_bind_keymaps()
@@ -517,10 +533,10 @@ function ChatWidget:_bind_keymaps()
         end
     end
 
-    -- Add 'x' keymap only to chat buffer to toggle full width
+    -- Add 'x' keymap only to chat buffer to toggle maximize
     BufHelpers.keymap_set(self.buf_nrs.chat, "n", "x", function()
         self:_toggle_full_width()
-    end, { desc = "Agentic: Toggle full width" })
+    end, { desc = "Agentic: Toggle maximize" })
 
     -- Add prompt navigation keymaps to chat buffer
     BufHelpers.keymap_set(
@@ -799,28 +815,6 @@ function ChatWidget:open_left_window(bufnr)
             local ft = vim.bo[alt_bufnr].filetype
             if not EXCLUDED_FILETYPES[ft] then
                 bufnr = alt_bufnr
-            end
-        end
-    end
-
-    if bufnr == nil then
-        -- Fall back to first oldfile that exists in current directory
-        local oldfiles = vim.v.oldfiles
-        local cwd = vim.fn.getcwd()
-        if oldfiles and #oldfiles > 0 then
-            for _, filepath in ipairs(oldfiles) do
-                -- Check if file exists and is under current working directory
-                if
-                    vim.startswith(filepath, cwd)
-                    and vim.fn.filereadable(filepath) == 1
-                then
-                    local file_bufnr = vim.fn.bufnr(filepath)
-                    if file_bufnr == -1 then
-                        file_bufnr = vim.fn.bufadd(filepath)
-                    end
-                    bufnr = file_bufnr
-                    break
-                end
             end
         end
     end
