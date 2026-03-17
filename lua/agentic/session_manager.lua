@@ -49,6 +49,7 @@ end
 --- @field tab_page_id integer
 --- @field _is_first_message boolean Whether this is the first message in the session, used to add system info only once
 --- @field is_generating boolean
+--- @field _pending_input? string Prompt text queued while session was initializing
 --- @field widget agentic.ui.ChatWidget
 --- @field agent agentic.acp.ACPClient
 --- @field message_writer agentic.ui.MessageWriter
@@ -422,6 +423,13 @@ function SessionManager:_handle_input_submit(input_text)
         return
     end
 
+    -- Queue prompt if session is still initializing
+    if not self.session_id then
+        self._pending_input = input_text
+        self.status_animation:start("thinking")
+        return
+    end
+
     --- @type agentic.acp.Content[]
     local prompt = {}
 
@@ -779,6 +787,14 @@ function SessionManager:new_session(opts)
             -- Invoke on_created callback after welcome message is written
             if on_created then
                 on_created()
+            end
+
+            -- Flush prompt that was queued while session was initializing
+            if self._pending_input then
+                --- @type string
+                local input = self._pending_input
+                self._pending_input = nil
+                self:_handle_input_submit(input)
             end
         end)
     end)
