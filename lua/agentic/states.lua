@@ -7,6 +7,16 @@ local M = {}
 --- @type agentic.acp.CompletionItem[]
 local slash_commands = {}
 
+--- Listeners called when slash commands are updated
+--- @type fun(items: agentic.acp.CompletionItem[])[]
+local slash_commands_listeners = {}
+
+--- Register a listener called whenever slash commands are updated
+--- @param callback fun(items: agentic.acp.CompletionItem[])
+function M.onSlashCommandsUpdate(callback)
+    table.insert(slash_commands_listeners, callback)
+end
+
 --- Safely set a state value, because the buffer/tab/window may not exist anymore
 --- @param accessor table vim.b, vim.g, vim.w, or vim.t
 --- @param id integer|string The buffer number, tabpage number, or other identifier
@@ -59,6 +69,9 @@ end
 --- @param items agentic.acp.CompletionItem[]
 function M.setSlashCommands(items)
     slash_commands = items
+    for _, cb in ipairs(slash_commands_listeners) do
+        pcall(cb, items)
+    end
 end
 
 --- Retrieve slash commands

@@ -21,6 +21,28 @@ local Source = {}
 --- @return blink.cmp.AgenticCommandsSource
 function Source.new(_, _config)
     local self = setmetatable({}, { __index = Source })
+
+    local States = require("agentic.states")
+    States.onSlashCommandsUpdate(function(_items)
+        vim.schedule(function()
+            local mode = vim.api.nvim_get_mode().mode
+            if mode ~= "i" and mode ~= "ic" then
+                return
+            end
+            local bufnr = vim.api.nvim_get_current_buf()
+            if vim.bo[bufnr].filetype ~= "AgenticInput" then
+                return
+            end
+            local line = vim.api.nvim_buf_get_lines(bufnr, 0, 1, false)[1] or ""
+            if line:match("^/") and not line:match("%s") then
+                local ok, blink = pcall(require, "blink.cmp")
+                if ok and blink.show then
+                    blink.show({ providers = { "agentic_commands" } })
+                end
+            end
+        end)
+    end)
+
     return self
 end
 
