@@ -318,7 +318,7 @@ function ChatWidget:focus_prompt()
     vim.api.nvim_set_current_win(input_winid)
 end
 
---- Get all line numbers where user prompts end (marked by "### 󱚠 Agent")
+--- Get all line numbers where user prompt content starts (line after "##  User" header)
 --- @return integer[] positions 1-indexed line numbers
 function ChatWidget:_get_prompt_positions()
     local bufnr = self.buf_nrs.chat
@@ -331,8 +331,22 @@ function ChatWidget:_get_prompt_positions()
 
     for i = 0, line_count - 1 do
         local line = vim.api.nvim_buf_get_lines(bufnr, i, i + 1, false)[1] or ""
-        if line:match("^###%s*󱚠%s*Agent") then
-            table.insert(positions, i + 1)
+        if line:match("^##[^#]") then
+            -- Find first non-empty line after the header
+            local content_line = i + 1 -- 1-indexed header line
+            for j = i + 1, line_count - 1 do
+                local next_line = vim.api.nvim_buf_get_lines(
+                    bufnr,
+                    j,
+                    j + 1,
+                    false
+                )[1] or ""
+                if next_line ~= "" then
+                    content_line = j + 1 -- 1-indexed
+                    break
+                end
+            end
+            table.insert(positions, content_line)
         end
     end
 
