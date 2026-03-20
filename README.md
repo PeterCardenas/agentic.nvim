@@ -738,6 +738,8 @@ colorscheme.
 | `AgenticStatusFailed`    | Failed tool call status indicator        | `bg=#7a2d2d`                        |
 | `AgenticCodeBlockFence`  | The left border decoration on tool calls | Links to `Directory`                |
 | `AgenticTitle`           | Window titles in sidebar                 | `bg=#2787b0, fg=#000000, bold=true` |
+| `AgenticThoughtLabel`    | "Thinking:" prefix on thought blocks     | `fg=#c678dd, bold=true`             |
+| `AgenticThoughtText`     | Thought block content text               | Links to `Comment`                  |
 
 If any of these highlight exists, Agentic will use it instead of creating new
 ones.

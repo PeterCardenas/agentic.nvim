@@ -8,6 +8,10 @@ local Logger = require("agentic.utils.logger")
 local Theme = require("agentic.theme")
 
 local NS_TOOL_BLOCKS = vim.api.nvim_create_namespace("agentic_tool_blocks")
+local NS_THOUGHT_HIGHLIGHTS =
+    vim.api.nvim_create_namespace("agentic_thought_highlights")
+
+local THOUGHT_LABEL_PREFIX = "Thinking: "
 local NS_DECORATIONS = vim.api.nvim_create_namespace("agentic_tool_decorations")
 local NS_PERMISSION_BUTTONS =
     vim.api.nvim_create_namespace("agentic_permission_buttons")
@@ -47,6 +51,9 @@ local NS_STATUS = vim.api.nvim_create_namespace("agentic_status_footer")
 --- @field _should_auto_scroll? boolean
 --- @field _scroll_scheduled? boolean
 --- @field _on_content_changed? fun()
+--- @field _thought_label_row? integer
+--- @field _thought_label_start_col? integer
+--- @field _thought_text_extmark_id? integer
 local MessageWriter = {}
 MessageWriter.__index = MessageWriter
 
@@ -90,6 +97,14 @@ function MessageWriter:_with_modifiable_and_notify_change(fn)
     end
 end
 
+--- @private
+function MessageWriter:_clear_thought_state()
+    self._last_message_type = nil
+    self._thought_label_row = nil
+    self._thought_label_start_col = nil
+    self._thought_text_extmark_id = nil
+end
+
 --- Writes a full message to the chat buffer and append two blank lines after
 --- @param update agentic.acp.SessionUpdateMessage
 function MessageWriter:write_message(update)
@@ -103,6 +118,7 @@ function MessageWriter:write_message(update)
 
     local lines = vim.split(text, "\n", { plain = true })
 
+    self:_clear_thought_state()
     self:_auto_scroll(self.bufnr)
 
     self:_with_modifiable_and_notify_change(function()
@@ -123,13 +139,19 @@ function MessageWriter:write_message_chunk(update)
         return
     end
 
-    if
-        self._last_message_type == "agent_thought_chunk"
-        and update.sessionUpdate == "agent_message_chunk"
-    then
+    local is_thought = update.sessionUpdate == "agent_thought_chunk"
+    local was_thought = self._last_message_type == "agent_thought_chunk"
+    local is_first_thought = is_thought and not was_thought
+
+    if was_thought and not is_thought then
         -- Different message type, add newline before appending, to create visual separation
         -- only for thought -> message
         text = "\n\n" .. text
+        self:_clear_thought_state()
+    end
+
+    if is_first_thought then
+        text = THOUGHT_LABEL_PREFIX .. text
     end
 
     self._last_message_type = update.sessionUpdate
@@ -161,6 +183,49 @@ function MessageWriter:write_message_chunk(update)
 
         if not success then
             Logger.debug("Failed to set text in buffer", err, lines_to_write)
+            return
+        end
+
+        if is_thought then
+            if is_first_thought then
+                self._thought_label_row = last_line
+                self._thought_label_start_col = start_col
+                vim.api.nvim_buf_set_extmark(
+                    bufnr,
+                    NS_THOUGHT_HIGHLIGHTS,
+                    last_line,
+                    start_col,
+                    {
+                        end_row = last_line,
+                        end_col = start_col + #THOUGHT_LABEL_PREFIX,
+                        hl_group = Theme.HL_GROUPS.THOUGHT_LABEL,
+                        priority = 110,
+                    }
+                )
+            end
+
+            if self._thought_label_row then
+                local new_last_line = vim.api.nvim_buf_line_count(bufnr) - 1
+                local new_last_text = vim.api.nvim_buf_get_lines(
+                    bufnr,
+                    new_last_line,
+                    new_last_line + 1,
+                    false
+                )[1] or ""
+                self._thought_text_extmark_id = vim.api.nvim_buf_set_extmark(
+                    bufnr,
+                    NS_THOUGHT_HIGHLIGHTS,
+                    self._thought_label_row,
+                    self._thought_label_start_col + #THOUGHT_LABEL_PREFIX,
+                    {
+                        id = self._thought_text_extmark_id,
+                        end_row = new_last_line,
+                        end_col = #new_last_text,
+                        hl_group = Theme.HL_GROUPS.THOUGHT_TEXT,
+                        priority = 100,
+                    }
+                )
+            end
         end
     end)
 end
@@ -236,6 +301,7 @@ end
 
 --- @param tool_call_block agentic.ui.MessageWriter.ToolCallBlock
 function MessageWriter:write_tool_call_block(tool_call_block)
+    self:_clear_thought_state()
     self:_auto_scroll(self.bufnr)
 
     self:_with_modifiable_and_notify_change(function(bufnr)
