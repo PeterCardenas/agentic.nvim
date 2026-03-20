@@ -68,9 +68,10 @@ describe("agentic.SessionManager", function()
                 session.config_options.legacy_agent_modes.current_mode_id
             )
 
-            assert.spy(render_header_spy).was.called(1)
+            assert.spy(render_header_spy).was.called(2)
             assert.equal("chat", render_header_spy.calls[1][2])
             assert.equal("Mode: Code", render_header_spy.calls[1][3])
+            assert.is_nil(render_header_spy.calls[2][3])
 
             assert.spy(notify_stub).was.called(1)
             assert.equal("Mode changed to: code", notify_stub.calls[1][1])
@@ -84,7 +85,8 @@ describe("agentic.SessionManager", function()
                 "plan",
                 session.config_options.legacy_agent_modes.current_mode_id
             )
-            assert.spy(render_header_spy).was.called(0)
+            assert.spy(render_header_spy).was.called(1)
+            assert.is_nil(render_header_spy.calls[1][3])
 
             assert.spy(notify_stub).was.called(1)
             assert.equal(vim.log.levels.WARN, notify_stub.calls[1][2])
@@ -158,8 +160,9 @@ describe("agentic.SessionManager", function()
 
             assert.is_not_nil(session.config_options.mode)
             assert.equal("plan", session.config_options.mode.currentValue)
-            assert.spy(render_header_spy).was.called(1)
+            assert.spy(render_header_spy).was.called(2)
             assert.equal("Mode: Plan", render_header_spy.calls[1][3])
+            assert.is_nil(render_header_spy.calls[2][3])
         end)
     end)
 

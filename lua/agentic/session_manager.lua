@@ -253,6 +253,8 @@ function SessionManager:_on_session_update(update)
         )
     end
 
+    self.widget:render_header("chat")
+
     -- This is being done after handling specific updates but one could argue
     -- there should be pre/post hooks for everything.
     P.invoke_hook("on_session_update", {
