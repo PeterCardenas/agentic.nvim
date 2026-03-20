@@ -331,7 +331,7 @@ function ChatWidget:_get_prompt_positions()
 
     for i = 0, line_count - 1 do
         local line = vim.api.nvim_buf_get_lines(bufnr, i, i + 1, false)[1] or ""
-        if line:match("^##[^#]") then
+        if line:match("^##%s+User") then
             -- Find first non-empty line after the header
             local content_line = i + 1 -- 1-indexed header line
             for j = i + 1, line_count - 1 do
