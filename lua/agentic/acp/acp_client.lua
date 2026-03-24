@@ -571,7 +571,7 @@ function ACPClient:create_session(handlers, callback)
             self:_subscribe(result.sessionId, handlers)
         end
 
-        local function cb(res, e)
+        local function cb()
             --- @cast result agentic.acp.SessionCreationResponse
             callback(result, nil)
         end
@@ -596,10 +596,10 @@ function ACPClient:create_session(handlers, callback)
                     return
                 end
 
-                cb(result, nil)
+                cb()
             end)
         else
-            cb(result, nil)
+            cb()
         end
     end)
 end
