@@ -8,6 +8,19 @@ local Logger = require("agentic.utils.logger")
 --- @class agentic.acp.CursorToolCallMessage : agentic.acp.ToolCallMessage
 --- @field rawInput? agentic.acp.CursorRawInput
 
+--- Cursor sends rawOutput on tool_call_update with varying shapes per kind
+--- @class agentic.acp.CursorRawOutput
+--- @field content? string File contents (read kind)
+--- @field stdout? string Command stdout (execute kind)
+--- @field stderr? string Command stderr (execute kind)
+--- @field exitCode? number Command exit code (execute kind)
+--- @field totalFiles? number Number of files found (search kind)
+--- @field truncated? boolean Whether search results were truncated (search kind)
+
+--- @class agentic.acp.CursorToolCallUpdate : agentic.acp.ToolCallUpdate
+--- @field rawOutput? agentic.acp.CursorRawOutput
+--- @field kind? agentic.acp.ToolKind
+
 --- Cursor-specific adapter that extends ACPClient with Cursor-specific behaviors
 --- @class agentic.acp.CursorACPAdapter : agentic.acp.ACPClient
 --- @field _available_commands_updates table<string, table> Cursor sends available commands before session starts, indexed by session ID, to be processed after session creation
@@ -78,7 +91,7 @@ function CursorACPAdapter:__handle_session_update(params)
 end
 
 --- Extract diff from content array (standard ACP diff content type)
---- @param update agentic.acp.ToolCallMessage
+--- @param update agentic.acp.ToolCallMessage|agentic.acp.CursorToolCallUpdate
 --- @return agentic.ui.MessageWriter.ToolCallDiff|nil diff
 --- @return string|nil path
 function CursorACPAdapter:_extract_content_diff(update)
@@ -172,6 +185,72 @@ function CursorACPAdapter:__handle_tool_call(session_id, update)
 
     self:__with_subscriber(session_id, function(subscriber)
         subscriber.on_tool_call(message)
+    end)
+end
+
+--- Build enriched update from rawOutput/content fields that cursor
+--- sends on tool_call_update (not on the initial tool_call).
+--- @protected
+--- @param update agentic.acp.CursorToolCallUpdate
+--- @return agentic.ui.MessageWriter.ToolCallBase message
+function CursorACPAdapter:__build_tool_call_update(update)
+    --- @type agentic.ui.MessageWriter.ToolCallBase
+    local message = {
+        tool_call_id = update.toolCallId,
+        status = update.status,
+    }
+
+    -- Edit diffs arrive in standard ACP content format (content[1].type == "diff")
+    if update.content and #update.content > 0 then
+        local diff, path = self:_extract_content_diff(update)
+        if diff then
+            message.diff = diff
+            if path then
+                message.argument = FileSystem.to_smart_path(path)
+            end
+            return message
+        end
+    end
+
+    -- Read, execute, and search results arrive in rawOutput
+    local rawOutput = update.rawOutput
+    if rawOutput then
+        if rawOutput.content then
+            -- read kind: rawOutput.content is the file text
+            message.body = self:safe_split(rawOutput.content)
+        elseif rawOutput.stdout then
+            -- execute kind: rawOutput.stdout/stderr
+            message.body = self:safe_split(rawOutput.stdout)
+        elseif rawOutput.totalFiles then
+            -- search kind: cursor only sends metadata, not actual results
+            message.body = {
+                string.format("Found %d file(s)", rawOutput.totalFiles),
+            }
+        end
+    end
+
+    -- Fall back to standard content extraction
+    if not message.body and not message.diff then
+        message.body = self:extract_content_body(update)
+    end
+
+    return message
+end
+
+--- Cursor sends tool_call_update without status for in_progress,
+--- and with rawOutput/content on completion.
+--- @protected
+--- @param session_id string
+--- @param update agentic.acp.CursorToolCallUpdate
+function CursorACPAdapter:__handle_tool_call_update(session_id, update)
+    if not update.status then
+        return
+    end
+
+    local message = self:__build_tool_call_update(update)
+
+    self:__with_subscriber(session_id, function(subscriber)
+        subscriber.on_tool_call_update(message)
     end)
 end
 
