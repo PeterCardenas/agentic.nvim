@@ -33,7 +33,10 @@ function Source.new(_, _config)
             if vim.bo[bufnr].filetype ~= "AgenticInput" then
                 return
             end
-            local line = vim.api.nvim_buf_get_lines(bufnr, 0, 1, false)[1] or ""
+            local cursor = vim.api.nvim_win_get_cursor(0)
+            local row = cursor[1]
+            local line = vim.api.nvim_buf_get_lines(bufnr, row - 1, row, false)[1]
+                or ""
             if line:match("^/%S*$") or line:match("%s/%S*$") then
                 local ok, blink = pcall(require, "blink.cmp")
                 if ok and blink.show then
@@ -63,11 +66,6 @@ end
 --- @param _items table[]
 --- @return boolean
 function Source:should_show_items(context, _items)
-    local row = context.cursor[1]
-    if row ~= 1 then
-        return false
-    end
-
     local cursor_col = context.cursor[2]
     local text_to_cursor = context.line:sub(1, cursor_col)
     local current_word = text_to_cursor:match("%S*$") or ""
@@ -92,9 +90,10 @@ function Source:get_completions(context, callback)
     -- 0-indexed position of the slash; character after slash = slash_pos + 1
     local slash_char = cursor_col - #current_word
 
+    local cursor_row = context.cursor[1] - 1 -- 0-indexed line
     local range = {
-        start = { line = 0, character = slash_char + 1 },
-        ["end"] = { line = 0, character = cursor_col },
+        start = { line = cursor_row, character = slash_char + 1 },
+        ["end"] = { line = cursor_row, character = cursor_col },
     }
 
     local items = {}
