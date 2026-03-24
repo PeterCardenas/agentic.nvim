@@ -26,6 +26,33 @@ local FILE_MUTATING_KINDS = {
     move = true,
 }
 
+--- Format elapsed duration from a high-resolution start time to a human-readable string
+--- @param start_hrtime number|nil
+--- @return string duration
+function P.format_duration(start_hrtime)
+    if not start_hrtime then
+        return "unknown"
+    end
+
+    local elapsed_ns = vim.uv.hrtime() - start_hrtime
+    local elapsed_s = elapsed_ns / 1e9
+
+    if elapsed_s < 60 then
+        return string.format("%.1fs", elapsed_s)
+    end
+
+    local minutes = math.floor(elapsed_s / 60)
+    local seconds = elapsed_s - (minutes * 60)
+
+    if minutes < 60 then
+        return string.format("%dm %ds", minutes, math.floor(seconds))
+    end
+
+    local hours = math.floor(minutes / 60)
+    local remaining_minutes = minutes - (hours * 60)
+    return string.format("%dh %dm", hours, remaining_minutes)
+end
+
 --- Safely invoke a user-configured hook
 --- @param hook_name "on_prompt_submit" | "on_response_complete" | "on_session_update"
 --- @param data table
@@ -49,6 +76,7 @@ end
 --- @field tab_page_id integer
 --- @field _is_first_message boolean Whether this is the first message in the session, used to add system info only once
 --- @field is_generating boolean
+--- @field _turn_start_time? number High-resolution timestamp (from vim.uv.hrtime) when the current turn started
 --- @field _pending_input? string Prompt text queued while session was initializing
 --- @field widget agentic.ui.ChatWidget
 --- @field agent agentic.acp.ACPClient
@@ -604,14 +632,19 @@ function SessionManager:_handle_input_submit(input_text)
     local chat_history = self.chat_history
 
     self.is_generating = true
+    self._turn_start_time = vim.uv.hrtime()
 
     self.agent:send_prompt(self.session_id, prompt, function(response, err)
         vim.schedule(function()
             self.is_generating = false
 
+            local duration_str = P.format_duration(self._turn_start_time)
+            self._turn_start_time = nil
+
             local finish_message = string.format(
-                "\n### 🏁 %s\n-----",
-                os.date("%Y-%m-%d %H:%M:%S")
+                "\n### 🏁 %s (%s)\n-----",
+                os.date("%Y-%m-%d %H:%M:%S"),
+                duration_str
             )
 
             if err then
