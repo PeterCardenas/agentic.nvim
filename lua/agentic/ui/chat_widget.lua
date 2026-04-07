@@ -476,17 +476,18 @@ function ChatWidget:_toggle_full_width()
         -- Maximize: close or minimize all non-widget, non-floating windows
         local all_windows = vim.api.nvim_tabpage_list_wins(self.tab_page_id)
 
-        local widget_win_ids = {}
-        for _, winid in pairs(self.win_nrs) do
-            if winid then
-                widget_win_ids[winid] = true
+        local widget_buf_ids = {}
+        for _, bufnr in pairs(self.buf_nrs) do
+            if bufnr then
+                widget_buf_ids[bufnr] = true
             end
         end
 
         --- @type { bufnr: integer|nil, width: integer, bufhidden: string|nil }[]
         local to_restore = {}
         for _, winid in ipairs(all_windows) do
-            if not widget_win_ids[winid] then
+            local win_buf = vim.api.nvim_win_get_buf(winid)
+            if not widget_buf_ids[win_buf] then
                 local win_config = vim.api.nvim_win_get_config(winid)
                 -- Only affect non-floating windows (skip notifications, popups, etc.)
                 if win_config.relative == "" then
