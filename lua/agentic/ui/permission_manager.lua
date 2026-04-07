@@ -1,4 +1,5 @@
 local BufHelpers = require("agentic.utils.buf_helpers")
+local Config = require("agentic.config")
 local Logger = require("agentic.utils.logger")
 
 -- Priority order for permission option kinds based on ACP tool-calls documentation
@@ -50,6 +51,24 @@ function PermissionManager:add_request(request, callback)
     end
 
     local toolCallId = request.toolCall.toolCallId
+
+    local provider_config = Config.acp_providers[Config.provider]
+    if provider_config and provider_config.auto_approve then
+        local allow_option = self._find_allow_option(request.options)
+        if allow_option then
+            Logger.debug(
+                "PermissionManager: Auto-approving permission for tool call "
+                    .. toolCallId
+                    .. " with option "
+                    .. allow_option.optionId
+            )
+            vim.schedule(function()
+                callback(allow_option.optionId)
+            end)
+            return
+        end
+    end
+
     table.insert(self.queue, { toolCallId, request, callback })
 
     if not self.current_request then
@@ -132,6 +151,22 @@ function PermissionManager:_reanchor_permission_prompt()
             vim.log.levels.ERROR
         )
     end
+end
+
+--- Find the first allow option from permission options, preferring allow_once over allow_always
+--- @param options agentic.acp.PermissionOption[]
+--- @return agentic.acp.PermissionOption|nil
+function PermissionManager._find_allow_option(options)
+    local allow_once = nil
+    local allow_always = nil
+    for _, option in ipairs(options) do
+        if option.kind == "allow_once" and not allow_once then
+            allow_once = option
+        elseif option.kind == "allow_always" and not allow_always then
+            allow_always = option
+        end
+    end
+    return allow_once or allow_always
 end
 
 --- @param options agentic.acp.PermissionOption[]

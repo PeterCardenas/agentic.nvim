@@ -1008,4 +1008,5 @@ return ACPClient
 --- @field auth_method? string Authentication method
 --- @field default_mode? string Default mode ID to set on session creation
 --- @field default_model? string Default model ID to set on session creation
+--- @field auto_approve? boolean Automatically approve all permission requests
 --- @field mcp_servers? agentic.acp.McpServer[] MCP servers to connect on session creation
