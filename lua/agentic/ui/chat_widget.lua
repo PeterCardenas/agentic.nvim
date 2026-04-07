@@ -710,6 +710,13 @@ function ChatWidget:_create_new_buf(opts)
         end,
     })
 
+    if opts.filetype then
+        local filetype = opts.filetype
+        vim.api.nvim_buf_call(bufnr, function()
+            vim.cmd("set filetype=" .. filetype)
+        end)
+    end
+
     return bufnr
 end
 
