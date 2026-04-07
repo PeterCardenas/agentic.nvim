@@ -199,4 +199,42 @@ function FileSystem.mkdirp(path)
     return false, error_str
 end
 
+--- Get the common git directory for the repository.
+--- For regular repos and worktrees, returns the main repo root (parent of .git).
+--- For bare repos, returns the bare repo directory.
+--- All worktrees of the same repo resolve to the same directory.
+--- Falls back to cwd if not in a git repo.
+--- @return string root_dir
+function FileSystem.get_git_root()
+    local cwd = vim.uv.cwd() or ""
+
+    -- --git-common-dir returns the shared .git dir:
+    --   regular repo: ".git" (relative)
+    --   worktree: "/path/to/main-repo/.git" (absolute)
+    --   bare repo: "." (relative)
+    local common_dir = vim.fn.system(
+        "git -C " .. vim.fn.shellescape(cwd) .. " rev-parse --git-common-dir"
+    )
+    if vim.v.shell_error ~= 0 or common_dir == "" then
+        return cwd
+    end
+
+    common_dir = vim.trim(common_dir)
+
+    -- Make absolute if relative
+    if not vim.startswith(common_dir, "/") then
+        common_dir = vim.fn.fnamemodify(vim.fs.joinpath(cwd, common_dir), ":p")
+        -- Remove trailing slash added by :p
+        common_dir = common_dir:gsub("/$", "")
+    end
+
+    -- For regular repos and worktrees, common_dir ends with /.git → strip it
+    if vim.endswith(common_dir, "/.git") then
+        return common_dir:sub(1, -6)
+    end
+
+    -- For bare repos, common_dir IS the repo root
+    return common_dir
+end
+
 return FileSystem

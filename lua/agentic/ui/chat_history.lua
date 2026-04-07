@@ -60,7 +60,7 @@ end
 --- Normalizes path by replacing slashes, spaces, and colons with underscores
 --- Appends first 8 chars of SHA256 hash for collision resistance
 function ChatHistory.get_project_folder()
-    local cwd = vim.uv.cwd() or ""
+    local cwd = FileSystem.get_git_root()
 
     local normalized = cwd:gsub("[/\\%s:]", "_"):gsub("^_+", "")
     local hash = vim.fn.sha256(cwd):sub(1, 8)
