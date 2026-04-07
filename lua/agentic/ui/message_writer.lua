@@ -208,7 +208,7 @@ function MessageWriter:write_message_chunk(update)
     end
 
     if is_first_thought then
-        text = THOUGHT_LABEL_PREFIX .. text
+        text = "\n" .. THOUGHT_LABEL_PREFIX .. text
     end
 
     self._last_message_type = update.sessionUpdate
@@ -245,16 +245,18 @@ function MessageWriter:write_message_chunk(update)
 
         if is_thought then
             if is_first_thought then
-                self._thought_label_row = last_line
-                self._thought_label_start_col = start_col
+                -- The "\n" prefix puts "Thinking: " on the line after last_line
+                local label_row = last_line + 1
+                self._thought_label_row = label_row
+                self._thought_label_start_col = 0
                 vim.api.nvim_buf_set_extmark(
                     bufnr,
                     NS_THOUGHT_HIGHLIGHTS,
-                    last_line,
-                    start_col,
+                    label_row,
+                    0,
                     {
-                        end_row = last_line,
-                        end_col = start_col + #THOUGHT_LABEL_PREFIX,
+                        end_row = label_row,
+                        end_col = #THOUGHT_LABEL_PREFIX,
                         hl_group = Theme.HL_GROUPS.THOUGHT_LABEL,
                         priority = 110,
                     }
