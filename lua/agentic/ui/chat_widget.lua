@@ -33,6 +33,7 @@ local WidgetLayout = require("agentic.ui.widget_layout")
 --- @field buf_nrs agentic.ui.ChatWidget.BufNrs
 --- @field win_nrs agentic.ui.ChatWidget.WinNrs
 --- @field on_submit_input fun(prompt: string) external callback to be called when user submits the input
+--- @field message_writer? agentic.ui.MessageWriter
 local ChatWidget = {}
 ChatWidget.__index = ChatWidget
 
@@ -318,39 +319,13 @@ function ChatWidget:focus_prompt()
     vim.api.nvim_set_current_win(input_winid)
 end
 
---- Get all line numbers where user prompt content starts (line after "##  User" header)
+--- Get all line numbers where user prompts start (recorded via extmarks).
 --- @return integer[] positions 1-indexed line numbers
 function ChatWidget:_get_prompt_positions()
-    local bufnr = self.buf_nrs.chat
-    if not bufnr or not vim.api.nvim_buf_is_valid(bufnr) then
+    if not self.message_writer then
         return {}
     end
-
-    local line_count = vim.api.nvim_buf_line_count(bufnr)
-    local positions = {}
-
-    for i = 0, line_count - 1 do
-        local line = vim.api.nvim_buf_get_lines(bufnr, i, i + 1, false)[1] or ""
-        if line:match("^##%s+User") then
-            -- Find first non-empty line after the header
-            local content_line = i + 1 -- 1-indexed header line
-            for j = i + 1, line_count - 1 do
-                local next_line = vim.api.nvim_buf_get_lines(
-                    bufnr,
-                    j,
-                    j + 1,
-                    false
-                )[1] or ""
-                if next_line ~= "" then
-                    content_line = j + 1 -- 1-indexed
-                    break
-                end
-            end
-            table.insert(positions, content_line)
-        end
-    end
-
-    return positions
+    return self.message_writer:get_prompt_positions()
 end
 
 --- Navigate to next or previous user prompt in chat buffer
@@ -358,8 +333,13 @@ end
 function ChatWidget:_navigate_prompt(direction)
     local chat_winid = self.win_nrs.chat
     if not chat_winid or not vim.api.nvim_win_is_valid(chat_winid) then
-        Logger.notify("Chat window is not open", vim.log.levels.INFO)
-        return
+        -- Fallback: find the window currently showing the chat buffer
+        local bufnr = self.buf_nrs.chat
+        chat_winid = bufnr and vim.fn.bufwinid(bufnr) or -1
+        if chat_winid == -1 then
+            Logger.notify("Chat window is not open", vim.log.levels.INFO)
+            return
+        end
     end
 
     local positions = self:_get_prompt_positions()

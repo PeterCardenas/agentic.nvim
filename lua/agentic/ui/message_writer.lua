@@ -18,6 +18,8 @@ local NS_PERMISSION_BUTTONS =
 local NS_DIFF_HIGHLIGHTS =
     vim.api.nvim_create_namespace("agentic_diff_highlights")
 local NS_STATUS = vim.api.nvim_create_namespace("agentic_status_footer")
+local NS_PROMPT_POSITIONS =
+    vim.api.nvim_create_namespace("agentic_prompt_positions")
 
 --- @class agentic.ui.MessageWriter.HighlightRange
 --- @field type "comment"|"old"|"new"|"new_modification" Type of highlight to apply
@@ -54,6 +56,7 @@ local NS_STATUS = vim.api.nvim_create_namespace("agentic_status_footer")
 --- @field _thought_label_row? integer
 --- @field _thought_label_start_col? integer
 --- @field _thought_text_extmark_id? integer
+--- @field _record_next_prompt? boolean
 local MessageWriter = {}
 MessageWriter.__index = MessageWriter
 
@@ -117,14 +120,68 @@ function MessageWriter:write_message(update)
     end
 
     local lines = vim.split(text, "\n", { plain = true })
+    local should_record_prompt = self._record_next_prompt
+    self._record_next_prompt = nil
 
     self:_clear_thought_state()
     self:_auto_scroll(self.bufnr)
 
     self:_with_modifiable_and_notify_change(function()
+        -- Capture the row where new content will start (0-indexed)
+        local prompt_row
+        if should_record_prompt then
+            prompt_row = BufHelpers.is_buffer_empty(self.bufnr) and 0
+                or vim.api.nvim_buf_line_count(self.bufnr)
+        end
+
         self:_append_lines(lines)
         self:_append_lines({ "", "" })
+
+        if prompt_row then
+            -- Offset by 2 to point at the first content line
+            -- (header line, blank line, content line)
+            local content_row = math.min(
+                prompt_row + 2,
+                vim.api.nvim_buf_line_count(self.bufnr) - 1
+            )
+            vim.api.nvim_buf_set_extmark(
+                self.bufnr,
+                NS_PROMPT_POSITIONS,
+                content_row,
+                0,
+                {}
+            )
+        end
     end)
+end
+
+--- Marks the next write_message() call as a user prompt, so the starting
+--- line will be recorded for prompt navigation.
+function MessageWriter:record_prompt_position()
+    self._record_next_prompt = true
+end
+
+--- Returns 1-indexed line numbers of all recorded user prompts.
+--- @return integer[] positions
+function MessageWriter:get_prompt_positions()
+    if not vim.api.nvim_buf_is_valid(self.bufnr) then
+        return {}
+    end
+
+    local marks = vim.api.nvim_buf_get_extmarks(
+        self.bufnr,
+        NS_PROMPT_POSITIONS,
+        0,
+        -1,
+        {}
+    )
+    --- @type integer[]
+    local positions = {}
+    for _, mark in ipairs(marks) do
+        -- mark = { id, row (0-indexed), col }
+        table.insert(positions, mark[2] + 1) -- convert to 1-indexed
+    end
+    return positions
 end
 
 --- Appends message chunks to the last line and column in the chat buffer

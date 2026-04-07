@@ -207,6 +207,7 @@ function SessionRestore.replay_messages(writer, messages)
             }
             local user_message =
                 ACPPayloads.generate_user_message(message_lines)
+            writer:record_prompt_position()
             writer:write_message(user_message)
         elseif msg.type == "agent" then
             local agent_message = ACPPayloads.generate_agent_message(msg.text)

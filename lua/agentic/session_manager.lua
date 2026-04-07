@@ -156,6 +156,7 @@ function SessionManager:new(tab_page_id)
     end)
 
     self.message_writer = MessageWriter:new(self.widget.buf_nrs.chat)
+    self.widget.message_writer = self.message_writer
     self.status_animation = StatusAnimation:new(self.widget.buf_nrs.chat)
     self.permission_manager = PermissionManager:new(self.message_writer)
 
@@ -611,6 +612,7 @@ function SessionManager:_handle_input_submit(input_text)
     )
 
     local user_message = ACPPayloads.generate_user_message(message_lines)
+    self.message_writer:record_prompt_position()
     self.message_writer:write_message(user_message)
 
     --- @type agentic.ui.ChatHistory.UserMessage
