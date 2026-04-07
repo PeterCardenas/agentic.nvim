@@ -430,30 +430,37 @@ function ChatWidget:_toggle_full_width()
     local stored = vim.t[self.tab_page_id].agentic_maximized_windows
 
     if stored and #stored > 0 then
-        -- Restore: re-open the previously closed windows
+        -- Restore: re-open or un-minimize the previously saved windows
         vim.t[self.tab_page_id].agentic_maximized_windows = nil
 
         local restored_any = false
         for _, entry in ipairs(stored) do
             local bufnr = entry.bufnr
             if bufnr and vim.api.nvim_buf_is_valid(bufnr) then
-                local ok = pcall(vim.api.nvim_open_win, bufnr, false, {
+                local ok, winid = pcall(vim.api.nvim_open_win, bufnr, false, {
                     split = "left",
                     win = -1,
                 })
+                if ok and entry.width then
+                    pcall(vim.api.nvim_win_set_width, winid, entry.width)
+                end
                 if ok then
                     restored_any = true
+                    -- Restore original bufhidden if it was overridden
+                    if entry.bufhidden then
+                        vim.bo[bufnr].bufhidden = entry.bufhidden
+                    end
                 end
             end
         end
 
-        -- If no windows were restored (e.g. dashboard buffers got wiped),
+        -- If no windows were restored (e.g. all buffers got wiped),
         -- fall back to opening a usable window
         if not restored_any then
             self:open_left_window()
         end
     else
-        -- Maximize: close all non-widget windows and save them
+        -- Maximize: close or minimize all non-widget, non-floating windows
         local all_windows = vim.api.nvim_tabpage_list_wins(self.tab_page_id)
 
         local widget_win_ids = {}
@@ -463,13 +470,34 @@ function ChatWidget:_toggle_full_width()
             end
         end
 
-        --- @type { bufnr: integer }[]
+        --- @type { bufnr: integer|nil, width: integer, bufhidden: string|nil }[]
         local to_restore = {}
         for _, winid in ipairs(all_windows) do
             if not widget_win_ids[winid] then
-                local bufnr = vim.api.nvim_win_get_buf(winid)
-                table.insert(to_restore, { bufnr = bufnr })
-                pcall(vim.api.nvim_win_close, winid, true)
+                local win_config = vim.api.nvim_win_get_config(winid)
+                -- Only affect non-floating windows (skip notifications, popups, etc.)
+                if win_config.relative == "" then
+                    local bufnr = vim.api.nvim_win_get_buf(winid)
+                    local width = vim.api.nvim_win_get_width(winid)
+                    local bufhidden = vim.bo[bufnr].bufhidden
+
+                    if bufhidden == "wipe" or bufhidden == "delete" then
+                        -- Temporarily set bufhidden to "hide" so closing the
+                        -- window preserves the buffer for later restoration
+                        vim.bo[bufnr].bufhidden = "hide"
+                        table.insert(to_restore, {
+                            bufnr = bufnr,
+                            width = width,
+                            bufhidden = bufhidden,
+                        })
+                    else
+                        table.insert(to_restore, {
+                            bufnr = bufnr,
+                            width = width,
+                        })
+                    end
+                    pcall(vim.api.nvim_win_close, winid, true)
+                end
             end
         end
 
@@ -796,7 +824,10 @@ local EXCLUDED_FILETYPES = {
     ["mason"] = true, -- Mason installer
 }
 
---- Finds the first window on the current tabpage that is NOT part of the chat widget
+--- Finds the first window on the current tabpage that is NOT part of the chat widget.
+--- Prefers windows with non-excluded filetypes (regular editor buffers),
+--- but falls back to any non-widget, non-floating window (e.g. dashboard)
+--- to avoid creating unnecessary scratch buffers.
 --- @return number|nil winid The first non-widget window ID, or nil if none found
 function ChatWidget:find_first_non_widget_window()
     local all_windows = vim.api.nvim_tabpage_list_wins(self.tab_page_id)
@@ -809,17 +840,29 @@ function ChatWidget:find_first_non_widget_window()
         end
     end
 
+    --- @type number|nil
+    local fallback_winid = nil
+
     for _, winid in ipairs(all_windows) do
         if not widget_win_ids[winid] then
-            local bufnr = vim.api.nvim_win_get_buf(winid)
-            local ft = vim.bo[bufnr].filetype
-            if not EXCLUDED_FILETYPES[ft] then
-                return winid
+            -- Skip floating windows (notifications, popups, etc.)
+            local win_config = vim.api.nvim_win_get_config(winid)
+            if win_config.relative == "" then
+                local bufnr = vim.api.nvim_win_get_buf(winid)
+                local ft = vim.bo[bufnr].filetype
+                if not EXCLUDED_FILETYPES[ft] then
+                    -- Preferred: a regular editor window
+                    return winid
+                end
+                -- Remember as fallback (e.g. dashboard window)
+                if not fallback_winid then
+                    fallback_winid = winid
+                end
             end
         end
     end
 
-    return nil
+    return fallback_winid
 end
 
 --- Checks if a buffer belongs to this widget
