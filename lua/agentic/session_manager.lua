@@ -54,7 +54,7 @@ function P.format_duration(start_hrtime)
 end
 
 --- Safely invoke a user-configured hook
---- @param hook_name "on_prompt_submit" | "on_response_complete" | "on_session_update"
+--- @param hook_name "on_prompt_submit" | "on_response_complete" | "on_session_update" | "on_file_edit"
 --- @param data table
 function P.invoke_hook(hook_name, data)
     local hook = Config.hooks and Config.hooks[hook_name]
@@ -332,6 +332,14 @@ function SessionManager:_on_tool_call_update(tool_call_update)
 
         if tracker and tracker.kind and FILE_MUTATING_KINDS[tracker.kind] then
             vim.cmd.checktime()
+
+            if tracker.argument then
+                P.invoke_hook("on_file_edit", {
+                    file_path = tracker.argument,
+                    session_id = self.session_id,
+                    tab_page_id = self.tab_page_id,
+                })
+            end
         end
     end
 
