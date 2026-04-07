@@ -981,6 +981,15 @@ return ACPClient
 --- @alias agentic.acp.ClientHandlers.on_request_permission fun(request: agentic.acp.RequestPermission, callback: fun(option_id: string | nil)): nil
 --- @alias agentic.acp.ClientHandlers.on_error fun(err: agentic.acp.ACPError): nil
 
+--- Cursor CLI extension RPCs (`cursor/*`); dispatched only by CursorACPAdapter.
+--- @class agentic.acp.CursorExtensionContext
+--- @field message_id number|nil JSON-RPC id when the server expects a result
+--- @field method string
+--- @field params table
+--- @field respond fun(result: table|nil): nil
+
+--- @alias agentic.acp.ClientHandlers.on_cursor_extension fun(ctx: agentic.acp.CursorExtensionContext): nil
+
 --- @class agentic.Selection
 --- @field lines string[] The selected code lines
 --- @field start_line integer Starting line number (1-indexed)
@@ -995,6 +1004,7 @@ return ACPClient
 --- @field on_error agentic.acp.ClientHandlers.on_error
 --- @field on_tool_call fun(tool_call: agentic.ui.MessageWriter.ToolCallBlock): nil
 --- @field on_tool_call_update fun(tool_call: agentic.ui.MessageWriter.ToolCallBase): nil
+--- @field on_cursor_extension? agentic.acp.ClientHandlers.on_cursor_extension
 
 --- @class agentic.acp.ACPProviderConfig
 --- @field name? string Provider name

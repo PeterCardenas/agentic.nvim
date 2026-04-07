@@ -298,6 +298,386 @@ function SessionManager:_on_session_update(update)
     self.widget:render_header("chat")
 end
 
+--- @param raw string|nil
+--- @return agentic.acp.PlanEntryStatus
+function P.plan_status_from_cursor(raw)
+    if not raw then
+        return "pending"
+    end
+
+    local r = string.lower(tostring(raw))
+
+    if r == "completed" or r == "done" or r == "complete" then
+        return "completed"
+    end
+
+    if
+        r == "in_progress"
+        or r == "inprogress"
+        or r == "in progress"
+        or r == "active"
+    then
+        return "in_progress"
+    end
+
+    return "pending"
+end
+
+--- Normalize Cursor `cursor/update_todos` payloads into ACP plan entries.
+--- @param params table
+--- @return agentic.acp.PlanEntry[]
+function P.cursor_todos_to_plan_entries(params)
+    local raw = params.todos or params.entries or params.items
+
+    if type(raw) ~= "table" then
+        return {}
+    end
+
+    --- @type agentic.acp.PlanEntry[]
+    local entries = {}
+
+    for _, item in ipairs(raw) do
+        if type(item) == "table" then
+            local content = item.content
+                or item.text
+                or item.title
+                or item.label
+
+            if type(content) == "string" and content ~= "" then
+                --- @type agentic.acp.PlanEntry
+                local entry = {
+                    content = content,
+                    priority = item.priority or "medium",
+                    status = P.plan_status_from_cursor(item.status),
+                }
+                table.insert(entries, entry)
+            end
+        elseif type(item) == "string" and item ~= "" then
+            --- @type agentic.acp.PlanEntry
+            local entry = {
+                content = item,
+                priority = "medium",
+                status = "pending",
+            }
+            table.insert(entries, entry)
+        end
+    end
+
+    return entries
+end
+
+--- Build a markdown plan summary from `cursor/create_plan` params (shape varies by CLI version).
+--- @param params table
+--- @return string
+function P.cursor_plan_markdown(params)
+    local lines = {}
+
+    if type(params.title) == "string" and params.title ~= "" then
+        table.insert(lines, "## Plan: " .. params.title)
+        table.insert(lines, "")
+    end
+
+    if type(params.markdown) == "string" and params.markdown ~= "" then
+        table.insert(lines, params.markdown)
+    elseif type(params.plan) == "string" and params.plan ~= "" then
+        table.insert(lines, params.plan)
+    elseif type(params.content) == "string" and params.content ~= "" then
+        table.insert(lines, params.content)
+    end
+
+    if type(params.steps) == "table" then
+        for i, step in ipairs(params.steps) do
+            if type(step) == "string" then
+                table.insert(lines, string.format("%d. %s", i, step))
+            elseif type(step) == "table" then
+                local text = step.text
+                    or step.content
+                    or step.title
+                    or step.description
+
+                if type(text) == "string" and text ~= "" then
+                    table.insert(lines, string.format("%d. %s", i, text))
+                end
+            end
+        end
+    end
+
+    if #lines == 0 then
+        return "(No plan details from Cursor.)"
+    end
+
+    return table.concat(lines, "\n")
+end
+
+--- @param params table
+--- @return string|nil path Local file path if available
+function P.cursor_image_path(params)
+    local path = params.path or params.filePath
+
+    if type(path) == "string" and path ~= "" then
+        return path
+    end
+
+    local uri = params.uri or params.url
+
+    if type(uri) == "string" and vim.startswith(uri, "file://") then
+        return vim.uri_to_fname(uri)
+    end
+
+    return nil
+end
+
+--- Cursor CLI extension RPCs (`cursor/*`): todos, generated images, interactive Q&A / plan approval.
+--- @param ctx agentic.acp.CursorExtensionContext
+function SessionManager:_on_cursor_extension(ctx)
+    if ctx.method == "cursor/update_todos" then
+        local entries = P.cursor_todos_to_plan_entries(ctx.params)
+
+        if Config.windows.todos.display and #entries > 0 then
+            self.todo_list:render(entries)
+        end
+
+        ctx.respond(vim.empty_dict())
+    elseif ctx.method == "cursor/generate_image" then
+        local path = P.cursor_image_path(ctx.params)
+
+        --- @type string[]
+        local msg = { "🖼 **Generated image**" }
+
+        if path then
+            table.insert(msg, "")
+            table.insert(
+                msg,
+                "![img](" .. FileSystem.to_smart_path(path) .. ")"
+            )
+        else
+            table.insert(msg, "")
+            table.insert(msg, "(No file path in payload.)")
+        end
+
+        self.message_writer:write_message(
+            ACPPayloads.generate_agent_message(msg)
+        )
+
+        self.chat_history:append_agent_text({
+            type = "agent",
+            text = table.concat(msg, "\n"),
+            provider_name = self.agent.provider_config.name,
+        })
+
+        ctx.respond(vim.empty_dict())
+    elseif ctx.method == "cursor/ask_question" then
+        self:_handle_cursor_ask_question(ctx)
+    elseif ctx.method == "cursor/create_plan" then
+        self:_handle_cursor_create_plan(ctx)
+    else
+        ctx.respond(vim.empty_dict())
+    end
+end
+
+--- @param ctx agentic.acp.CursorExtensionContext
+function SessionManager:_handle_cursor_ask_question(ctx)
+    local params = ctx.params
+    local q = params.question or params.title or params.prompt
+    local choices = params.options or params.choices or params.answers
+
+    if type(q) ~= "string" or q == "" then
+        ctx.respond(vim.empty_dict())
+        return
+    end
+
+    if type(choices) ~= "table" or #choices == 0 then
+        self.message_writer:write_message(ACPPayloads.generate_agent_message(q))
+        ctx.respond(vim.empty_dict())
+        return
+    end
+
+    --- @type string[]
+    local lines = { q, "" }
+
+    for i, ch in ipairs(choices) do
+        local label = ""
+
+        if type(ch) == "table" then
+            label = ch.label or ch.name or ch.title or ch.text or ""
+        elseif type(ch) == "string" then
+            label = ch
+        end
+
+        table.insert(lines, string.format("- %s) %s", tostring(i), label))
+    end
+
+    self.message_writer:write_message(ACPPayloads.generate_agent_message(lines))
+
+    self.status_animation:stop()
+
+    --- @type agentic.acp.PermissionOption[]
+    local options = {}
+
+    for i, ch in ipairs(choices) do
+        local opt_id = tostring(i)
+        local name = ""
+
+        if type(ch) == "table" then
+            opt_id = tostring(ch.id or ch.optionId or ch.value or i)
+            name = ch.label or ch.name or ch.title or ch.text or opt_id
+        elseif type(ch) == "string" then
+            name = ch
+        end
+
+        --- @type agentic.acp.PermissionOption
+        local opt = {
+            optionId = opt_id,
+            name = name,
+            kind = "allow_once",
+        }
+        table.insert(options, opt)
+    end
+
+    local tool_call_id = "cursor_ext_ask_" .. tostring(ctx.message_id or 0)
+
+    --- @type agentic.acp.RequestPermission
+    local request = {
+        sessionId = self.session_id or "",
+        toolCall = {
+            toolCallId = tool_call_id,
+        },
+        options = options,
+    }
+
+    local function wrapped_callback(option_id)
+        if option_id == nil then
+            ctx.respond({
+                outcome = {
+                    outcome = "cancelled",
+                },
+            })
+        else
+            ctx.respond({
+                outcome = {
+                    outcome = "selected",
+                    optionId = option_id,
+                },
+            })
+        end
+
+        self:_clear_diff_in_buffer(request.toolCall.toolCallId, false)
+
+        if
+            not self.permission_manager.current_request
+            and #self.permission_manager.queue == 0
+        then
+            self.status_animation:start("generating")
+        end
+    end
+
+    self:_show_diff_in_buffer(request.toolCall.toolCallId)
+    self.permission_manager:add_request(request, wrapped_callback)
+end
+
+--- @param ctx agentic.acp.CursorExtensionContext
+function SessionManager:_handle_cursor_create_plan(ctx)
+    local md = P.cursor_plan_markdown(ctx.params)
+
+    self.message_writer:write_message(ACPPayloads.generate_agent_message(md))
+
+    self.status_animation:stop()
+
+    --- @type agentic.acp.PermissionOption[]
+    local options = {}
+
+    local raw_opts = ctx.params.options
+
+    if type(raw_opts) == "table" then
+        for _, o in ipairs(raw_opts) do
+            if type(o) == "table" then
+                local oid = o.optionId or o.id or o.value
+                local oname = o.name or o.label or o.title
+
+                if oid and oname then
+                    local kind = o.kind or "allow_once"
+
+                    if
+                        kind ~= "allow_once"
+                        and kind ~= "allow_always"
+                        and kind ~= "reject_once"
+                        and kind ~= "reject_always"
+                    then
+                        kind = "allow_once"
+                    end
+
+                    --- @type agentic.acp.PermissionOption
+                    local opt = {
+                        optionId = tostring(oid),
+                        name = tostring(oname),
+                        kind = kind,
+                    }
+                    table.insert(options, opt)
+                end
+            end
+        end
+    end
+
+    if #options == 0 then
+        --- @type agentic.acp.PermissionOption
+        local approve = {
+            optionId = "approve",
+            name = "Approve plan",
+            kind = "allow_once",
+        }
+
+        --- @type agentic.acp.PermissionOption
+        local reject = {
+            optionId = "reject",
+            name = "Reject",
+            kind = "reject_once",
+        }
+
+        table.insert(options, approve)
+        table.insert(options, reject)
+    end
+
+    local tool_call_id = "cursor_ext_plan_" .. tostring(ctx.message_id or 0)
+
+    --- @type agentic.acp.RequestPermission
+    local request = {
+        sessionId = self.session_id or "",
+        toolCall = {
+            toolCallId = tool_call_id,
+        },
+        options = options,
+    }
+
+    local function wrapped_callback(option_id)
+        if option_id == nil then
+            ctx.respond({
+                outcome = {
+                    outcome = "cancelled",
+                },
+            })
+        else
+            ctx.respond({
+                outcome = {
+                    outcome = "selected",
+                    optionId = option_id,
+                },
+            })
+        end
+
+        self:_clear_diff_in_buffer(request.toolCall.toolCallId, false)
+
+        if
+            not self.permission_manager.current_request
+            and #self.permission_manager.queue == 0
+        then
+            self.status_animation:start("generating")
+        end
+    end
+
+    self:_show_diff_in_buffer(request.toolCall.toolCallId)
+    self.permission_manager:add_request(request, wrapped_callback)
+end
+
 --- Handle tool call update: update UI, history, diff preview, permissions, and reload buffers
 --- @param tool_call_update agentic.ui.MessageWriter.ToolCallBase
 function SessionManager:_on_tool_call_update(tool_call_update)
@@ -775,6 +1155,10 @@ function SessionManager:new_session(opts)
 
             self:_show_diff_in_buffer(request.toolCall.toolCallId)
             self.permission_manager:add_request(request, wrapped_callback)
+        end,
+
+        on_cursor_extension = function(ctx)
+            self:_on_cursor_extension(ctx)
         end,
     }
 

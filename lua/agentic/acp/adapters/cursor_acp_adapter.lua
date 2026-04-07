@@ -254,4 +254,146 @@ function CursorACPAdapter:__handle_tool_call_update(session_id, update)
     end)
 end
 
+--- Cursor extension: cursor/task notifies about subagent task completion.
+--- Params shape:
+---   { agentId, description, durationMs, model, prompt, subagentType, toolCallId }
+--- @class agentic.acp.CursorTaskParams
+--- @field agentId string
+--- @field description string
+--- @field durationMs number
+--- @field model string
+--- @field prompt string
+--- @field subagentType table
+--- @field toolCallId string
+
+--- Handle cursor/task request — subagent task completion notification.
+--- Sends an acknowledgment response and routes the task info as a tool call update body.
+--- @param message_id number|nil
+--- @param params agentic.acp.CursorTaskParams
+function CursorACPAdapter:_handle_cursor_task(message_id, params)
+    -- Acknowledge the request so cursor doesn't block
+    if message_id then
+        self:__send_result(message_id, vim.empty_dict())
+    end
+
+    if not params or not params.toolCallId then
+        Logger.debug(
+            "CursorACPAdapter",
+            "cursor/task without toolCallId, ignoring"
+        )
+        return
+    end
+
+    local duration_str = ""
+    if params.durationMs then
+        duration_str = string.format(" (%.1fs)", params.durationMs / 1000)
+    end
+
+    local description = params.description or "subagent task"
+
+    --- @type agentic.ui.MessageWriter.ToolCallBase
+    local update = {
+        tool_call_id = params.toolCallId,
+        status = "completed",
+        argument = description,
+        body = {
+            string.format("⚡ %s%s", description, duration_str),
+        },
+    }
+
+    -- cursor/task doesn't include sessionId, so find the subscriber that owns this tool call
+    for session_id, _ in pairs(self.subscribers) do
+        self:__with_subscriber(session_id, function(subscriber)
+            subscriber.on_tool_call_update(update)
+        end)
+    end
+end
+
+--- @param params table|nil
+--- @return string|nil session_id
+function CursorACPAdapter:_resolve_cursor_session_id(params)
+    if params and params.sessionId and params.sessionId ~= "" then
+        return params.sessionId
+    end
+
+    --- @type string[]
+    local ids = {}
+    for sid, _ in pairs(self.subscribers) do
+        table.insert(ids, sid)
+    end
+
+    if #ids == 1 then
+        return ids[1]
+    end
+
+    return nil
+end
+
+--- Dispatch a Cursor extension JSON-RPC request to the session subscriber (one response per id).
+--- @param message_id number|nil
+--- @param method string
+--- @param params table|nil
+function CursorACPAdapter:_emit_cursor_extension(message_id, method, params)
+    local session_id = self:_resolve_cursor_session_id(params)
+    if not session_id then
+        Logger.debug(
+            "CursorACPAdapter",
+            "cursor extension "
+                .. method
+                .. ": no sessionId and not exactly one subscriber; ack only"
+        )
+        if message_id then
+            self:__send_result(message_id, vim.empty_dict())
+        end
+        return
+    end
+
+    local responded = false
+    --- @param result table|nil
+    local function respond(result)
+        if not message_id or responded then
+            return
+        end
+        responded = true
+        self:__send_result(message_id, result or vim.empty_dict())
+    end
+
+    self:__with_subscriber(session_id, function(subscriber)
+        if subscriber.on_cursor_extension then
+            --- @type agentic.acp.CursorExtensionContext
+            local ctx = {
+                message_id = message_id,
+                method = method,
+                params = params or {},
+                respond = respond,
+            }
+            subscriber.on_cursor_extension(ctx)
+        elseif message_id then
+            self:__send_result(message_id, vim.empty_dict())
+        end
+    end)
+end
+
+--- Override notification handler to intercept Cursor extension methods.
+--- @param message_id number|nil
+--- @param method string
+--- @param params table|nil
+function CursorACPAdapter:_handle_notification(message_id, method, params)
+    if method == "cursor/task" then
+        self:_handle_cursor_task(
+            message_id,
+            (params or {}) --[[@as agentic.acp.CursorTaskParams]]
+        )
+    elseif
+        method == "cursor/update_todos"
+        or method == "cursor/generate_image"
+        or method == "cursor/ask_question"
+        or method == "cursor/create_plan"
+    then
+        self:_emit_cursor_extension(message_id, method, params)
+    else
+        ACPClient._handle_notification(self, message_id, method, params or {})
+    end
+end
+
 return CursorACPAdapter
