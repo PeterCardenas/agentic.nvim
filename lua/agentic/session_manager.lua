@@ -482,10 +482,12 @@ function SessionManager:_handle_input_submit(input_text)
         self.chat_history.title = input_text -- Set title for new session
     end
 
-    table.insert(prompt, {
-        type = "text",
-        text = input_text,
-    })
+    if input_text ~= "" then
+        table.insert(prompt, {
+            type = "text",
+            text = input_text,
+        })
+    end
 
     -- Add system info on first message only (after user text so resume picker shows the prompt)
     if self._is_first_message then

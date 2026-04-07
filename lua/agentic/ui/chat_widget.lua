@@ -9,6 +9,12 @@ local WidgetLayout = require("agentic.ui.widget_layout")
 
 --- Ordered list of panels for window cycling
 --- @type agentic.ui.ChatWidget.PanelNames[]
+--- Panels that are not user-attached content (excluded from "has other content" checks)
+--- @type table<agentic.ui.ChatWidget.PanelNames, boolean>
+local NON_CONTENT_PANELS = { chat = true, input = true, todos = true }
+
+--- Ordered list of panels for window cycling
+--- @type agentic.ui.ChatWidget.PanelNames[]
 local CYCLE_ORDER = { "chat", "todos", "code", "files", "diagnostics", "input" }
 
 --- Runtime header parts with dynamic context
@@ -207,29 +213,50 @@ function ChatWidget:_submit_input()
     local prompt = table.concat(lines, "\n"):match("^%s*(.-)%s*$")
 
     -- Check if prompt is empty or contains only whitespace
-    if not prompt or prompt == "" or not prompt:match("%S") then
-        return
+    local has_prompt = prompt and prompt ~= "" and prompt:match("%S")
+
+    if not has_prompt then
+        -- Allow submit if other content (files, diagnostics, code) is attached
+        local has_other_content = false
+        for name, bufnr in pairs(self.buf_nrs) do
+            if
+                not NON_CONTENT_PANELS[name]
+                and vim.api.nvim_buf_is_valid(bufnr)
+            then
+                local buf_lines =
+                    vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+                local content = table.concat(buf_lines, "")
+                if content:match("%S") then
+                    has_other_content = true
+                    break
+                end
+            end
+        end
+
+        if not has_other_content then
+            return
+        end
+
+        prompt = prompt or ""
     end
 
     vim.api.nvim_buf_set_lines(self.buf_nrs.input, 0, -1, false, {})
 
-    BufHelpers.with_modifiable(self.buf_nrs.code, function(bufnr)
-        vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {})
-    end)
-
-    BufHelpers.with_modifiable(self.buf_nrs.files, function(bufnr)
-        vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {})
-    end)
-
-    BufHelpers.with_modifiable(self.buf_nrs.diagnostics, function(bufnr)
-        vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {})
-    end)
+    for name, bufnr in pairs(self.buf_nrs) do
+        if not NON_CONTENT_PANELS[name] then
+            BufHelpers.with_modifiable(bufnr, function(b)
+                vim.api.nvim_buf_set_lines(b, 0, -1, false, {})
+            end)
+        end
+    end
 
     self.on_submit_input(prompt)
 
-    self:close_optional_window("code")
-    self:close_optional_window("files")
-    self:close_optional_window("diagnostics")
+    for name, _ in pairs(self.buf_nrs) do
+        if not NON_CONTENT_PANELS[name] then
+            self:close_optional_window(name)
+        end
+    end
     -- Move cursor to chat buffer after submit for easy access to permission requests
     self:move_cursor_to(self.win_nrs.chat)
 end
