@@ -70,10 +70,13 @@ describe("FilePicker:scan_files", function()
             FilePicker.CMD_FD[1] = "echo"
             FilePicker.CMD_GIT[1] = "echo"
 
+            -- Reset shell_error to ensure clean state (may be non-zero from prior tests)
+            vim.fn.system("true")
+
             system_stub = spy.stub(vim.fn, "system")
             system_stub:invokes(function(_cmd)
-                -- First call returns empty (simulates failure)
-                -- Second call returns files (simulates success)
+                -- First call is git rev-parse check (returns "" = not a git repo)
+                -- Second call is rg scan (returns files = success)
                 if system_stub.call_count == 1 then
                     return ""
                 else
@@ -83,7 +86,8 @@ describe("FilePicker:scan_files", function()
 
             local files = picker:scan_files()
 
-            -- Should have called system exactly 2 times (first fails, second succeeds)
+            -- git rev-parse returns "" with shell_error=0 so git is added as a command,
+            -- then rg scan succeeds (returns files) = 2 total calls
             assert.equal(2, system_stub.call_count)
             assert.equal(3, #files)
         end)
