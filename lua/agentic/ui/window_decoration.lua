@@ -193,6 +193,10 @@ local function set_winbar(winid, text)
     winbar_text = "%#Normal#" .. winbar_text
 
     vim.api.nvim_set_option_value("winbar", winbar_text, { win = winid })
+
+    -- Force winbar redraw — setting the option alone doesn't trigger a
+    -- visual update when Neovim is idle (no cursor movement or user action).
+    vim.cmd("redrawstatus!")
 end
 
 --- Sets the buffer name based on header text and tab count

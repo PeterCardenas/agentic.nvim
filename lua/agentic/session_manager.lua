@@ -67,6 +67,10 @@ function P.invoke_hook(hook_name, data)
                     string.format("Hook '%s' error: %s", hook_name, err)
                 )
             end
+
+            -- Force statusline/winbar redraw so hooks that update
+            -- statusline variables take effect immediately.
+            vim.cmd("redrawstatus!")
         end)
     end
 end
@@ -281,15 +285,16 @@ function SessionManager:_on_session_update(update)
         )
     end
 
-    self.widget:render_header("chat")
-
-    -- This is being done after handling specific updates but one could argue
-    -- there should be pre/post hooks for everything.
+    -- Invoke the hook BEFORE render_header so that hook-set state (e.g.
+    -- vim.t[].agentic_usage) is available when the header title function runs.
+    -- Both are deferred via vim.schedule (FIFO), so this ordering is load-bearing.
     P.invoke_hook("on_session_update", {
         session_id = self.session_id,
         tab_page_id = self.tab_page_id,
         update = update,
     })
+
+    self.widget:render_header("chat")
 end
 
 --- Handle tool call update: update UI, history, diff preview, permissions, and reload buffers
