@@ -7,6 +7,10 @@ local WidgetLayout = require("agentic.ui.widget_layout")
 
 --- @alias agentic.ui.ChatWidget.PanelNames "chat"|"todos"|"code"|"files"|"input"|"diagnostics"
 
+--- Ordered list of panels for window cycling
+--- @type agentic.ui.ChatWidget.PanelNames[]
+local CYCLE_ORDER = { "chat", "todos", "code", "files", "diagnostics", "input" }
+
 --- Runtime header parts with dynamic context
 --- @class agentic.ui.ChatWidget.HeaderParts
 --- @field title string Main header text
@@ -272,16 +276,15 @@ function ChatWidget:_initialize()
     end
 end
 
---- Cycle through widget windows in order: chat -> todos -> code -> files -> input
-function ChatWidget:_cycle_windows()
+--- Cycle through widget windows using CYCLE_ORDER
+--- @param direction integer 1 for forward, -1 for backward
+function ChatWidget:_cycle_windows(direction)
     local current_win = vim.api.nvim_get_current_win()
-
-    -- Define the window cycle order
-    local cycle_order = { "chat", "todos", "code", "files", "input" }
+    local len = #CYCLE_ORDER
 
     -- Find current position in cycle
     local current_idx = nil
-    for i, panel_name in ipairs(cycle_order) do
+    for i, panel_name in ipairs(CYCLE_ORDER) do
         local winid = self.win_nrs[panel_name]
         if winid and winid == current_win then
             current_idx = i
@@ -289,15 +292,15 @@ function ChatWidget:_cycle_windows()
         end
     end
 
-    -- If not in any widget window, start from chat
+    -- If not in any widget window, start from first (forward) or last (backward)
     if not current_idx then
-        current_idx = 0
+        current_idx = direction == 1 and 0 or (len + 1)
     end
 
-    -- Find next valid window
-    for offset = 1, #cycle_order do
-        local next_idx = (current_idx + offset - 1) % #cycle_order + 1
-        local next_panel = cycle_order[next_idx]
+    -- Find next valid window in the given direction
+    for offset = 1, len do
+        local next_idx = (current_idx + direction * offset - 1) % len + 1
+        local next_panel = CYCLE_ORDER[next_idx]
         local next_winid = self.win_nrs[next_panel]
 
         if next_winid and vim.api.nvim_win_is_valid(next_winid) then
@@ -498,9 +501,19 @@ function ChatWidget:_bind_keymaps()
             Config.keymaps.widget.cycle_windows,
             bufnr,
             function()
-                self:_cycle_windows()
+                self:_cycle_windows(1)
             end,
             { desc = "Agentic: Cycle through windows" }
+        )
+
+        -- Shift-Tab to cycle backwards through windows
+        BufHelpers.multi_keymap_set(
+            Config.keymaps.widget.cycle_windows_reverse,
+            bufnr,
+            function()
+                self:_cycle_windows(-1)
+            end,
+            { desc = "Agentic: Cycle through windows (reverse)" }
         )
     end
 
