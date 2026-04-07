@@ -64,9 +64,10 @@ end
 --- @param rhs string|fun():any
 --- @param opts vim.keymap.set.Opts|nil
 function BufHelpers.keymap_set(bufnr, mode, lhs, rhs, opts)
-    opts = opts or {}
-    opts.buffer = bufnr
-    vim.keymap.set(mode, lhs, rhs, opts)
+    --- @class vim.keymap.set.Opts
+    local resolved = opts or {}
+    resolved.buffer = bufnr
+    vim.keymap.set(mode, lhs, rhs, resolved)
 end
 
 --- Sets multiple keymaps from a KeymapValue config entry for a specific buffer.

@@ -279,7 +279,8 @@ function ACPClient:_handle_message(message)
     end
 end
 
---- @param message_id number
+--- @protected
+--- @param message_id number|nil
 --- @param method string
 --- @param params table
 function ACPClient:_handle_notification(message_id, method, params)
