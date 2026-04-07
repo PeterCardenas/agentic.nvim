@@ -10,8 +10,11 @@ local WidgetLayout = require("agentic.ui.widget_layout")
 --- Ordered list of panels for window cycling
 --- @type agentic.ui.ChatWidget.PanelNames[]
 --- Panels that are not user-attached content (excluded from "has other content" checks)
---- @type table<agentic.ui.ChatWidget.PanelNames, boolean>
-local NON_CONTENT_PANELS = { chat = true, input = true, todos = true }
+local NON_CONTENT_PANELS = {
+    chat = true,
+    input = true,
+    todos = true,
+} --- @type table<agentic.ui.ChatWidget.PanelNames, boolean>
 
 --- Ordered list of panels for window cycling
 --- @type agentic.ui.ChatWidget.PanelNames[]
@@ -307,6 +310,7 @@ end
 --- @param direction integer 1 for forward, -1 for backward
 function ChatWidget:_cycle_windows(direction)
     local current_win = vim.api.nvim_get_current_win()
+    local in_insert = vim.fn.mode():sub(1, 1) == "i"
     local len = #CYCLE_ORDER
 
     -- Find current position in cycle
@@ -331,7 +335,16 @@ function ChatWidget:_cycle_windows(direction)
         local next_winid = self.win_nrs[next_panel]
 
         if next_winid and vim.api.nvim_win_is_valid(next_winid) then
-            vim.api.nvim_set_current_win(next_winid)
+            if in_insert then
+                vim.cmd.stopinsert()
+                vim.schedule(function()
+                    if vim.api.nvim_win_is_valid(next_winid) then
+                        vim.api.nvim_set_current_win(next_winid)
+                    end
+                end)
+            else
+                vim.api.nvim_set_current_win(next_winid)
+            end
             return
         end
     end

@@ -59,18 +59,15 @@ function FilePicker:_setup_completion(bufnr)
         Config.keymaps.prompt.accept_completion,
         bufnr,
         function()
-            -- Exit insert mode and cycle through windows
-            return vim.api.nvim_replace_termcodes(
-                "<Esc><Tab>",
-                true,
-                true,
-                true
-            )
+            vim.cmd.stopinsert()
+            vim.schedule(function()
+                local tab =
+                    vim.api.nvim_replace_termcodes("<Tab>", true, true, true)
+                vim.api.nvim_feedkeys(tab, "m", false)
+            end)
         end,
         {
             desc = "Agentic cycle windows",
-            expr = true,
-            replace_keycodes = false,
         }
     )
 end
