@@ -20,6 +20,19 @@ FileSystem.IMAGE_MIMES = {
     ico = "image/x-icon",
 }
 
+--- Reverse mapping from MIME type to file extension (built from IMAGE_MIMES)
+--- @type table<string, string>
+FileSystem.MIME_TO_EXT = {}
+for ext, mime in pairs(FileSystem.IMAGE_MIMES) do
+    -- Prefer shorter canonical extensions (jpg over jpeg, tif over tiff)
+    if
+        not FileSystem.MIME_TO_EXT[mime]
+        or #ext < #FileSystem.MIME_TO_EXT[mime]
+    then
+        FileSystem.MIME_TO_EXT[mime] = ext
+    end
+end
+
 FileSystem.AUDIO_MIMES = {
     mp3 = "audio/mpeg",
     wav = "audio/wav",
@@ -235,6 +248,43 @@ function FileSystem.get_git_root()
 
     -- For bare repos, common_dir IS the repo root
     return common_dir
+end
+
+--- Decode base64-encoded image data and write it to a temp file.
+--- Returns the file path on success, or nil + error on failure.
+--- @param data string
+--- @param mime_type string
+--- @return string|nil path
+--- @return string|nil error
+function FileSystem.decode_base64_to_temp_file(data, mime_type)
+    local ext = FileSystem.MIME_TO_EXT[mime_type] or "png"
+    local tmp_dir = vim.uv.os_tmpdir() or "/tmp"
+    local file_name = "agentic_img_"
+        .. os.date("%Y%m%d_%H%M%S")
+        .. "_"
+        .. math.random(1000, 9999)
+        .. "."
+        .. ext
+    local path = vim.fs.joinpath(tmp_dir, file_name)
+
+    local decoded = vim.base64.decode(data)
+    if not decoded or decoded == "" then
+        return nil, "Failed to decode base64 image data"
+    end
+
+    local file, open_err = io.open(path, "wb")
+    if not file then
+        return nil, "Failed to open temp file: " .. tostring(open_err)
+    end
+
+    local ok, write_err = pcall(file.write, file, decoded)
+    file:close()
+
+    if not ok then
+        return nil, "Failed to write image data: " .. tostring(write_err)
+    end
+
+    return path, nil
 end
 
 return FileSystem

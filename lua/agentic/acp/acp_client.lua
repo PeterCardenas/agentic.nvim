@@ -1,3 +1,4 @@
+local FileSystem = require("agentic.utils.file_system")
 local Logger = require("agentic.utils.logger")
 local transport_module = require("agentic.acp.acp_transport")
 
@@ -354,13 +355,42 @@ end
 function ACPClient:extract_content_body(update)
     local content = update.content and update.content[1]
 
-    if
-        content
-        and content.type == "content"
-        and content.content
-        and content.content.text
-    then
-        return self:safe_split(content.content.text)
+    if not content or content.type ~= "content" or not content.content then
+        return nil
+    end
+
+    local inner = content.content
+
+    if inner.type == "text" and inner.text then
+        return self:safe_split(inner.text)
+    end
+
+    if inner.type == "image" and inner.data and inner.mimeType then
+        local path, err =
+            FileSystem.decode_base64_to_temp_file(inner.data, inner.mimeType)
+        if path then
+            return { "![image](" .. path .. ")" }
+        end
+        Logger.debug("Failed to decode tool call image: " .. (err or "unknown"))
+    end
+
+    if inner.type == "resource" and inner.resource then
+        local res = inner.resource
+        if
+            res.blob
+            and res.mimeType
+            and FileSystem.MIME_TO_EXT[res.mimeType]
+        then
+            local path, err =
+                FileSystem.decode_base64_to_temp_file(res.blob, res.mimeType)
+            if path then
+                return { "![image](" .. path .. ")" }
+            end
+            Logger.debug(
+                "Failed to decode tool call blob resource: "
+                    .. (err or "unknown")
+            )
+        end
     end
 
     return nil

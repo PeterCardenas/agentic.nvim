@@ -4,6 +4,7 @@ local Config = require("agentic.config")
 local DiffHighlighter = require("agentic.utils.diff_highlighter")
 local DiffPreview = require("agentic.ui.diff_preview")
 local ExtmarkBlock = require("agentic.utils.extmark_block")
+local FileSystem = require("agentic.utils.file_system")
 local Logger = require("agentic.utils.logger")
 local Theme = require("agentic.theme")
 
@@ -20,6 +21,52 @@ local NS_DIFF_HIGHLIGHTS =
 local NS_STATUS = vim.api.nvim_create_namespace("agentic_status_footer")
 local NS_PROMPT_POSITIONS =
     vim.api.nvim_create_namespace("agentic_prompt_positions")
+
+--- Decode base64 image data to a temp file and return a markdown image link.
+--- @param data string
+--- @param mime_type string
+--- @return string|nil markdown
+local function base64_image_to_markdown(data, mime_type)
+    if not FileSystem.MIME_TO_EXT[mime_type] then
+        return nil
+    end
+
+    local path, err = FileSystem.decode_base64_to_temp_file(data, mime_type)
+    if path then
+        return "![image](" .. path .. ")"
+    end
+    Logger.debug("Failed to decode image: " .. (err or "unknown error"))
+    return nil
+end
+
+--- Extract displayable text from an ACP content block.
+--- For text content, returns the text directly.
+--- For image content, decodes to a temp file and returns a markdown image link.
+--- For resource content with an image blob, decodes and returns a markdown image link.
+--- @param content agentic.acp.Content|nil
+--- @return string|nil text
+local function extract_content_text(content)
+    if not content then
+        return nil
+    end
+
+    if content.type == "text" then
+        return content.text
+    end
+
+    if content.type == "image" and content.data and content.mimeType then
+        return base64_image_to_markdown(content.data, content.mimeType)
+    end
+
+    if content.type == "resource" and content.resource then
+        local res = content.resource
+        if res.blob and res.mimeType then
+            return base64_image_to_markdown(res.blob, res.mimeType)
+        end
+    end
+
+    return nil
+end
 
 --- @class agentic.ui.MessageWriter.HighlightRange
 --- @field type "comment"|"old"|"new"|"new_modification" Type of highlight to apply
@@ -111,9 +158,10 @@ end
 --- Writes a full message to the chat buffer and append two blank lines after
 --- @param update agentic.acp.SessionUpdateMessage
 function MessageWriter:write_message(update)
-    local text = update.content
-        and update.content.type == "text"
-        and update.content.text
+    local text = extract_content_text(
+        --- @cast update agentic.acp.AgentMessageChunk|agentic.acp.UserMessageChunk
+        update.content
+    )
 
     if not text or text == "" then
         return
@@ -188,9 +236,8 @@ end
 --- Some ACP providers stream chunks instead of full messages
 --- @param update agentic.acp.SessionUpdateMessage
 function MessageWriter:write_message_chunk(update)
-    local text = update.content
-        and update.content.type == "text"
-        and update.content.text
+    --- @cast update agentic.acp.AgentMessageChunk|agentic.acp.AgentThoughtChunk
+    local text = extract_content_text(update.content)
 
     if not text or text == "" then
         return

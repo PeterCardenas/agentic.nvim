@@ -238,10 +238,11 @@ function SessionManager:_on_session_update(update)
         self.status_animation:start("generating")
         self.message_writer:write_message_chunk(update)
 
-        if update.content and update.content.text then
+        local chunk_text = update.content and update.content.text
+        if chunk_text then
             self.chat_history:append_agent_text({
                 type = "agent",
-                text = update.content.text,
+                text = chunk_text,
                 provider_name = self.agent.provider_config.name,
             })
         end
@@ -249,10 +250,11 @@ function SessionManager:_on_session_update(update)
         self.status_animation:start("thinking")
         self.message_writer:write_message_chunk(update)
 
-        if update.content and update.content.text then
+        local chunk_text = update.content and update.content.text
+        if chunk_text then
             self.chat_history:append_agent_text({
                 type = "thought",
-                text = update.content.text,
+                text = chunk_text,
                 provider_name = self.agent.provider_config.name,
             })
         end
