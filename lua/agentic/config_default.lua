@@ -289,6 +289,15 @@ local ConfigDefault = {
         hint = "✨",
     },
 
+    --- Icons used in agent messages (finish, error, etc.)
+    --- @class agentic.UserConfig.MessageIcons
+    message_icons = {
+        thinking = "🧠",
+        finished = "🏁",
+        stopped = "🛑",
+        error = "❌",
+    },
+
     --- @class agentic.UserConfig.PermissionIcons
     permission_icons = {
         allow_once = "",

@@ -1052,13 +1052,15 @@ function SessionManager:_handle_input_submit(input_text)
 
             if err then
                 finish_message = string.format(
-                    "\n### ❌ Agent finished with error: %s\n%s",
+                    "\n### %s Agent finished with error: %s\n%s",
+                    Config.message_icons.error,
                     vim.inspect(err),
                     finish_message
                 )
             elseif response and response.stopReason == "cancelled" then
                 finish_message = string.format(
-                    "\n### 🛑 Generation stopped by the user request\n%s",
+                    "\n### %s Generation stopped by the user request\n%s",
+                    Config.message_icons.stopped,
                     finish_message
                 )
             end
