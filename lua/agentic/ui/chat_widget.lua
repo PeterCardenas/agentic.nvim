@@ -56,6 +56,7 @@ function ChatWidget:new(tab_page_id, on_submit_input)
     self = setmetatable({}, self)
 
     self.win_nrs = {}
+    self.current_position = Config.windows.position
 
     self.on_submit_input = on_submit_input
     self.tab_page_id = tab_page_id
@@ -90,6 +91,7 @@ function ChatWidget:show(opts)
         buf_nrs = self.buf_nrs,
         win_nrs = self.win_nrs,
         focus_prompt = opts.focus_prompt,
+        position = self.current_position,
     })
 end
 
@@ -108,7 +110,7 @@ function ChatWidget:rotate_layout(layouts)
         )
     end
 
-    local current = Config.windows.position
+    local current = self.current_position
     local next_layout = layouts[1]
 
     for i, layout in ipairs(layouts) do
@@ -121,7 +123,7 @@ function ChatWidget:rotate_layout(layouts)
         end
     end
 
-    Config.windows.position = next_layout
+    self.current_position = next_layout
 
     local previous_mode = vim.fn.mode()
     local previous_buf = vim.api.nvim_get_current_buf()
@@ -812,7 +814,11 @@ end
 
 --- @param panel_name agentic.ui.ChatWidget.PanelNames
 function ChatWidget:close_optional_window(panel_name)
-    WidgetLayout.close_optional_window(self.win_nrs, panel_name)
+    WidgetLayout.close_optional_window(
+        self.win_nrs,
+        panel_name,
+        self.current_position
+    )
 end
 
 --- Filetypes that should be excluded when finding fallback windows
