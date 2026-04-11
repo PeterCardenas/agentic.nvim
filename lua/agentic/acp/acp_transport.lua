@@ -32,6 +32,38 @@ local IGNORE_STDERR_PATTERNS = {
     "[PreToolUseHook]",
 }
 
+--- Read child PIDs recursively from /proc/<pid>/task/<pid>/children.
+--- Returns PIDs in bottom-up order (deepest children first, root last)
+--- so callers can kill children before parents to avoid orphans.
+--- @param root_pid number
+--- @return number[] pids
+function M._read_proc_children(root_pid)
+    local result = {}
+    local queue = { root_pid }
+
+    repeat
+        local pid = table.remove(queue, 1)
+        local path = "/proc/" .. pid .. "/task/" .. pid .. "/children"
+        local f = io.open(path)
+        if f then
+            local data = f:read("*a")
+            f:close()
+            for child_pid in (data or ""):gmatch("%d+") do
+                local n = tonumber(child_pid)
+                if n then
+                    -- Prepend so children come before their parent
+                    table.insert(result, 1, n)
+                    table.insert(queue, n)
+                end
+            end
+        end
+    until #queue == 0
+
+    -- Root last (bottom-up kill order)
+    result[#result + 1] = root_pid
+    return result
+end
+
 --- Create stdio transport for ACP communication
 --- @param config agentic.acp.StdioTransportConfig
 --- @param callbacks agentic.acp.TransportCallbacks
@@ -243,53 +275,30 @@ function M.create_stdio_transport(config, callbacks)
         end
 
         if self.process and not self.process:is_closing() then
-            local process = self.process
-            self.process = nil
+            local pid = self.process:get_pid()
 
-            if not process then
-                return
-            end
+            -- Find all child processes via /proc and kill bottom-up.
+            -- This is synchronous and instant (~0.1 ms) unlike the previous
+            -- pgrep approach which spawned subprocesses that blocked for 5 s
+            -- during VimLeavePre because vim.system():wait() cannot receive
+            -- subprocess exits when the Neovim event loop is not being driven.
+            local process_ids = M._read_proc_children(pid)
 
-            local pid = process:get_pid()
-            local process_ids = { pid }
-            local process_queue = { pid }
-
-            -- Find all child processes recursively using pgrep
-            repeat
-                local next_pid = table.remove(process_queue, 1)
-                local result = vim.system({ "pgrep", "-P", tostring(next_pid) })
-                    :wait(5000)
-                if result.code == 0 then
-                    local lines =
-                        vim.split(result.stdout or "", "\n", { plain = true })
-                    for _, line in ipairs(lines) do
-                        local child_pid = tonumber(line)
-                        if child_pid then
-                            process_ids[#process_ids + 1] = child_pid
-                            process_queue[#process_queue + 1] = child_pid
-                        end
-                    end
-                end
-            until #process_queue == 0
-
-            -- Kill all processes bottom-up (children first) to avoid orphans
-            for i = #process_ids, 1, -1 do
-                local success = pcall(function()
-                    uv.kill(process_ids[i], 15) -- SIGTERM
-                end)
+            for _, cpid in ipairs(process_ids) do
+                local success = pcall(uv.kill, cpid, 15) -- SIGTERM
                 if not success then
-                    Logger.debug(
-                        "Failed to kill process: " .. tostring(process_ids[i])
-                    )
+                    Logger.debug("Failed to kill process: " .. tostring(cpid))
                 else
-                    Logger.debug("Killed process: " .. tostring(process_ids[i]))
+                    Logger.debug("Killed process: " .. tostring(cpid))
                 end
             end
 
-            process:close()
+            -- Don't close the handle here — the on_exit callback will close it
+            -- after waitpid() reaps the process, avoiding a zombie.
+            -- The on_exit callback also emits the "disconnected" state change.
+        else
+            callbacks.on_state_change("disconnected")
         end
-
-        callbacks.on_state_change("disconnected")
     end
 
     return transport
