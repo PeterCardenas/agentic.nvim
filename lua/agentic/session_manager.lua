@@ -824,6 +824,29 @@ function SessionManager:_handle_model_change(model_id, is_legacy)
     end
 end
 
+--- Schedule a coalesced re-render of function-based headers.
+--- Multiple calls within the same event loop tick collapse into one render.
+function SessionManager:schedule_header_refresh()
+    if self._header_refresh_scheduled then
+        return
+    end
+    if not Config.headers then
+        return
+    end
+
+    self._header_refresh_scheduled = true
+    -- Debounce updates within 150ms of each other to avoid excessive
+    -- re-renders when multiple updates come in quick succession
+    vim.defer_fn(function()
+        self._header_refresh_scheduled = false
+        for panel_name, header_config in pairs(Config.headers) do
+            if type(header_config) == "function" then
+                self.widget:render_header(panel_name)
+            end
+        end
+    end, 150)
+end
+
 --- @param mode_id string
 function SessionManager:_set_mode_to_chat_header(mode_id)
     local mode_name = self.config_options:get_mode_name(mode_id)
