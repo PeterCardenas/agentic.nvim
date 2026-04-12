@@ -1145,6 +1145,7 @@ function SessionManager:new_session(opts)
 
         on_tool_call = function(tool_call)
             self.message_writer:write_tool_call_block(tool_call)
+            self.status_animation:start("generating")
             -- Store full tool_call in chat history
             --- @type agentic.ui.ChatHistory.ToolCall
             local tool_msg = {
