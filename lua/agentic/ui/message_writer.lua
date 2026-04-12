@@ -104,6 +104,7 @@ end
 --- @field _thought_label_start_col? integer
 --- @field _thought_text_extmark_id? integer
 --- @field _record_next_prompt? boolean
+--- @field _pending_newline? boolean
 local MessageWriter = {}
 MessageWriter.__index = MessageWriter
 
@@ -153,6 +154,7 @@ function MessageWriter:_clear_thought_state()
     self._thought_label_row = nil
     self._thought_label_start_col = nil
     self._thought_text_extmark_id = nil
+    self._pending_newline = nil
 end
 
 --- Writes a full message to the chat buffer and append two blank lines after
@@ -243,6 +245,12 @@ function MessageWriter:write_message_chunk(update)
         return
     end
 
+    -- Flush any deferred trailing newline from the previous chunk
+    if self._pending_newline then
+        text = "\n" .. text
+        self._pending_newline = nil
+    end
+
     local is_thought = update.sessionUpdate == "agent_thought_chunk"
     local was_thought = self._last_message_type == "agent_thought_chunk"
     local is_first_thought = is_thought and not was_thought
@@ -274,6 +282,16 @@ function MessageWriter:write_message_chunk(update)
         local start_col = #current_line
 
         local lines_to_write = vim.split(text, "\n", { plain = true })
+
+        -- Defer trailing empty line to prevent visual jerk.
+        -- When a chunk ends with "\n", vim.split produces a trailing "".
+        -- Writing that empty string creates a blank line that briefly flashes
+        -- before the next chunk fills it. Instead, strip it and re-insert the
+        -- newline at the start of the next chunk.
+        if #lines_to_write > 1 and lines_to_write[#lines_to_write] == "" then
+            table.remove(lines_to_write)
+            self._pending_newline = true
+        end
 
         local success, err = pcall(
             vim.api.nvim_buf_set_text,

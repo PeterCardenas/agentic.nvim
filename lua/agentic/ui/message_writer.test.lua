@@ -377,6 +377,123 @@ describe("agentic.ui.MessageWriter", function()
         end)
     end)
 
+    describe("write_message_chunk trailing newline deferral", function()
+        --- @type TestStub
+        local schedule_stub
+
+        before_each(function()
+            schedule_stub = spy.stub(vim, "schedule")
+        end)
+
+        after_each(function()
+            schedule_stub:revert()
+        end)
+
+        --- Helper: get all buffer lines
+        --- @return string[]
+        local function get_lines()
+            return vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+        end
+
+        it(
+            "does not create trailing empty line for chunk ending with newline",
+            function()
+                writer:write_message_chunk(make_message_update("hello\n"))
+
+                local lines = get_lines()
+                assert.equal(1, #lines)
+                assert.equal("hello", lines[1])
+                assert.is_true(writer._pending_newline)
+            end
+        )
+
+        it("flushes deferred newline at start of next chunk", function()
+            writer:write_message_chunk(make_message_update("hello\n"))
+            writer:write_message_chunk(make_message_update("world"))
+
+            local lines = get_lines()
+            assert.equal(2, #lines)
+            assert.equal("hello", lines[1])
+            assert.equal("world", lines[2])
+            assert.is_nil(writer._pending_newline)
+        end)
+
+        it("handles consecutive chunks with trailing newlines", function()
+            writer:write_message_chunk(make_message_update("line1\n"))
+            writer:write_message_chunk(make_message_update("line2\n"))
+            writer:write_message_chunk(make_message_update("line3"))
+
+            local lines = get_lines()
+            assert.equal(3, #lines)
+            assert.equal("line1", lines[1])
+            assert.equal("line2", lines[2])
+            assert.equal("line3", lines[3])
+        end)
+
+        it("handles chunk that is only a newline", function()
+            writer:write_message_chunk(make_message_update("hello"))
+            writer:write_message_chunk(make_message_update("\n"))
+            writer:write_message_chunk(make_message_update("world"))
+
+            local lines = get_lines()
+            assert.equal(2, #lines)
+            assert.equal("hello", lines[1])
+            assert.equal("world", lines[2])
+        end)
+
+        it("preserves intentional blank lines from double newline", function()
+            writer:write_message_chunk(make_message_update("above\n"))
+            writer:write_message_chunk(make_message_update("\n"))
+            writer:write_message_chunk(make_message_update("below"))
+
+            local lines = get_lines()
+            assert.equal(3, #lines)
+            assert.equal("above", lines[1])
+            assert.equal("", lines[2])
+            assert.equal("below", lines[3])
+        end)
+
+        it("clears pending newline on _clear_thought_state", function()
+            writer:write_message_chunk(make_message_update("text\n"))
+            assert.is_true(writer._pending_newline)
+
+            writer:_clear_thought_state()
+            assert.is_nil(writer._pending_newline)
+        end)
+
+        it("clears pending newline when write_message is called", function()
+            writer:write_message_chunk(make_message_update("chunk\n"))
+            assert.is_true(writer._pending_newline)
+
+            writer:write_message(make_message_update("full message"))
+            assert.is_nil(writer._pending_newline)
+        end)
+
+        it(
+            "produces same final output as naive approach for markdown content",
+            function()
+                -- Simulate streaming a markdown code block
+                writer:write_message_chunk(make_message_update("Code:\n"))
+                writer:write_message_chunk(make_message_update("\n"))
+                writer:write_message_chunk(make_message_update("```lua\n"))
+                writer:write_message_chunk(make_message_update("local x = 1\n"))
+                writer:write_message_chunk(make_message_update("```\n"))
+                writer:write_message_chunk(make_message_update("\n"))
+                writer:write_message_chunk(make_message_update("Done!"))
+
+                local lines = get_lines()
+                assert.equal(7, #lines)
+                assert.equal("Code:", lines[1])
+                assert.equal("", lines[2])
+                assert.equal("```lua", lines[3])
+                assert.equal("local x = 1", lines[4])
+                assert.equal("```", lines[5])
+                assert.equal("", lines[6])
+                assert.equal("Done!", lines[7])
+            end
+        )
+    end)
+
     describe("_prepare_block_lines", function()
         local FileSystem
         local read_stub

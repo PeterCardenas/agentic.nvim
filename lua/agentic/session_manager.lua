@@ -235,8 +235,8 @@ function SessionManager:_on_session_update(update)
             self.todo_list:render(update.entries)
         end
     elseif update.sessionUpdate == "agent_message_chunk" then
-        self.status_animation:start("generating")
         self.message_writer:write_message_chunk(update)
+        self.status_animation:start("generating")
 
         local chunk_text = update.content and update.content.text
         if chunk_text then
@@ -247,8 +247,8 @@ function SessionManager:_on_session_update(update)
             })
         end
     elseif update.sessionUpdate == "agent_thought_chunk" then
-        self.status_animation:start("thinking")
         self.message_writer:write_message_chunk(update)
+        self.status_animation:start("thinking")
 
         local chunk_text = update.content and update.content.text
         if chunk_text then
