@@ -47,6 +47,9 @@ local CYCLE_ORDER = { "chat", "todos", "code", "files", "diagnostics", "input" }
 --- @field win_nrs agentic.ui.ChatWidget.WinNrs
 --- @field on_submit_input fun(prompt: string) external callback to be called when user submits the input
 --- @field message_writer? agentic.ui.MessageWriter
+--- @field _on_before_hide? fun()
+--- @field _on_after_show? fun(chat_winid: integer|nil)
+--- @field _is_hiding? boolean
 local ChatWidget = {}
 ChatWidget.__index = ChatWidget
 
@@ -82,6 +85,16 @@ function ChatWidget:is_cursor_in_widget()
     return self:_is_widget_buffer(vim.api.nvim_get_current_buf())
 end
 
+--- @param callback fun()|nil
+function ChatWidget:set_on_before_hide(callback)
+    self._on_before_hide = callback
+end
+
+--- @param callback fun(chat_winid: integer|nil)|nil
+function ChatWidget:set_on_after_show(callback)
+    self._on_after_show = callback
+end
+
 --- @param opts agentic.ui.ChatWidget.ShowOpts|agentic.ui.ChatWidget.AddToContextOpts|nil
 function ChatWidget:show(opts)
     opts = opts or {}
@@ -93,6 +106,10 @@ function ChatWidget:show(opts)
         focus_prompt = opts.focus_prompt,
         position = self.current_position,
     })
+
+    if self._on_after_show then
+        self._on_after_show(self.win_nrs.chat)
+    end
 end
 
 --- @param layouts agentic.UserConfig.Windows.Position[]|nil
@@ -146,29 +163,47 @@ end
 
 --- Closes all windows but keeps buffers in memory
 function ChatWidget:hide()
-    vim.cmd("stopinsert")
-
-    -- Check if we're on the correct tabpage before trying to find/create fallback window
-    local current_tabpage = vim.api.nvim_get_current_tabpage()
-    local should_create_fallback = current_tabpage == self.tab_page_id
-
-    if should_create_fallback then
-        local fallback_winid = self:find_first_non_widget_window()
-
-        if not fallback_winid then
-            -- Fallback: create a new left window to avoid closing the last window error
-            local created_winid = self:open_left_window()
-            if not created_winid then
-                Logger.notify(
-                    "Failed to create fallback window; cannot hide widget safely, run `:tabclose` to close the tab instead.",
-                    vim.log.levels.ERROR
-                )
-                return
-            end
-        end
+    if self._is_hiding or not self:is_open() then
+        return
     end
 
-    WidgetLayout.close(self.win_nrs)
+    self._is_hiding = true
+
+    local ok, err = xpcall(function()
+        vim.cmd("stopinsert")
+
+        if self._on_before_hide then
+            self._on_before_hide()
+        end
+
+        -- Check if we're on the correct tabpage before trying to find/create fallback window
+        local current_tabpage = vim.api.nvim_get_current_tabpage()
+        local should_create_fallback = current_tabpage == self.tab_page_id
+
+        if should_create_fallback then
+            local fallback_winid = self:find_first_non_widget_window()
+
+            if not fallback_winid then
+                -- Fallback: create a new left window to avoid closing the last window error
+                local created_winid = self:open_left_window()
+                if not created_winid then
+                    Logger.notify(
+                        "Failed to create fallback window; cannot hide widget safely, run `:tabclose` to close the tab instead.",
+                        vim.log.levels.ERROR
+                    )
+                    return
+                end
+            end
+        end
+
+        WidgetLayout.close(self.win_nrs)
+    end, debug.traceback)
+
+    self._is_hiding = false
+
+    if not ok then
+        error(err)
+    end
 end
 
 --- Cleans up all buffers content without destroying them

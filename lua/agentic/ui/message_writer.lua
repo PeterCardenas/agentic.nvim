@@ -92,6 +92,7 @@ end
 --- @field argument string
 --- @field extmark_id? integer Range extmark spanning the block
 --- @field decoration_extmark_ids? integer[] IDs of decoration extmarks from ExtmarkBlock
+--- @field fold_text_prefix? string Prefix for fold text display
 
 --- @class agentic.ui.MessageWriter
 --- @field bufnr integer
@@ -105,6 +106,7 @@ end
 --- @field _thought_text_extmark_id? integer
 --- @field _record_next_prompt? boolean
 --- @field _pending_newline? boolean
+--- @field _chat_folds? agentic.ui.ChatFolds
 local MessageWriter = {}
 MessageWriter.__index = MessageWriter
 
@@ -129,6 +131,11 @@ end
 --- @param callback fun()|nil
 function MessageWriter:set_on_content_changed(callback)
     self._on_content_changed = callback
+end
+
+--- @param chat_folds agentic.ui.ChatFolds|nil
+function MessageWriter:set_chat_folds(chat_folds)
+    self._chat_folds = chat_folds
 end
 
 function MessageWriter:_notify_content_changed()
@@ -394,6 +401,30 @@ function MessageWriter:_check_auto_scroll(bufnr)
     return distance_from_bottom <= threshold
 end
 
+--- Immediately scroll to bottom if auto-scroll is active.
+--- Fold creation uses winsaveview/winrestview which can leave the view in a
+--- wrong position when a fold collapses lines near the visible bottom.
+--- Call this after fold operations to correct the view synchronously,
+--- preventing a visual flash before the scheduled auto-scroll fires.
+--- @private
+function MessageWriter:_fix_scroll_after_fold()
+    local should_scroll = self._should_auto_scroll
+    if should_scroll == nil then
+        should_scroll = self:_check_auto_scroll(self.bufnr)
+    end
+
+    if not should_scroll then
+        return
+    end
+
+    local wins = vim.fn.win_findbuf(self.bufnr)
+    if #wins > 0 then
+        vim.api.nvim_win_call(wins[1], function()
+            vim.cmd("normal! G0zb")
+        end)
+    end
+end
+
 --- @param bufnr integer Buffer number to scroll
 function MessageWriter:_auto_scroll(bufnr)
     if self._should_auto_scroll ~= true then
@@ -467,11 +498,23 @@ function MessageWriter:write_tool_call_block(tool_call_block)
 
         self.tool_call_blocks[tool_call_block.tool_call_id] = tool_call_block
 
+        -- Store fold text prefix for the fold display
+        tool_call_block.fold_text_prefix = ExtmarkBlock.BODY_PREFIX
+
         self:_apply_header_highlight(start_row, tool_call_block.status)
         self:_apply_status_footer(end_row, tool_call_block.status)
 
         self:_append_lines({ "", "" })
+
+        if self._chat_folds then
+            self._chat_folds:sync_tool_call(
+                tool_call_block.tool_call_id,
+                self.tool_call_blocks
+            )
+        end
     end)
+
+    self:_fix_scroll_after_fold()
 end
 
 --- @param tool_call_block agentic.ui.MessageWriter.ToolCallBase
@@ -533,6 +576,18 @@ function MessageWriter:update_tool_call_block(tool_call_block)
         )
         return
     end
+
+    -- Capture fold state before modifying buffer content
+    if self._chat_folds then
+        self._chat_folds:capture_tool_call_fold_state(
+            tool_call_block.tool_call_id,
+            self.tool_call_blocks
+        )
+    end
+
+    -- Preserve fold text prefix across updates
+    tracker.fold_text_prefix = tracker.fold_text_prefix
+        or ExtmarkBlock.BODY_PREFIX
 
     self:_with_modifiable_and_notify_change(function(bufnr)
         -- Diff blocks don't change after the initial render
@@ -609,7 +664,17 @@ function MessageWriter:update_tool_call_block(tool_call_block)
             new_end_row,
             tracker.status
         )
+
+        -- Sync fold after content update
+        if self._chat_folds then
+            self._chat_folds:sync_tool_call(
+                tool_call_block.tool_call_id,
+                self.tool_call_blocks
+            )
+        end
     end)
+
+    self:_fix_scroll_after_fold()
 end
 
 --- @param tool_call_block agentic.ui.MessageWriter.ToolCallBlock

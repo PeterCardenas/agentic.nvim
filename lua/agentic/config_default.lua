@@ -352,6 +352,37 @@ local ConfigDefault = {
     --- @type agentic.UserConfig.Headers
     headers = {},
 
+    --- Per-kind folding overrides
+    --- @class agentic.UserConfig.FoldingToolCallKindConfig
+    --- @field closed_by_default? boolean
+    --- @field min_lines? integer
+
+    --- Tool call folding configuration
+    --- @class agentic.UserConfig.FoldingToolCalls
+    --- @field enabled boolean
+    --- @field closed_by_default boolean
+    --- @field min_lines integer
+    --- @field kinds? table<string, agentic.UserConfig.FoldingToolCallKindConfig>
+
+    --- @class agentic.UserConfig.Folding
+    --- @field tool_calls agentic.UserConfig.FoldingToolCalls
+
+    --- Fold completed tool call output to keep chat compact
+    --- @type agentic.UserConfig.Folding
+    folding = {
+        tool_calls = {
+            enabled = true,
+            closed_by_default = true,
+            min_lines = 20,
+            kinds = {
+                fetch = { min_lines = 8 },
+                execute = { min_lines = 12 },
+                read = { min_lines = 15 },
+                edit = { closed_by_default = false },
+            },
+        },
+    },
+
     --- Control various behaviors and features of the plugin
     --- @class agentic.UserConfig.Settings
     settings = {

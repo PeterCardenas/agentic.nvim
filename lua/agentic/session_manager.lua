@@ -93,6 +93,7 @@ end
 --- @field config_options agentic.acp.AgentConfigOptions
 --- @field todo_list agentic.ui.TodoList
 --- @field chat_history agentic.ui.ChatHistory
+--- @field chat_folds agentic.ui.ChatFolds
 --- @field _history_to_send? agentic.ui.ChatHistory.Message[] Messages to prepend on next prompt submit
 --- @field _restoring boolean Flag to prevent auto-new_session during restore
 local SessionManager = {}
@@ -159,6 +160,27 @@ function SessionManager:new(tab_page_id)
     self.widget.message_writer = self.message_writer
     self.status_animation = StatusAnimation:new(self.widget.buf_nrs.chat)
     self.permission_manager = PermissionManager:new(self.message_writer)
+
+    local ChatFolds = require("agentic.ui.chat_folds")
+    self.chat_folds = ChatFolds:new(self.widget.buf_nrs.chat, tab_page_id)
+    self.message_writer:set_chat_folds(self.chat_folds)
+
+    self.widget:set_on_before_hide(function()
+        self.chat_folds:capture_visible_fold_states(
+            self.message_writer.tool_call_blocks
+        )
+    end)
+
+    self.widget:set_on_after_show(function(chat_winid)
+        if chat_winid and vim.api.nvim_win_is_valid(chat_winid) then
+            self.chat_folds:on_buf_win_enter(
+                chat_winid,
+                self.message_writer.tool_call_blocks
+            )
+        end
+    end)
+
+    self:_bind_chat_buffer_events()
 
     FilePicker:new(self.widget.buf_nrs.input)
 
@@ -1264,6 +1286,19 @@ function SessionManager:new_session(opts)
     end)
 end
 
+function SessionManager:_bind_chat_buffer_events()
+    vim.api.nvim_create_autocmd("BufWinEnter", {
+        buffer = self.widget.buf_nrs.chat,
+        callback = function()
+            local winid = vim.api.nvim_get_current_win()
+            self.chat_folds:on_buf_win_enter(
+                winid,
+                self.message_writer.tool_call_blocks
+            )
+        end,
+    })
+end
+
 function SessionManager:_cancel_session()
     self.is_generating = false
     self.status_animation:stop()
@@ -1278,6 +1313,10 @@ function SessionManager:_cancel_session()
         self.code_selection:clear()
         self.diagnostics_list:clear()
         self.config_options:clear()
+
+        if self.chat_folds then
+            self.chat_folds:reset()
+        end
     end
 
     self.session_id = nil

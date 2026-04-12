@@ -8,6 +8,9 @@ local GLYPHS = {
 --- @class agentic.utils.ExtmarkBlock
 local ExtmarkBlock = {}
 
+--- Prefix used for body lines in tool call blocks (for fold text display)
+ExtmarkBlock.BODY_PREFIX = GLYPHS.VERTICAL .. " "
+
 --- @class agentic.utils.ExtmarkBlock.RenderBlockOpts
 --- @field header_line integer 0-indexed line number for header
 --- @field body_start? integer 0-indexed start line for body (optional)
