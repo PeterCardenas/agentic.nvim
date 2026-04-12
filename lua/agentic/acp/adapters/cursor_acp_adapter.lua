@@ -72,7 +72,8 @@ end
 
 --- @param params table
 function CursorACPAdapter:__handle_session_update(params)
-    local update_type = params.update.sessionUpdate
+    local update = params.update
+    local update_type = update.sessionUpdate
 
     if update_type == "available_commands_update" then
         -- Store for later processing if session not yet subscribed
@@ -84,6 +85,26 @@ function CursorACPAdapter:__handle_session_update(params)
             )
             self._available_commands_updates[params.sessionId] = params
             return
+        end
+    end
+
+    -- Cursor prefixes responses and pre-tool-call separators with leading
+    -- newlines (single \n before text, triple \n\n\n before tool calls).
+    -- Strip all leading newlines to avoid blank lines in the chat buffer.
+    if
+        update_type == "agent_message_chunk"
+        or update_type == "agent_thought_chunk"
+    then
+        local content = update.content
+        if
+            content
+            and content.type == "text"
+            and type(content.text) == "string"
+        then
+            content.text = content.text:gsub("^\n+", "")
+            if content.text == "" then
+                return
+            end
         end
     end
 

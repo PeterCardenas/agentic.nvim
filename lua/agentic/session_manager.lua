@@ -851,7 +851,6 @@ function SessionManager:_handle_input_submit(input_text)
         return
     end
 
-
     --- @type agentic.acp.Content[]
     local prompt = {}
 

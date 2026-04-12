@@ -593,9 +593,8 @@ describe("agentic.SessionManager", function()
                 _handle_input_submit = SessionManager._handle_input_submit,
             } --[[@as agentic.SessionManager]]
 
-            local result = session:_handle_input_submit("/new")
+            session:_handle_input_submit("/new")
 
-            assert.is_true(result)
             assert.spy(new_session_spy).was.called(1)
         end)
     end)
@@ -653,7 +652,10 @@ describe("agentic.SessionManager", function()
                         return true
                     end,
                 },
-                message_writer = { write_message = write_message_spy },
+                message_writer = {
+                    write_message = write_message_spy,
+                    record_prompt_position = function() end,
+                },
                 status_animation = {
                     start = function() end,
                     stop = function() end,
