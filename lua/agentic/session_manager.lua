@@ -1094,11 +1094,6 @@ function SessionManager:_handle_input_submit(input_text)
 
     self.agent:send_prompt(self.session_id, prompt, function(response, err)
         vim.schedule(function()
-            -- Guard: skip stale response if session changed (cancel/restore/new)
-            if self.session_id ~= session_id then
-                return
-            end
-
             self.is_generating = false
 
             local duration_str = P.format_duration(self._turn_start_time)
