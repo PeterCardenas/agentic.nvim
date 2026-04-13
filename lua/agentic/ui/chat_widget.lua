@@ -7,6 +7,18 @@ local WidgetLayout = require("agentic.ui.widget_layout")
 
 --- @alias agentic.ui.ChatWidget.PanelNames "chat"|"todos"|"code"|"files"|"input"|"diagnostics"
 
+--- Filetypes used by widget buffers. Used to detect cross-tabpage widget
+--- buffers that don't belong to the current widget instance (since
+--- `_is_widget_buffer` only knows about its own `buf_nrs`).
+local AGENTIC_FILETYPES = {
+    AgenticChat = true,
+    AgenticInput = true,
+    AgenticTodos = true,
+    AgenticCode = true,
+    AgenticFiles = true,
+    AgenticDiagnostics = true,
+}
+
 --- Ordered list of panels for window cycling
 --- @type agentic.ui.ChatWidget.PanelNames[]
 --- Panels that are not user-attached content (excluded from "has other content" checks)
@@ -524,7 +536,12 @@ function ChatWidget:_toggle_full_width()
         local to_restore = {}
         for _, winid in ipairs(all_windows) do
             local win_buf = vim.api.nvim_win_get_buf(winid)
-            if not widget_buf_ids[win_buf] then
+            -- Skip this widget's own buffers AND any cross-tabpage widget
+            -- buffers (detected by filetype) so they are never saved/closed.
+            if
+                not widget_buf_ids[win_buf]
+                and not AGENTIC_FILETYPES[vim.bo[win_buf].filetype]
+            then
                 local win_config = vim.api.nvim_win_get_config(winid)
                 -- Only affect non-floating windows (skip notifications, popups, etc.)
                 if win_config.relative == "" then
@@ -912,12 +929,15 @@ function ChatWidget:find_first_non_widget_window()
             if win_config.relative == "" then
                 local bufnr = vim.api.nvim_win_get_buf(winid)
                 local ft = vim.bo[bufnr].filetype
-                if not EXCLUDED_FILETYPES[ft] then
+                -- Always skip windows showing any Agentic buffer (including
+                -- cross-tabpage widget buffers not in this instance's buf_nrs)
+                if AGENTIC_FILETYPES[ft] then
+                    -- skip entirely, not even as fallback
+                elseif not EXCLUDED_FILETYPES[ft] then
                     -- Preferred: a regular editor window
                     return winid
-                end
-                -- Remember as fallback (e.g. dashboard window)
-                if not fallback_winid then
+                elseif not fallback_winid then
+                    -- Remember as fallback (e.g. dashboard window)
                     fallback_winid = winid
                 end
             end
@@ -944,7 +964,9 @@ end
 --- @return number|nil winid The newly created window ID or nil on failure
 function ChatWidget:open_left_window(bufnr)
     if bufnr == nil then
-        -- Try alternate buffer first, but skip if it's a widget buffer or excluded filetype
+        -- Try alternate buffer first, but skip if it's a widget buffer or excluded filetype.
+        -- Also skip cross-tabpage widget buffers via filetype check (since
+        -- _is_widget_buffer only knows about this instance's buf_nrs).
         local alt_bufnr = vim.fn.bufnr("#")
         if
             alt_bufnr ~= -1
@@ -952,7 +974,7 @@ function ChatWidget:open_left_window(bufnr)
             and not self:_is_widget_buffer(alt_bufnr)
         then
             local ft = vim.bo[alt_bufnr].filetype
-            if not EXCLUDED_FILETYPES[ft] then
+            if not EXCLUDED_FILETYPES[ft] and not AGENTIC_FILETYPES[ft] then
                 bufnr = alt_bufnr
             end
         end
