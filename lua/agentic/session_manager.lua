@@ -96,6 +96,7 @@ end
 --- @field chat_folds agentic.ui.ChatFolds
 --- @field _history_to_send? agentic.ui.ChatHistory.Message[] Messages to prepend on next prompt submit
 --- @field _restoring boolean Flag to prevent auto-new_session during restore
+--- @field _replace_session boolean When true, preserve loaded session identity on next submit (continue mode)
 local SessionManager = {}
 SessionManager.__index = SessionManager
 
@@ -132,6 +133,7 @@ function SessionManager:new(tab_page_id)
         _is_first_message = true,
         is_generating = false,
         _restoring = false,
+        _replace_session = false,
     }, self)
 
     local agent = AgentInstance.get_instance(Config.provider, function(_client)
@@ -901,7 +903,10 @@ function SessionManager:_handle_input_submit(input_text)
 
     -- If restored/switched session, prepend history on first submit
     if self._history_to_send then
-        self.chat_history.title = input_text -- Update title for restored session
+        if not self._replace_session then
+            self.chat_history.title = input_text -- Fork: new title from first message
+        end
+        self._replace_session = false -- Clear flag after use
         ChatHistory.prepend_restored_messages(self._history_to_send, prompt)
         self._history_to_send = nil
     elseif self.chat_history.title == "" then
@@ -1571,11 +1576,11 @@ function SessionManager:destroy()
     self.widget:destroy()
 end
 
---- Restore session from loaded chat history
---- Creates a new ACP session (agent doesn't know old session_id)
---- and replays messages to UI. History is sent on first prompt submit.
+--- Restore session from loaded chat history.
+--- Always creates a new ACP session (provider doesn't persist sessions)
+--- and replays messages to UI. History is prepended on first prompt submit.
 --- @param history agentic.ui.ChatHistory
---- @param opts {reuse_session?: boolean}|nil If reuse_session=true, replay into current session without creating new one
+--- @param opts {replace_session?: boolean}|nil If replace_session=true, keep original session identity for file persistence (continue mode)
 function SessionManager:restore_from_history(history, opts)
     opts = opts or {}
 
@@ -1583,39 +1588,38 @@ function SessionManager:restore_from_history(history, opts)
     self._restoring = true
     self._history_to_send = history.messages
     self._is_first_message = false
+    self.chat_history = history
 
-    -- Update existing chat_history with loaded data, keeping current session_id
-    if opts.reuse_session then
-        self.chat_history.messages = vim.deepcopy(history.messages)
-        self.chat_history.title = history.title or ""
-    else
-        self.chat_history = history
+    -- In continue mode, remember original identity to restore after new_session
+    local original_session_id = opts.replace_session and history.session_id
+        or nil
+    local original_timestamp = opts.replace_session and history.timestamp or nil
+
+    if opts.replace_session then
+        self._replace_session = true
     end
 
     local SessionRestore = require("agentic.session_restore")
 
-    if opts.reuse_session and self.session_id then
-        -- Reuse existing ACP session, just replay messages
-        self._restoring = false
-        SessionRestore.replay_messages(
-            self.message_writer,
-            self._history_to_send
-        )
-        -- ACP session already knows these messages; clear to prevent duplicate prepend
-        self._history_to_send = nil
-    else
-        -- Create fresh ACP session, then replay messages after session is ready
-        self:new_session({
-            restore_mode = true,
-            on_created = function()
-                self._restoring = false
-                SessionRestore.replay_messages(
-                    self.message_writer,
-                    self._history_to_send
-                )
-            end,
-        })
-    end
+    self:new_session({
+        restore_mode = true,
+        on_created = function()
+            -- In continue mode, restore original session identity
+            -- so saves overwrite the same file instead of creating a new one
+            if original_session_id then
+                self.chat_history.session_id = original_session_id
+            end
+            if original_timestamp then
+                self.chat_history.timestamp = original_timestamp
+            end
+
+            self._restoring = false
+            SessionRestore.replay_messages(
+                self.message_writer,
+                self._history_to_send
+            )
+        end,
+    })
 end
 
 return SessionManager

@@ -227,8 +227,7 @@ end
 --- show a selector to restore a previous session
 function Agentic.restore_session()
     local tab_page_id = vim.api.nvim_get_current_tabpage()
-    local current_session = SessionRegistry.sessions[tab_page_id]
-    SessionRestore.show_picker(tab_page_id, current_session)
+    SessionRestore.show_picker(tab_page_id)
 end
 
 --- Toggle between prompt and code window

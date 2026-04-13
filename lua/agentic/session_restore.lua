@@ -3,6 +3,8 @@ local ChatHistory = require("agentic.ui.chat_history")
 local Logger = require("agentic.utils.logger")
 local SessionRegistry = require("agentic.session_registry")
 
+--- @alias agentic.RestoreMode "fork" | "continue"
+
 --- @class agentic.SessionRestore
 local SessionRestore = {}
 
@@ -16,20 +18,11 @@ local function load_fzf_lua()
     return fzf
 end
 
---- Checks if the current session has messages or we can safely restore into it if it's empty
---- @param current_session agentic.SessionManager|nil
---- @return boolean has_conflict
-local function check_conflict(current_session)
-    return current_session ~= nil
-        and current_session.session_id ~= nil
-        and current_session.chat_history ~= nil
-        and #current_session.chat_history.messages > 0
-end
-
+--- Load selected session, cancel current, and restore with given mode
 --- @param session_id string
 --- @param tab_page_id integer
---- @param has_conflict boolean
-local function do_restore(session_id, tab_page_id, has_conflict)
+--- @param restore_mode agentic.RestoreMode
+local function do_restore(session_id, tab_page_id, restore_mode)
     ChatHistory.load(session_id, function(history, err)
         if err or not history then
             Logger.notify(
@@ -40,71 +33,19 @@ local function do_restore(session_id, tab_page_id, has_conflict)
         end
 
         SessionRegistry.get_session_for_tab_page(tab_page_id, function(session)
-            if has_conflict then
-                if session.session_id then
-                    session.agent:cancel_session(session.session_id)
-                    session.widget:clear()
-                end
+            -- Always cancel current session
+            if session.session_id then
+                session.agent:cancel_session(session.session_id)
             end
+            session.widget:clear()
 
-            session:restore_from_history(
-                history,
-                { reuse_session = not has_conflict }
-            )
+            session:restore_from_history(history, {
+                replace_session = restore_mode == "continue",
+            })
 
             session.widget:show()
         end)
     end)
-end
-
---- @param session_id string
---- @param tab_page_id integer
---- @param has_conflict boolean
-local function restore_with_conflict_check(
-    session_id,
-    tab_page_id,
-    has_conflict
-)
-    if has_conflict then
-        local fzf = load_fzf_lua()
-
-        local options = {
-            "Cancel",
-            "Clear current session and restore",
-        }
-
-        local on_choice = function(choice)
-            if choice == "Clear current session and restore" then
-                do_restore(session_id, tab_page_id, has_conflict)
-            end
-        end
-
-        if not fzf then
-            -- Fallback to vim.ui.select if fzf-lua is not available
-            vim.ui.select(options, {
-                prompt = "Current session has messages. What would you like to do?",
-            }, on_choice)
-        else
-            fzf.fzf_exec(options, {
-                prompt = "Current session has messages> ",
-                winopts = {
-                    height = 0.2,
-                    width = 0.5,
-                    row = 0.5,
-                    col = 0.5,
-                },
-                actions = {
-                    ["default"] = function(selected)
-                        if selected and #selected > 0 then
-                            on_choice(selected[1])
-                        end
-                    end,
-                },
-            })
-        end
-    else
-        do_restore(session_id, tab_page_id, has_conflict)
-    end
 end
 
 --- Show session picker using fzf-lua (with fallback to vim.ui.select)
@@ -207,8 +148,7 @@ end
 
 --- Show session picker and restore selected session
 --- @param tab_page_id integer
---- @param current_session agentic.SessionManager|nil
-function SessionRestore.show_picker(tab_page_id, current_session)
+function SessionRestore.show_picker(tab_page_id)
     local initial_items = build_session_items()
     if #initial_items == 0 then
         Logger.notify("No saved sessions found", vim.log.levels.INFO)
@@ -216,13 +156,15 @@ function SessionRestore.show_picker(tab_page_id, current_session)
     end
 
     show_fzf_picker(build_session_items, function(choice)
-        if choice then
-            restore_with_conflict_check(
-                choice.session_id,
-                tab_page_id,
-                check_conflict(current_session)
-            )
+        if not choice then
+            return
         end
+
+        SessionRestore.show_restore_mode_picker(function(mode)
+            if mode then
+                do_restore(choice.session_id, tab_page_id, mode)
+            end
+        end)
     end, function(choice)
         ChatHistory.delete_session(choice.session_id, function(err)
             if err then
@@ -235,6 +177,61 @@ function SessionRestore.show_picker(tab_page_id, current_session)
             Logger.notify("Session deleted", vim.log.levels.INFO)
         end)
     end)
+end
+
+--- Show restore mode picker (fork vs continue). Reusable from any entry point.
+--- @param callback fun(mode: agentic.RestoreMode|nil)
+function SessionRestore.show_restore_mode_picker(callback)
+    local fzf = load_fzf_lua()
+
+    --- @type {id: agentic.RestoreMode, display: string}[]
+    local options = {
+        { id = "continue", display = "Continue session" },
+        { id = "fork", display = "Fork as new session" },
+    }
+
+    if not fzf then
+        vim.ui.select(options, {
+            prompt = "Restore mode:",
+            format_item = function(item)
+                return item.display
+            end,
+        }, function(choice)
+            callback(choice and choice.id or nil)
+        end)
+        return
+    end
+
+    local display_list = {}
+    for _, opt in ipairs(options) do
+        table.insert(display_list, opt.display)
+    end
+
+    fzf.fzf_exec(display_list, {
+        prompt = "Restore mode> ",
+        winopts = {
+            height = 0.15,
+            width = 0.4,
+            row = 0.5,
+            col = 0.5,
+        },
+        actions = {
+            ["default"] = function(selected)
+                if not selected or #selected == 0 then
+                    callback(nil)
+                    return
+                end
+
+                for _, opt in ipairs(options) do
+                    if opt.display == selected[1] then
+                        callback(opt.id)
+                        return
+                    end
+                end
+                callback(nil)
+            end,
+        },
+    })
 end
 
 --- Replay stored messages to the UI
