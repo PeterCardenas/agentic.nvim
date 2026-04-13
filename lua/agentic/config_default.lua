@@ -364,8 +364,15 @@ local ConfigDefault = {
     --- @field min_lines integer
     --- @field kinds? table<string, agentic.UserConfig.FoldingToolCallKindConfig>
 
+    --- @class agentic.UserConfig.FoldtextInfo
+    --- @field virt_text string[][] Highlighted virtual text chunks {{text, hl_group}, ...}
+    --- @field line_count integer
+    --- @field width integer Available text area width in columns
+    --- @field truncate fun(str: string, target_width: integer): string
+
     --- @class agentic.UserConfig.Folding
     --- @field tool_calls agentic.UserConfig.FoldingToolCalls
+    --- @field foldtext? fun(info: agentic.UserConfig.FoldtextInfo): string[][]
 
     --- Fold completed tool call output to keep chat compact
     --- @type agentic.UserConfig.Folding
@@ -381,6 +388,7 @@ local ConfigDefault = {
                 edit = { closed_by_default = false },
             },
         },
+        foldtext = nil,
     },
 
     --- Control various behaviors and features of the plugin

@@ -438,12 +438,12 @@ describe("agentic.ui.ChatFolds", function()
     end)
 
     describe("foldtext", function()
-        it("returns formatted fold text", function()
+        it("returns virtual text chunks", function()
             -- foldtext is a static function that reads vim.v.foldstart/foldend
-            -- We can't easily mock those, but we can verify it returns a string
-            local text = ChatFolds.foldtext()
-            assert.is_not_nil(text)
-            assert.equal("string", type(text))
+            -- We can't easily mock those, but we can verify it returns a table
+            local result = ChatFolds.foldtext()
+            assert.is_not_nil(result)
+            assert.equal("table", type(result))
         end)
     end)
 

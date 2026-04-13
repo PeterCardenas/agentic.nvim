@@ -2,6 +2,9 @@ local Config = require("agentic.config")
 local ExtmarkBlock = require("agentic.utils.extmark_block")
 
 local NS_TOOL_BLOCKS = vim.api.nvim_create_namespace("agentic_tool_blocks")
+local NS_DECORATIONS = vim.api.nvim_create_namespace("agentic_tool_decorations")
+local NS_DIFF_HIGHLIGHTS =
+    vim.api.nvim_create_namespace("agentic_diff_highlights")
 
 --- Fold text prefix stored per-buffer via vim.b variable
 local FOLD_TEXT_PREFIXES_VAR = "_agentic_fold_text_prefixes"
@@ -501,21 +504,137 @@ function ChatFolds:on_buf_win_enter(winid, tool_call_blocks)
     end
 end
 
+--- Truncate a string to fit within a target display width.
+--- Respects multi-byte characters and double-width glyphs.
+--- @param str string
+--- @param target_width integer
+--- @return string truncated
+function ChatFolds._truncate_str(str, target_width)
+    if target_width <= 0 then
+        return ""
+    end
+
+    local str_width = vim.fn.strdisplaywidth(str)
+    if str_width <= target_width then
+        return str
+    end
+
+    local cur_width = 0
+    local byte_idx = 0
+    local char_count = vim.fn.strchars(str)
+
+    for i = 0, char_count - 1 do
+        local ch = vim.fn.strcharpart(str, i, 1)
+        local ch_width = vim.fn.strdisplaywidth(ch)
+        if cur_width + ch_width > target_width then
+            break
+        end
+        cur_width = cur_width + ch_width
+        byte_idx = byte_idx + #ch
+    end
+
+    return string.sub(str, 1, byte_idx)
+end
+
+--- Get the available text width for the current window.
+--- Accounts for number column, sign column, fold column, etc.
+--- @return integer width
+function ChatFolds._get_text_width()
+    local winid = vim.api.nvim_get_current_win()
+    local info = vim.fn.getwininfo(winid)
+    if info and info[1] then
+        return info[1].width - info[1].textoff
+    end
+    return vim.api.nvim_win_get_width(winid)
+end
+
+--- Build virtual text chunks for a fold line, preserving original highlighting.
+--- Queries extmark decorations and content highlights on the first fold line.
+--- @param bufnr integer
+--- @param foldstart integer 1-indexed
+--- @return string[][] chunks
+function ChatFolds._build_fold_virt_text(bufnr, foldstart)
+    local line = vim.api.nvim_buf_get_lines(
+        bufnr,
+        foldstart - 1,
+        foldstart,
+        false
+    )[1] or ""
+
+    --- @type string[][]
+    local chunks = {}
+
+    -- Get decoration prefix (inline virtual text from NS_DECORATIONS)
+    local dec_marks = vim.api.nvim_buf_get_extmarks(
+        bufnr,
+        NS_DECORATIONS,
+        { foldstart - 1, 0 },
+        { foldstart - 1, 0 },
+        { details = true }
+    )
+
+    if #dec_marks > 0 and dec_marks[1][4] then
+        local vt = dec_marks[1][4].virt_text
+        if vt then
+            for _, chunk in ipairs(vt) do
+                table.insert(chunks, chunk)
+            end
+        end
+    else
+        table.insert(
+            chunks,
+            { ExtmarkBlock.BODY_PREFIX, "AgenticCodeBlockFence" }
+        )
+    end
+
+    -- Get content highlight from NS_DIFF_HIGHLIGHTS
+    local hl_marks = vim.api.nvim_buf_get_extmarks(
+        bufnr,
+        NS_DIFF_HIGHLIGHTS,
+        { foldstart - 1, 0 },
+        { foldstart - 1, -1 },
+        { details = true }
+    )
+
+    if #hl_marks > 0 and hl_marks[1][4] and hl_marks[1][4].hl_group then
+        table.insert(chunks, { line, hl_marks[1][4].hl_group })
+    else
+        table.insert(chunks, { line, "Comment" })
+    end
+
+    return chunks
+end
+
 --- Static foldtext function called by Neovim.
---- Reads fold text prefixes from the current buffer variable.
---- @return string
+--- Returns virtual text chunks preserving the original line highlighting.
+--- @return string[][]
 function ChatFolds.foldtext()
     local bufnr = vim.api.nvim_get_current_buf()
     local foldstart = vim.v.foldstart
     local foldend = vim.v.foldend
     local line_count = foldend - foldstart + 1
 
-    -- Try to find the matching prefix for this fold range
+    local folding = Config.folding
+    if folding.foldtext then
+        local chunks = ChatFolds._build_fold_virt_text(bufnr, foldstart)
+        local width = ChatFolds._get_text_width()
+
+        local ok, result = pcall(folding.foldtext, {
+            virt_text = chunks,
+            line_count = line_count,
+            width = width,
+            truncate = ChatFolds._truncate_str,
+        })
+        if ok and result then
+            return result
+        end
+    end
+
+    -- Default: prefix + line count (matches original foldtext style)
     local prefixes = vim.b[bufnr][FOLD_TEXT_PREFIXES_VAR]
     local prefix = ExtmarkBlock.BODY_PREFIX
 
     if prefixes then
-        -- Find the prefix whose fold range matches
         for _, p in pairs(prefixes) do
             if type(p) == "string" then
                 prefix = p
@@ -524,7 +643,12 @@ function ChatFolds.foldtext()
         end
     end
 
-    return string.format("%s [%d lines folded]", prefix, line_count)
+    return {
+        {
+            string.format("%s [%d lines folded]", prefix, line_count),
+            "Comment",
+        },
+    }
 end
 
 return ChatFolds
