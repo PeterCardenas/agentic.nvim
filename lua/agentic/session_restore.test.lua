@@ -375,6 +375,7 @@ describe("SessionRestore", function()
         end)
 
         it("returns nil when user cancels", function()
+            --- @type string|nil
             local result = "not-called"
             SessionRestore.show_restore_mode_picker(function(mode)
                 result = mode
@@ -436,6 +437,7 @@ describe("SessionRestore", function()
         end)
 
         it("returns nil for unrecognized fzf selection", function()
+            --- @type string|nil
             local result = "not-called"
             SessionRestore.show_restore_mode_picker(function(mode)
                 result = mode
@@ -448,6 +450,7 @@ describe("SessionRestore", function()
         end)
 
         it("returns nil when fzf selection is empty", function()
+            --- @type string|nil
             local result = "not-called"
             SessionRestore.show_restore_mode_picker(function(mode)
                 result = mode

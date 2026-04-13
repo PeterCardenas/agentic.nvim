@@ -251,6 +251,7 @@ function MessageWriter:write_message_chunk(update)
     if not text or text == "" then
         return
     end
+    --- @cast text string
 
     -- Flush any deferred trailing newline from the previous chunk
     if self._pending_newline then

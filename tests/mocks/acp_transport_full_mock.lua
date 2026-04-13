@@ -23,6 +23,8 @@ local NEXT_PROMPT_ID_KEY = "_next_prompt_request_id"
 --- @field _stopped boolean
 --- @field _sent table[] Captured outgoing requests for assertions
 --- @field _next_prompt_request_id number|nil The JSON-RPC id of the pending session/prompt request
+--- @field inject_notification? fun(self: agentic.acp.ACPTransportFullMockInstance, session_id: string, update: table)
+--- @field complete_prompt? fun(self: agentic.acp.ACPTransportFullMockInstance, stop_reason: string|nil)
 
 --- @param config agentic.acp.StdioTransportConfig
 --- @param callbacks agentic.acp.TransportCallbacks
@@ -42,6 +44,7 @@ function M.create_stdio_transport(config, callbacks)
     }
 
     --- @param data string
+    --- @diagnostic disable: invisible
     function transport:send(data)
         if self._stopped then
             return false
@@ -57,6 +60,7 @@ function M.create_stdio_transport(config, callbacks)
         -- Auto-respond to known handshake methods
         if message.method == "initialize" then
             vim.schedule(function()
+                --- @diagnostic disable-next-line: missing-fields
                 self._callbacks.on_message({
                     jsonrpc = "2.0",
                     id = message.id,
@@ -75,6 +79,7 @@ function M.create_stdio_transport(config, callbacks)
             end)
         elseif message.method == "session/new" then
             vim.schedule(function()
+                --- @diagnostic disable-next-line: missing-fields
                 self._callbacks.on_message({
                     jsonrpc = "2.0",
                     id = message.id,
@@ -94,6 +99,7 @@ function M.create_stdio_transport(config, callbacks)
             or message.method == "session/set_model"
         then
             vim.schedule(function()
+                --- @diagnostic disable-next-line: missing-fields
                 self._callbacks.on_message({
                     jsonrpc = "2.0",
                     id = message.id,
@@ -121,11 +127,13 @@ function M.create_stdio_transport(config, callbacks)
     --- @param session_id string
     --- @param update table The session update payload (e.g. { sessionUpdate = "agent_message_chunk", content = { type = "text", text = "Hello" } })
     function transport:inject_notification(session_id, update)
+        --- @diagnostic disable-next-line: missing-fields, assign-type-mismatch
         self._callbacks.on_message({
             jsonrpc = "2.0",
             method = "session/update",
             params = {
                 sessionId = session_id,
+                --- @diagnostic disable-next-line: assign-type-mismatch
                 update = update,
             },
         })
@@ -140,8 +148,10 @@ function M.create_stdio_transport(config, callbacks)
         end
         self[NEXT_PROMPT_ID_KEY] = nil
 
+        --- @diagnostic disable-next-line: missing-fields
         self._callbacks.on_message({
             jsonrpc = "2.0",
+            --- @diagnostic disable-next-line: assign-type-mismatch
             id = id,
             result = {
                 stopReason = stop_reason or "end_turn",

@@ -380,6 +380,7 @@ describe("ChatHistory", function()
             local file_path = create_session_file("delete-me")
             assert.is_not_nil(vim.uv.fs_stat(file_path))
 
+            --- @type string|nil
             local result_err = "not-called"
             ChatHistory.delete_session("delete-me", function(err)
                 result_err = err
@@ -445,6 +446,7 @@ describe("ChatHistory", function()
         it("returns error on double deletion", function()
             create_session_file("double-delete")
 
+            --- @type string|nil
             local first_err = "not-called"
             ChatHistory.delete_session("double-delete", function(err)
                 first_err = err

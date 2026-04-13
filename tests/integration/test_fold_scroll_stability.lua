@@ -25,6 +25,7 @@ describe("Fold scroll stability", function()
                 enabled = true,
                 closed_by_default = true,
                 min_lines = 5,
+                preview = false,
                 kinds = {},
             },
         }

@@ -5,6 +5,13 @@ local MiniTest = require("mini.test")
 --- @class tests.helpers.Child : MiniTest.child
 --- @field setup fun() Restart child and load plugin and run agentic.setup() to run auto commands and configurations
 --- @field flush fun() Flush pending scheduled callbacks in child neovim and wait a bit to ensure they are processed
+--- @field stop fun()
+--- @field v table
+--- @field api table
+--- @field g table
+--- @field fn table
+--- @field lua fun(code: string, args: table|nil)
+--- @field type_keys fun(...: string)
 
 --- @class tests.helpers.ChildModule
 local M = {}

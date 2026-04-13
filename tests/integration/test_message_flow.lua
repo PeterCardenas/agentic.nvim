@@ -1,3 +1,4 @@
+--- @diagnostic disable: redundant-parameter, cast-local-type
 local assert = require("tests.helpers.assert")
 local MiniTest = require("mini.test")
 local child = MiniTest.new_child_neovim()
@@ -209,12 +210,14 @@ describe("Tool call - enriched argument preserved in chat history", function()
 
             -- Chat history should store enriched argument
             local messages = get_chat_history_messages()
+            --- @type agentic.ui.ChatHistory.ToolCall|nil
             local tool_msg = nil
             for i = #messages, 1, -1 do
                 if
                     messages[i].type == "tool_call"
                     and messages[i].tool_call_id == "tool-exec-001"
                 then
+                    --- @cast tool_msg agentic.ui.ChatHistory.ToolCall
                     tool_msg = messages[i]
                     break
                 end
@@ -226,6 +229,7 @@ describe("Tool call - enriched argument preserved in chat history", function()
             )
             assert.equal(
                 "npm test",
+                --- @diagnostic disable-next-line: need-check-nil
                 tool_msg.argument,
                 "Chat history argument should be 'npm test', not 'Terminal'"
             )
@@ -259,12 +263,14 @@ describe("Tool call - enriched argument preserved in chat history", function()
 
             -- Chat history should store enriched argument (file path, not "Write")
             local messages = get_chat_history_messages()
+            --- @type agentic.ui.ChatHistory.ToolCall|nil
             local tool_msg = nil
             for i = #messages, 1, -1 do
                 if
                     messages[i].type == "tool_call"
                     and messages[i].tool_call_id == "tool-edit-001"
                 then
+                    --- @cast tool_msg agentic.ui.ChatHistory.ToolCall
                     tool_msg = messages[i]
                     break
                 end
@@ -276,6 +282,7 @@ describe("Tool call - enriched argument preserved in chat history", function()
             )
             assert.are_not.equal(
                 "Write",
+                --- @diagnostic disable-next-line: need-check-nil
                 tool_msg.argument,
                 "Chat history should NOT have generic title 'Write'"
             )

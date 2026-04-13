@@ -1,3 +1,4 @@
+--- @diagnostic disable: redundant-parameter
 local assert = require("tests.helpers.assert")
 local Child = require("tests.helpers.child")
 

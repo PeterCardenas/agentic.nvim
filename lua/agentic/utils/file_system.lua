@@ -147,9 +147,10 @@ function FileSystem.read_file(abs_path, line, limit, callback)
     end
 
     if line ~= nil and limit ~= nil then
-        lines = vim.list_slice(lines, line, line + limit)
+        lines = vim.list_slice(lines, line, line + limit) or {}
     end
 
+    --- @cast lines string[]
     local content = table.concat(lines, "\n")
     callback(content)
 end
