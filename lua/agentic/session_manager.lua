@@ -716,6 +716,11 @@ function SessionManager:_on_tool_call_update(tool_call_update)
         status = tool_call_update.status,
         body = tool_call_update.body,
         diff = tool_call_update.diff,
+        -- Some adapters (e.g. claude-agent-acp) enrich kind/argument on
+        -- tool_call_update rather than the initial tool_call. Include them
+        -- so chat history reflects the enriched values on session restore.
+        kind = tool_call_update.kind,
+        argument = tool_call_update.argument,
     }
 
     self.chat_history:update_tool_call(tool_call_update.tool_call_id, tool_call)
