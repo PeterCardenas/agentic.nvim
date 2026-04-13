@@ -406,12 +406,14 @@ local ConfigDefault = {
     --- @class agentic.UserConfig.FoldingToolCallKindConfig
     --- @field closed_by_default? boolean
     --- @field min_lines? integer
+    --- @field preview? boolean
 
     --- Tool call folding configuration
     --- @class agentic.UserConfig.FoldingToolCalls
     --- @field enabled boolean
     --- @field closed_by_default boolean
     --- @field min_lines integer
+    --- @field preview boolean
     --- @field kinds? table<string, agentic.UserConfig.FoldingToolCallKindConfig>
 
     --- @class agentic.UserConfig.FoldtextInfo
@@ -430,6 +432,7 @@ local ConfigDefault = {
         tool_calls = {
             enabled = true,
             closed_by_default = true,
+            preview = true,
             min_lines = 20,
             kinds = {
                 fetch = { min_lines = 8 },

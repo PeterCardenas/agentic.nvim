@@ -13,7 +13,10 @@ local FOLD_TEXT_PREFIXES_VAR = "_agentic_fold_text_prefixes"
 --- @field tool_call_id string
 --- @field should_render_fold? boolean
 --- @field default_closed? boolean
---- @field last_known_fold_state? boolean true = closed, false = open
+--- @field preview? boolean
+--- @field min_lines? integer
+--- @field last_known_fold_state? boolean true = closed, false = open (outer fold)
+--- @field last_known_inner_fold_state? boolean true = closed, false = open (inner fold)
 --- @field fold_text_prefix? string
 
 --- @class agentic.ui.ChatFolds.FoldingConfig
@@ -63,21 +66,24 @@ end
 --- @return boolean enabled
 --- @return integer min_lines
 --- @return boolean closed_by_default
+--- @return boolean preview
 function ChatFolds._resolve_policy(kind)
     local folding = Config.folding
     if not folding or not folding.tool_calls then
-        return false, 20, false
+        return false, 20, false, true
     end
 
     local tc = folding.tool_calls
     if not tc.enabled then
-        return false, 20, false
+        return false, 20, false, true
     end
 
     --- @type integer
     local min_lines = tc.min_lines or 20
     --- @type boolean
     local closed_by_default = tc.closed_by_default or false
+    --- @type boolean
+    local preview = tc.preview ~= false
 
     if kind and tc.kinds and tc.kinds[kind] then
         local kind_config = tc.kinds[kind]
@@ -89,9 +95,13 @@ function ChatFolds._resolve_policy(kind)
             --- @type boolean
             closed_by_default = kind_config.closed_by_default
         end
+        if kind_config.preview ~= nil then
+            --- @type boolean
+            preview = kind_config.preview
+        end
     end
 
-    return true, min_lines, closed_by_default
+    return true, min_lines, closed_by_default, preview
 end
 
 --- Resolve the body line range from the tool block extmark.
@@ -149,7 +159,7 @@ function ChatFolds:_ensure_tool_call_fold(tool_call_id, tool_call_blocks)
     local tracker = tool_call_blocks[tool_call_id]
     local kind = tracker and tracker.kind
 
-    local enabled, min_lines, closed_by_default =
+    local enabled, min_lines, closed_by_default, preview =
         ChatFolds._resolve_policy(kind)
 
     local body_start, body_end = ChatFolds._resolve_body_range(
@@ -182,6 +192,8 @@ function ChatFolds:_ensure_tool_call_fold(tool_call_id, tool_call_blocks)
         tool_call_id = tool_call_id,
         should_render_fold = should_render,
         default_closed = closed_by_default,
+        preview = preview,
+        min_lines = min_lines,
         fold_text_prefix = tracker and tracker.fold_text_prefix
             or ExtmarkBlock.BODY_PREFIX,
     }
@@ -251,7 +263,7 @@ function ChatFolds._get_fold_state(winid, line)
     return state
 end
 
---- Set fold state at a given line in a window
+--- Set fold state at a given line in a window (one level only)
 --- @param winid integer
 --- @param line integer 1-indexed
 --- @param closed boolean
@@ -264,10 +276,10 @@ function ChatFolds._set_fold_state(winid, line, closed)
         vim.api.nvim_win_set_cursor(0, { line, 0 })
         if closed then
             --- @diagnostic disable-next-line: param-type-mismatch
-            pcall(vim.cmd, "silent! normal! zC")
+            pcall(vim.cmd, "silent! normal! zc")
         else
             --- @diagnostic disable-next-line: param-type-mismatch
-            pcall(vim.cmd, "silent! normal! zO")
+            pcall(vim.cmd, "silent! normal! zo")
         end
     end)
 end
@@ -297,15 +309,23 @@ function ChatFolds:_clear_fold_text_prefix(tool_call_id)
     vim.b[self._bufnr][FOLD_TEXT_PREFIXES_VAR] = prefixes
 end
 
---- Decide the default state for a fold
+--- Decide the default states for outer and inner folds
 --- @param tool_call_fold agentic.ui.ChatFolds.ToolCallFold
---- @return boolean closed
-function ChatFolds._decide_default_state(tool_call_fold)
+--- @return boolean outer_closed
+--- @return boolean inner_closed
+function ChatFolds._decide_default_states(tool_call_fold)
+    local outer_closed = tool_call_fold.default_closed or false
     if tool_call_fold.last_known_fold_state ~= nil then
-        return tool_call_fold.last_known_fold_state
+        outer_closed = tool_call_fold.last_known_fold_state --[[@as boolean]]
     end
 
-    return tool_call_fold.default_closed or false
+    -- Inner fold defaults to closed when preview is enabled, open otherwise
+    local inner_closed = tool_call_fold.preview ~= false
+    if tool_call_fold.last_known_inner_fold_state ~= nil then
+        inner_closed = tool_call_fold.last_known_inner_fold_state --[[@as boolean]]
+    end
+
+    return outer_closed, inner_closed
 end
 
 --- Sync a single tool call fold to all visible windows.
@@ -346,19 +366,45 @@ function ChatFolds:sync_tool_call(tool_call_id, tool_call_blocks)
         fold.fold_text_prefix or ExtmarkBlock.BODY_PREFIX
     )
 
-    local desired_state = ChatFolds._decide_default_state(fold)
+    local outer_closed, inner_closed = ChatFolds._decide_default_states(fold)
+
+    -- Calculate inner fold start (preview boundary)
+    --- @type integer|nil
+    local inner_start = nil
+    if fold.min_lines and body_start + fold.min_lines <= body_end then
+        inner_start = body_start + fold.min_lines
+    end
 
     for _, winid in ipairs(winids) do
-        self:_sync_fold_to_window(winid, body_start, body_end, desired_state)
+        self:_sync_fold_to_window(
+            winid,
+            body_start,
+            body_end,
+            outer_closed,
+            inner_start,
+            inner_closed
+        )
     end
 end
 
---- Create/recreate a fold in a specific window, preserving view
+--- Create/recreate outer and optional inner fold in a specific window, preserving view.
+--- The outer fold spans the entire body. The inner fold (when present) starts at
+--- body_start + min_lines and covers the remainder, giving a "preview" of the
+--- first min_lines when outer is open and inner is closed.
 --- @param winid integer
 --- @param body_start integer 1-indexed
 --- @param body_end integer 1-indexed
---- @param closed boolean
-function ChatFolds:_sync_fold_to_window(winid, body_start, body_end, closed)
+--- @param outer_closed boolean
+--- @param inner_start integer|nil 1-indexed start of inner fold, nil = no inner fold
+--- @param inner_closed boolean|nil
+function ChatFolds:_sync_fold_to_window(
+    winid,
+    body_start,
+    body_end,
+    outer_closed,
+    inner_start,
+    inner_closed
+)
     if not vim.api.nvim_win_is_valid(winid) then
         return
     end
@@ -368,22 +414,46 @@ function ChatFolds:_sync_fold_to_window(winid, body_start, body_end, closed)
     vim.api.nvim_win_call(winid, function()
         local view = vim.fn.winsaveview()
 
-        -- Delete any existing fold at this range
+        -- Delete any existing folds at this range
         vim.api.nvim_win_set_cursor(0, { body_start, 0 })
         --- @diagnostic disable-next-line: param-type-mismatch
         pcall(vim.cmd, "silent! normal! zD")
 
-        -- Create the new fold
+        -- Create outer fold (level 1) — created closed by default
         --- @diagnostic disable-next-line: param-type-mismatch
         pcall(vim.cmd, string.format("silent! %d,%dfold", body_start, body_end))
 
-        -- Set desired state
-        if closed then
+        if inner_start and inner_start <= body_end then
+            -- Open outer so we can nest the inner fold inside
             --- @diagnostic disable-next-line: param-type-mismatch
-            pcall(vim.cmd, "silent! normal! zC")
+            pcall(vim.cmd, "silent! normal! zo")
+
+            -- Create inner fold (level 2) — created closed by default
+            pcall(
+                --- @diagnostic disable-next-line: param-type-mismatch
+                vim.cmd,
+                string.format("silent! %d,%dfold", inner_start, body_end)
+            )
+
+            -- Set inner fold state (only need to open if requested)
+            if not inner_closed then
+                vim.api.nvim_win_set_cursor(0, { inner_start, 0 })
+                --- @diagnostic disable-next-line: param-type-mismatch
+                pcall(vim.cmd, "silent! normal! zo")
+            end
+
+            -- Set outer fold state (only need to close, it's already open)
+            if outer_closed then
+                vim.api.nvim_win_set_cursor(0, { body_start, 0 })
+                --- @diagnostic disable-next-line: param-type-mismatch
+                pcall(vim.cmd, "silent! normal! zc")
+            end
         else
-            --- @diagnostic disable-next-line: param-type-mismatch
-            pcall(vim.cmd, "silent! normal! zO")
+            -- No inner fold — set outer state directly
+            if not outer_closed then
+                --- @diagnostic disable-next-line: param-type-mismatch
+                pcall(vim.cmd, "silent! normal! zo")
+            end
         end
 
         vim.fn.winrestview(view)
@@ -404,16 +474,28 @@ function ChatFolds:capture_visible_fold_states(tool_call_blocks)
 
     for tool_call_id, fold in pairs(self._tool_call_folds) do
         if fold.should_render_fold then
-            local body_start = ChatFolds._resolve_body_range(
+            local body_start, body_end = ChatFolds._resolve_body_range(
                 self._bufnr,
                 tool_call_blocks,
                 tool_call_id
             )
 
             if body_start then
-                local state = ChatFolds._get_fold_state(winid, body_start)
-                if state ~= nil then
-                    fold.last_known_fold_state = state
+                local outer_state = ChatFolds._get_fold_state(winid, body_start)
+                if outer_state ~= nil then
+                    fold.last_known_fold_state = outer_state
+                end
+
+                -- Capture inner fold state (only meaningful when outer is open)
+                if outer_state == false and fold.min_lines and body_end then
+                    local inner_start = body_start + fold.min_lines
+                    if inner_start <= body_end then
+                        local inner_state =
+                            ChatFolds._get_fold_state(winid, inner_start)
+                        if inner_state ~= nil then
+                            fold.last_known_inner_fold_state = inner_state
+                        end
+                    end
                 end
             end
         end
@@ -434,16 +516,30 @@ function ChatFolds:capture_tool_call_fold_state(tool_call_id, tool_call_blocks)
         return
     end
 
-    local body_start = ChatFolds._resolve_body_range(
+    local body_start, body_end = ChatFolds._resolve_body_range(
         self._bufnr,
         tool_call_blocks,
         tool_call_id
     )
 
-    if body_start then
-        local state = ChatFolds._get_fold_state(winids[1], body_start)
-        if state ~= nil then
-            fold.last_known_fold_state = state
+    if not body_start then
+        return
+    end
+
+    local winid = winids[1]
+    local outer_state = ChatFolds._get_fold_state(winid, body_start)
+    if outer_state ~= nil then
+        fold.last_known_fold_state = outer_state
+    end
+
+    -- Capture inner fold state (only meaningful when outer is open)
+    if outer_state == false and fold.min_lines and body_end then
+        local inner_start = body_start + fold.min_lines
+        if inner_start <= body_end then
+            local inner_state = ChatFolds._get_fold_state(winid, inner_start)
+            if inner_state ~= nil then
+                fold.last_known_inner_fold_state = inner_state
+            end
         end
     end
 end
@@ -463,45 +559,52 @@ function ChatFolds:on_buf_win_enter(winid, tool_call_blocks)
 
     ChatFolds._configure_window(winid)
 
-    -- Process reopen-restore queue (known fold states)
-    local restore_ids = self._reopen_restore_tool_call_ids
-    self._reopen_restore_tool_call_ids = {}
+    --- @param ids string[]
+    local function process_queue(ids)
+        for _, tool_call_id in ipairs(ids) do
+            local fold = self._tool_call_folds[tool_call_id]
+            if fold and fold.should_render_fold then
+                local body_start, body_end = ChatFolds._resolve_body_range(
+                    self._bufnr,
+                    tool_call_blocks,
+                    tool_call_id
+                )
 
-    for _, tool_call_id in ipairs(restore_ids) do
-        local fold = self._tool_call_folds[tool_call_id]
-        if fold and fold.should_render_fold then
-            local body_start, body_end = ChatFolds._resolve_body_range(
-                self._bufnr,
-                tool_call_blocks,
-                tool_call_id
-            )
+                if body_start and body_end then
+                    local outer_closed, inner_closed =
+                        ChatFolds._decide_default_states(fold)
 
-            if body_start and body_end then
-                local desired = ChatFolds._decide_default_state(fold)
-                self:_sync_fold_to_window(winid, body_start, body_end, desired)
+                    --- @type integer|nil
+                    local inner_start = nil
+                    if
+                        fold.min_lines
+                        and body_start + fold.min_lines <= body_end
+                    then
+                        inner_start = body_start + fold.min_lines
+                    end
+
+                    self:_sync_fold_to_window(
+                        winid,
+                        body_start,
+                        body_end,
+                        outer_closed,
+                        inner_start,
+                        inner_closed
+                    )
+                end
             end
         end
     end
+
+    -- Process reopen-restore queue (known fold states)
+    local restore_ids = self._reopen_restore_tool_call_ids
+    self._reopen_restore_tool_call_ids = {}
+    process_queue(restore_ids)
 
     -- Process pending queue (new folds, no prior state)
     local pending_ids = self._pending_tool_call_ids
     self._pending_tool_call_ids = {}
-
-    for _, tool_call_id in ipairs(pending_ids) do
-        local fold = self._tool_call_folds[tool_call_id]
-        if fold and fold.should_render_fold then
-            local body_start, body_end = ChatFolds._resolve_body_range(
-                self._bufnr,
-                tool_call_blocks,
-                tool_call_id
-            )
-
-            if body_start and body_end then
-                local desired = ChatFolds._decide_default_state(fold)
-                self:_sync_fold_to_window(winid, body_start, body_end, desired)
-            end
-        end
-    end
+    process_queue(pending_ids)
 end
 
 --- Truncate a string to fit within a target display width.

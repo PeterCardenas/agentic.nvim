@@ -82,6 +82,7 @@ describe("agentic.ui.ChatFolds", function()
             tool_calls = {
                 enabled = true,
                 closed_by_default = false,
+                preview = true,
                 min_lines = 5,
                 kinds = {},
             },
@@ -140,6 +141,32 @@ describe("agentic.ui.ChatFolds", function()
             })
             local _, _, closed = ChatFolds._resolve_policy("execute")
             assert.is_true(closed)
+        end)
+
+        it("defaults preview to true", function()
+            setup_config()
+            local _, _, _, preview = ChatFolds._resolve_policy("execute")
+            assert.is_true(preview)
+        end)
+
+        it("returns global preview=false", function()
+            setup_config({ tool_calls = { preview = false } })
+            local _, _, _, preview = ChatFolds._resolve_policy("execute")
+            assert.is_false(preview)
+        end)
+
+        it("uses per-kind preview override", function()
+            setup_config({
+                tool_calls = {
+                    kinds = { read = { preview = false } },
+                },
+            })
+            local _, _, _, preview = ChatFolds._resolve_policy("read")
+            assert.is_false(preview)
+
+            -- Other kinds still use global default
+            local _, _, _, preview2 = ChatFolds._resolve_policy("execute")
+            assert.is_true(preview2)
         end)
     end)
 
@@ -324,6 +351,147 @@ describe("agentic.ui.ChatFolds", function()
         end)
     end)
 
+    describe("nested inner fold", function()
+        it("creates inner fold when body exceeds min_lines", function()
+            setup_config({
+                tool_calls = { min_lines = 5, closed_by_default = false },
+            })
+            -- 10 body lines, min_lines=5 → inner fold at body_start+5 = line 7
+            local bufnr, winid, blocks, tc_id = create_tool_call_buffer(10)
+            local tab = vim.api.nvim_get_current_tabpage()
+
+            local folds = ChatFolds:new(bufnr, tab)
+            folds:sync_tool_call(tc_id, blocks)
+
+            -- Outer fold at body_start (line 2) should be open
+            local outer_state = ChatFolds._get_fold_state(winid, 2)
+            assert.is_false(outer_state)
+
+            -- Inner fold at line 7 (2 + 5) should be closed
+            local inner_state = ChatFolds._get_fold_state(winid, 7)
+            assert.is_true(inner_state)
+
+            vim.api.nvim_win_close(winid, true)
+            vim.api.nvim_buf_delete(bufnr, { force = true })
+        end)
+
+        it("does not create inner fold when body equals min_lines", function()
+            setup_config({
+                tool_calls = { min_lines = 10, closed_by_default = false },
+            })
+            -- 10 body lines, min_lines=10 → inner_start=12 > body_end=11
+            local bufnr, winid, blocks, tc_id = create_tool_call_buffer(10)
+            local tab = vim.api.nvim_get_current_tabpage()
+
+            local folds = ChatFolds:new(bufnr, tab)
+            folds:sync_tool_call(tc_id, blocks)
+
+            -- Outer fold exists and is open
+            local outer_state = ChatFolds._get_fold_state(winid, 2)
+            assert.is_false(outer_state)
+
+            -- Line 7 is inside the outer fold (open), no separate inner fold
+            local inner_state = ChatFolds._get_fold_state(winid, 7)
+            assert.is_false(inner_state)
+
+            vim.api.nvim_win_close(winid, true)
+            vim.api.nvim_buf_delete(bufnr, { force = true })
+        end)
+
+        it("inner fold closed hides remainder, outer fold hides all", function()
+            setup_config({
+                tool_calls = { min_lines = 5, closed_by_default = false },
+            })
+            local bufnr, winid, blocks, tc_id = create_tool_call_buffer(10)
+            local tab = vim.api.nvim_get_current_tabpage()
+
+            local folds = ChatFolds:new(bufnr, tab)
+            folds:sync_tool_call(tc_id, blocks)
+
+            -- Close the outer fold
+            ChatFolds._set_fold_state(winid, 2, true)
+            local state = ChatFolds._get_fold_state(winid, 2)
+            assert.is_true(state) -- everything hidden
+
+            -- Open outer again → inner should still be closed
+            ChatFolds._set_fold_state(winid, 2, false)
+            local outer_state = ChatFolds._get_fold_state(winid, 2)
+            assert.is_false(outer_state)
+
+            local inner_state = ChatFolds._get_fold_state(winid, 7)
+            assert.is_true(inner_state) -- still closed
+
+            vim.api.nvim_win_close(winid, true)
+            vim.api.nvim_buf_delete(bufnr, { force = true })
+        end)
+
+        it("preview=false starts with both folds open", function()
+            setup_config({
+                tool_calls = {
+                    min_lines = 5,
+                    closed_by_default = false,
+                    preview = false,
+                },
+            })
+            local bufnr, winid, blocks, tc_id = create_tool_call_buffer(10)
+            local tab = vim.api.nvim_get_current_tabpage()
+
+            local folds = ChatFolds:new(bufnr, tab)
+            folds:sync_tool_call(tc_id, blocks)
+
+            -- Outer fold open
+            local outer_state = ChatFolds._get_fold_state(winid, 2)
+            assert.is_false(outer_state)
+
+            -- Inner fold also open (preview disabled)
+            local inner_state = ChatFolds._get_fold_state(winid, 7)
+            assert.is_false(inner_state)
+
+            vim.api.nvim_win_close(winid, true)
+            vim.api.nvim_buf_delete(bufnr, { force = true })
+        end)
+
+        it("per-kind preview=false overrides global preview=true", function()
+            setup_config({
+                tool_calls = {
+                    min_lines = 5,
+                    closed_by_default = false,
+                    preview = true,
+                    kinds = { execute = { preview = false } },
+                },
+            })
+            local bufnr, winid, blocks, tc_id = create_tool_call_buffer(10)
+            local tab = vim.api.nvim_get_current_tabpage()
+
+            local folds = ChatFolds:new(bufnr, tab)
+            folds:sync_tool_call(tc_id, blocks)
+
+            -- Inner fold open because execute kind has preview=false
+            local inner_state = ChatFolds._get_fold_state(winid, 7)
+            assert.is_false(inner_state)
+
+            vim.api.nvim_win_close(winid, true)
+            vim.api.nvim_buf_delete(bufnr, { force = true })
+        end)
+
+        it("stores min_lines on tool call fold", function()
+            setup_config({
+                tool_calls = { min_lines = 5 },
+            })
+            local bufnr, winid, blocks, tc_id = create_tool_call_buffer(10)
+            local tab = vim.api.nvim_get_current_tabpage()
+
+            local folds = ChatFolds:new(bufnr, tab)
+            folds:sync_tool_call(tc_id, blocks)
+
+            local fold = folds._tool_call_folds[tc_id]
+            assert.equal(5, fold.min_lines)
+
+            vim.api.nvim_win_close(winid, true)
+            vim.api.nvim_buf_delete(bufnr, { force = true })
+        end)
+    end)
+
     describe("capture and restore fold state", function()
         it("preserves user toggle across update", function()
             setup_config({
@@ -349,6 +517,41 @@ describe("agentic.ui.ChatFolds", function()
             -- Fold should remain closed because user closed it
             local new_state = ChatFolds._get_fold_state(winid, 2)
             assert.is_true(new_state)
+
+            vim.api.nvim_win_close(winid, true)
+            vim.api.nvim_buf_delete(bufnr, { force = true })
+        end)
+
+        it("preserves inner fold toggle across update", function()
+            setup_config({
+                tool_calls = { min_lines = 5, closed_by_default = false },
+            })
+            local bufnr, winid, blocks, tc_id = create_tool_call_buffer(10)
+            local tab = vim.api.nvim_get_current_tabpage()
+
+            local folds = ChatFolds:new(bufnr, tab)
+            folds:sync_tool_call(tc_id, blocks)
+
+            -- Inner fold at line 7 is closed by default. User opens it.
+            ChatFolds._set_fold_state(winid, 7, false)
+            local inner_state = ChatFolds._get_fold_state(winid, 7)
+            assert.is_false(inner_state)
+
+            -- Capture before update
+            folds:capture_tool_call_fold_state(tc_id, blocks)
+
+            local fold = folds._tool_call_folds[tc_id]
+            assert.is_false(fold.last_known_fold_state) -- outer open
+            assert.is_false(fold.last_known_inner_fold_state) -- inner open
+
+            -- Re-sync
+            folds:sync_tool_call(tc_id, blocks)
+
+            -- Both should remain open
+            local new_outer = ChatFolds._get_fold_state(winid, 2)
+            assert.is_false(new_outer)
+            local new_inner = ChatFolds._get_fold_state(winid, 7)
+            assert.is_false(new_inner)
 
             vim.api.nvim_win_close(winid, true)
             vim.api.nvim_buf_delete(bufnr, { force = true })
@@ -447,15 +650,18 @@ describe("agentic.ui.ChatFolds", function()
         end)
     end)
 
-    describe("_decide_default_state", function()
+    describe("_decide_default_states", function()
         it("uses last known state when available", function()
             --- @type agentic.ui.ChatFolds.ToolCallFold
             local fold = {
                 tool_call_id = "tc_1",
                 default_closed = false,
                 last_known_fold_state = true,
+                last_known_inner_fold_state = false,
             }
-            assert.is_true(ChatFolds._decide_default_state(fold))
+            local outer, inner = ChatFolds._decide_default_states(fold)
+            assert.is_true(outer)
+            assert.is_false(inner)
         end)
 
         it("falls back to default_closed when no last known state", function()
@@ -464,15 +670,45 @@ describe("agentic.ui.ChatFolds", function()
                 tool_call_id = "tc_1",
                 default_closed = true,
             }
-            assert.is_true(ChatFolds._decide_default_state(fold))
+            local outer, inner = ChatFolds._decide_default_states(fold)
+            assert.is_true(outer)
+            -- Inner defaults to closed (preview mode)
+            assert.is_true(inner)
         end)
 
-        it("defaults to open when nothing set", function()
+        it(
+            "defaults to open outer and closed inner when nothing set",
+            function()
+                --- @type agentic.ui.ChatFolds.ToolCallFold
+                local fold = {
+                    tool_call_id = "tc_1",
+                }
+                local outer, inner = ChatFolds._decide_default_states(fold)
+                assert.is_false(outer)
+                assert.is_true(inner)
+            end
+        )
+
+        it("inner defaults to open when preview is false", function()
             --- @type agentic.ui.ChatFolds.ToolCallFold
             local fold = {
                 tool_call_id = "tc_1",
+                preview = false,
             }
-            assert.is_false(ChatFolds._decide_default_state(fold))
+            local outer, inner = ChatFolds._decide_default_states(fold)
+            assert.is_false(outer)
+            assert.is_false(inner)
+        end)
+
+        it("last_known_inner_fold_state overrides preview=false", function()
+            --- @type agentic.ui.ChatFolds.ToolCallFold
+            local fold = {
+                tool_call_id = "tc_1",
+                preview = false,
+                last_known_inner_fold_state = true,
+            }
+            local _, inner = ChatFolds._decide_default_states(fold)
+            assert.is_true(inner)
         end)
     end)
 end)
