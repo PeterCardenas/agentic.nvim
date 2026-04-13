@@ -108,13 +108,15 @@ local function restore_with_conflict_check(
 end
 
 --- Show session picker using fzf-lua (with fallback to vim.ui.select)
---- @param items table[] List of session items with display and session_id fields
+--- @param build_items fun(): table[] Function that returns current session items
 --- @param on_choice fun(choice: table|nil) Callback when user selects an item
-local function show_fzf_picker(items, on_choice)
+--- @param on_delete fun(choice: table)|nil Callback when user requests deletion
+local function show_fzf_picker(build_items, on_choice, on_delete)
     local fzf = load_fzf_lua()
 
     if not fzf then
         -- Fallback to vim.ui.select if fzf-lua is not available
+        local items = build_items()
         vim.ui.select(items, {
             prompt = "Select session to restore:",
             format_item = function(item)
@@ -124,12 +126,54 @@ local function show_fzf_picker(items, on_choice)
         return
     end
 
-    local entries = {}
-    for i, item in ipairs(items) do
-        table.insert(entries, string.format("%d. %s", i, item.display))
+    -- Shared state: rebuilt each time the content function runs (initial + reload)
+    local current_items = {}
+
+    --- @param fzf_cb fun(entry: string|nil)
+    local function contents(fzf_cb)
+        current_items = build_items()
+        for i, item in ipairs(current_items) do
+            fzf_cb(string.format("%d. %s", i, item.display))
+        end
+        fzf_cb() -- EOF
     end
 
-    fzf.fzf_exec(entries, {
+    local actions = {
+        ["default"] = function(selected)
+            if not selected or #selected == 0 then
+                on_choice(nil)
+                return
+            end
+
+            local idx = tonumber(selected[1]:match("^(%d+)%."))
+            if idx and current_items[idx] then
+                on_choice(current_items[idx])
+                return
+            end
+            on_choice(nil)
+        end,
+    }
+
+    local fzf_opts = {}
+
+    if on_delete then
+        actions["ctrl-x"] = {
+            fn = function(selected)
+                if not selected or #selected == 0 then
+                    return
+                end
+
+                local idx = tonumber(selected[1]:match("^(%d+)%."))
+                if idx and current_items[idx] then
+                    on_delete(current_items[idx])
+                end
+            end,
+            reload = true,
+        }
+        fzf_opts["--header"] = "ctrl-x: delete session"
+    end
+
+    fzf.fzf_exec(contents, {
         prompt = "Select session to restore> ",
         winopts = {
             height = 0.4,
@@ -137,35 +181,17 @@ local function show_fzf_picker(items, on_choice)
             row = 0.5,
             col = 0.5,
         },
-        actions = {
-            ["default"] = function(selected)
-                if not selected or #selected == 0 then
-                    on_choice(nil)
-                    return
-                end
-
-                local idx = tonumber(selected[1]:match("^(%d+)%."))
-                if idx and items[idx] then
-                    on_choice(items[idx])
-                    return
-                end
-                on_choice(nil)
-            end,
-        },
+        fzf_opts = fzf_opts,
+        actions = actions,
     })
 end
 
---- Show session picker and restore selected session
---- @param tab_page_id integer
---- @param current_session agentic.SessionManager|nil
-function SessionRestore.show_picker(tab_page_id, current_session)
+--- Build session items from disk. list_sessions is synchronous despite
+--- the callback API, so the returned table is populated before this returns.
+--- @return table[] items
+local function build_session_items()
+    local items = {}
     ChatHistory.list_sessions(function(sessions)
-        if #sessions == 0 then
-            Logger.notify("No saved sessions found", vim.log.levels.INFO)
-            return
-        end
-
-        local items = {}
         for _, s in ipairs(sessions) do
             local date = os.date("%Y-%m-%d %H:%M", s.timestamp or 0)
             local title = (s.title or "(no title)"):gsub("\n", " ")
@@ -175,15 +201,38 @@ function SessionRestore.show_picker(tab_page_id, current_session)
                 session_id = s.session_id,
             })
         end
+    end)
+    return items
+end
 
-        show_fzf_picker(items, function(choice)
-            if choice then
-                restore_with_conflict_check(
-                    choice.session_id,
-                    tab_page_id,
-                    check_conflict(current_session)
+--- Show session picker and restore selected session
+--- @param tab_page_id integer
+--- @param current_session agentic.SessionManager|nil
+function SessionRestore.show_picker(tab_page_id, current_session)
+    local initial_items = build_session_items()
+    if #initial_items == 0 then
+        Logger.notify("No saved sessions found", vim.log.levels.INFO)
+        return
+    end
+
+    show_fzf_picker(build_session_items, function(choice)
+        if choice then
+            restore_with_conflict_check(
+                choice.session_id,
+                tab_page_id,
+                check_conflict(current_session)
+            )
+        end
+    end, function(choice)
+        ChatHistory.delete_session(choice.session_id, function(err)
+            if err then
+                Logger.notify(
+                    "Failed to delete session: " .. err,
+                    vim.log.levels.WARN
                 )
+                return
             end
+            Logger.notify("Session deleted", vim.log.levels.INFO)
         end)
     end)
 end

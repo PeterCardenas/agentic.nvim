@@ -340,6 +340,125 @@ describe("ChatHistory", function()
         end)
     end)
 
+    describe("delete_session", function()
+        local temp_dir
+        local original_delete_storage
+
+        before_each(function()
+            stub_cwd()
+            temp_dir = vim.fn.tempname()
+            vim.fn.mkdir(temp_dir, "p")
+            local Config = require("agentic.config")
+            original_delete_storage = Config.session_restore.storage_path
+            Config.session_restore.storage_path = temp_dir
+        end)
+
+        after_each(function()
+            vim.fn.delete(temp_dir, "rf")
+            local Config = require("agentic.config")
+            Config.session_restore.storage_path = original_delete_storage
+        end)
+
+        local function create_session_file(session_id)
+            local file_path = ChatHistory.get_file_path(session_id)
+            local dir = vim.fn.fnamemodify(file_path, ":h")
+            vim.fn.mkdir(dir, "p")
+            local f = io.open(file_path, "w")
+            assert.is_not_nil(f)
+            --- @cast f file*
+            f:write(vim.json.encode({
+                session_id = session_id,
+                title = "Test " .. session_id,
+                timestamp = os.time(),
+                messages = {},
+            }))
+            f:close()
+            return file_path
+        end
+
+        it("deletes session file and calls callback with nil", function()
+            local file_path = create_session_file("delete-me")
+            assert.is_not_nil(vim.uv.fs_stat(file_path))
+
+            local result_err = "not-called"
+            ChatHistory.delete_session("delete-me", function(err)
+                result_err = err
+            end)
+
+            assert.is_nil(result_err)
+            assert.is_nil(vim.uv.fs_stat(file_path))
+        end)
+
+        it("calls callback with error when file does not exist", function()
+            local result_err = nil
+            ChatHistory.delete_session("nonexistent", function(err)
+                result_err = err
+            end)
+
+            assert.is_not_nil(result_err)
+        end)
+
+        it("works without callback", function()
+            assert.has_no_errors(function()
+                ChatHistory.delete_session("nonexistent")
+            end)
+        end)
+
+        it("works without callback on existing file", function()
+            create_session_file("no-callback")
+
+            assert.has_no_errors(function()
+                ChatHistory.delete_session("no-callback")
+            end)
+
+            local path = ChatHistory.get_file_path("no-callback")
+            assert.is_nil(vim.uv.fs_stat(path))
+        end)
+
+        it("only deletes the specified session file", function()
+            local keep_path = create_session_file("session-keep")
+            local delete_path = create_session_file("session-delete")
+
+            ChatHistory.delete_session("session-delete", function(_err) end)
+
+            assert.is_not_nil(vim.uv.fs_stat(keep_path))
+            assert.is_nil(vim.uv.fs_stat(delete_path))
+        end)
+
+        it("deleted session no longer appears in list_sessions", function()
+            create_session_file("session-a")
+            create_session_file("session-b")
+
+            ChatHistory.delete_session("session-a", function(_err) end)
+
+            local sessions = nil
+            ChatHistory.list_sessions(function(result)
+                sessions = result
+            end)
+
+            assert.is_not_nil(sessions)
+            --- @cast sessions agentic.ui.ChatHistory.SessionMeta[]
+            assert.equal(1, #sessions)
+            assert.equal("session-b", sessions[1].session_id)
+        end)
+
+        it("returns error on double deletion", function()
+            create_session_file("double-delete")
+
+            local first_err = "not-called"
+            ChatHistory.delete_session("double-delete", function(err)
+                first_err = err
+            end)
+            assert.is_nil(first_err)
+
+            local second_err = nil
+            ChatHistory.delete_session("double-delete", function(err)
+                second_err = err
+            end)
+            assert.is_not_nil(second_err)
+        end)
+    end)
+
     describe("list_sessions", function()
         before_each(function()
             stub_cwd()

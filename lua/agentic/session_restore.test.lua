@@ -282,6 +282,338 @@ describe("SessionRestore", function()
         end)
     end)
 
+    describe("session deletion (fzf-lua)", function()
+        --- @type TestSpy
+        local fzf_exec_spy
+        --- @type TestStub
+        local chat_history_delete_stub
+
+        before_each(function()
+            fzf_exec_spy = spy.new(function() end)
+            package.loaded["fzf-lua"] = {
+                fzf_exec = fzf_exec_spy,
+            }
+
+            chat_history_delete_stub = spy.stub(ChatHistory, "delete_session")
+        end)
+
+        after_each(function()
+            package.loaded["fzf-lua"] = nil
+            chat_history_delete_stub:revert()
+        end)
+
+        local function get_fzf_opts(call_index)
+            return fzf_exec_spy.calls[call_index or 1][2]
+        end
+
+        local function get_fzf_actions(call_index)
+            return get_fzf_opts(call_index).actions
+        end
+
+        --- Simulate fzf calling the content function to populate items
+        local function populate_items(call_index)
+            local contents_fn = fzf_exec_spy.calls[call_index or 1][1]
+            local entries = {}
+            contents_fn(function(entry)
+                if entry then
+                    table.insert(entries, entry)
+                end
+            end)
+            return entries
+        end
+
+        it("passes content function to fzf_exec", function()
+            setup_list_stub()
+            SessionRestore.show_picker(1, nil)
+
+            assert.equal("function", type(fzf_exec_spy.calls[1][1]))
+        end)
+
+        it(
+            "registers ctrl-x action with reload=true and header hint",
+            function()
+                setup_list_stub()
+                SessionRestore.show_picker(1, nil)
+
+                local opts = get_fzf_opts()
+                local ctrl_x = opts.actions["ctrl-x"]
+                assert.is_table(ctrl_x)
+                assert.equal("function", type(ctrl_x.fn))
+                assert.is_true(ctrl_x.reload)
+                assert.equal(
+                    "ctrl-x: delete session",
+                    opts.fzf_opts["--header"]
+                )
+            end
+        )
+
+        it("calls delete_session with correct session_id on ctrl-x", function()
+            setup_list_stub()
+            chat_history_delete_stub:invokes(function(_sid, callback)
+                callback(nil)
+            end)
+
+            SessionRestore.show_picker(1, nil)
+
+            -- Populate items so actions can resolve indices
+            populate_items()
+
+            local actions = get_fzf_actions()
+            actions["ctrl-x"].fn({
+                "1. 2024-01-01 09:20 - First chat",
+            })
+
+            assert.spy(chat_history_delete_stub).was.called(1)
+            assert.equal("session-1", chat_history_delete_stub.calls[1][1])
+        end)
+
+        it("deletes the correct session when second item selected", function()
+            setup_list_stub()
+            chat_history_delete_stub:invokes(function(_sid, callback)
+                callback(nil)
+            end)
+
+            SessionRestore.show_picker(1, nil)
+            populate_items()
+
+            local actions = get_fzf_actions()
+            actions["ctrl-x"].fn({
+                "2. 2024-01-02 09:20 - Second chat",
+            })
+
+            assert.equal("session-2", chat_history_delete_stub.calls[1][1])
+        end)
+
+        it("reloads in-place instead of re-opening picker", function()
+            setup_list_stub()
+            chat_history_delete_stub:invokes(function(_sid, callback)
+                callback(nil)
+            end)
+
+            SessionRestore.show_picker(1, nil)
+            populate_items()
+
+            local actions = get_fzf_actions()
+            actions["ctrl-x"].fn({
+                "1. 2024-01-01 09:20 - First chat",
+            })
+
+            -- fzf_exec called only ONCE (reload is handled by fzf)
+            assert.equal(1, fzf_exec_spy.call_count)
+            -- Verify action has reload flag for fzf
+            assert.is_true(actions["ctrl-x"].reload)
+        end)
+
+        it("shows success notification after deletion", function()
+            setup_list_stub()
+            chat_history_delete_stub:invokes(function(_sid, callback)
+                callback(nil)
+            end)
+
+            SessionRestore.show_picker(1, nil)
+            populate_items()
+
+            local actions = get_fzf_actions()
+            actions["ctrl-x"].fn({
+                "1. 2024-01-01 09:20 - First chat",
+            })
+
+            assert.is_true(
+                logger_notify_stub:called_with(
+                    "Session deleted",
+                    vim.log.levels.INFO
+                )
+            )
+        end)
+
+        it("shows warning on delete failure", function()
+            setup_list_stub()
+            chat_history_delete_stub:invokes(function(_sid, callback)
+                callback("Permission denied")
+            end)
+
+            SessionRestore.show_picker(1, nil)
+            populate_items()
+
+            local actions = get_fzf_actions()
+            actions["ctrl-x"].fn({
+                "1. 2024-01-01 09:20 - First chat",
+            })
+
+            assert.spy(logger_notify_stub).was.called(1)
+            assert.truthy(
+                logger_notify_stub.calls[1][1]:match("Permission denied")
+            )
+            assert.equal(vim.log.levels.WARN, logger_notify_stub.calls[1][2])
+        end)
+
+        it("does nothing when ctrl-x with empty selection", function()
+            setup_list_stub()
+
+            SessionRestore.show_picker(1, nil)
+            populate_items()
+
+            local actions = get_fzf_actions()
+            actions["ctrl-x"].fn({})
+
+            assert.spy(chat_history_delete_stub).was.called(0)
+        end)
+
+        it("does nothing when ctrl-x with nil selection", function()
+            setup_list_stub()
+
+            SessionRestore.show_picker(1, nil)
+            populate_items()
+
+            local actions = get_fzf_actions()
+            actions["ctrl-x"].fn(nil)
+
+            assert.spy(chat_history_delete_stub).was.called(0)
+        end)
+
+        it("does nothing when ctrl-x selection has no index match", function()
+            setup_list_stub()
+
+            SessionRestore.show_picker(1, nil)
+            populate_items()
+
+            local actions = get_fzf_actions()
+            actions["ctrl-x"].fn({ "not a valid entry" })
+
+            assert.spy(chat_history_delete_stub).was.called(0)
+        end)
+
+        it("does nothing when ctrl-x index is out of range", function()
+            setup_list_stub()
+
+            SessionRestore.show_picker(1, nil)
+            populate_items()
+
+            local actions = get_fzf_actions()
+            actions["ctrl-x"].fn({ "99. some session" })
+
+            assert.spy(chat_history_delete_stub).was.called(0)
+        end)
+
+        it("default action still works alongside ctrl-x", function()
+            local mock_session = create_mock_session()
+            setup_list_stub()
+            setup_load_stub(mock_history)
+            setup_registry_stub(mock_session)
+
+            SessionRestore.show_picker(1, nil)
+            populate_items()
+
+            local actions = get_fzf_actions()
+            actions["default"]({
+                "1. 2024-01-01 09:20 - First chat",
+            })
+
+            assert.spy(chat_history_load_stub).was.called(1)
+            assert.equal("session-1", chat_history_load_stub.calls[1][1])
+        end)
+
+        it("default action handles empty selection in fzf", function()
+            setup_list_stub()
+
+            SessionRestore.show_picker(1, nil)
+            populate_items()
+
+            local actions = get_fzf_actions()
+            actions["default"]({})
+
+            assert.spy(chat_history_load_stub).was.called(0)
+        end)
+
+        it("default action handles invalid index pattern in fzf", function()
+            setup_list_stub()
+
+            SessionRestore.show_picker(1, nil)
+            populate_items()
+
+            local actions = get_fzf_actions()
+            actions["default"]({ "no index here" })
+
+            assert.spy(chat_history_load_stub).was.called(0)
+        end)
+
+        it(
+            "content function returns fresh items on simulated reload",
+            function()
+                local call_count = 0
+                chat_history_list_stub:invokes(function(callback)
+                    call_count = call_count + 1
+                    if call_count <= 2 then
+                        callback(test_sessions)
+                    else
+                        -- After deletion: only second session remains
+                        callback({ test_sessions[2] })
+                    end
+                end)
+                chat_history_delete_stub:invokes(function(_sid, callback)
+                    callback(nil)
+                end)
+
+                SessionRestore.show_picker(1, nil)
+
+                -- Initial content generation
+                local entries1 = populate_items()
+                assert.equal(2, #entries1)
+
+                -- Delete first session
+                local actions = get_fzf_actions()
+                actions["ctrl-x"].fn({
+                    "1. 2024-01-01 09:20 - First chat",
+                })
+
+                -- Simulate fzf reload: call content function again
+                local entries2 = populate_items()
+                assert.equal(1, #entries2)
+                assert.truthy(entries2[1]:match("Second chat"))
+            end
+        )
+
+        it("conflict detection works after reload", function()
+            local current = create_mock_session({
+                chat_history = {
+                    messages = { { type = "user" } },
+                },
+            })
+            setup_list_stub()
+            setup_load_stub(mock_history)
+            chat_history_delete_stub:invokes(function(_sid, callback)
+                callback(nil)
+            end)
+
+            SessionRestore.show_picker(
+                42,
+                current --[[@as agentic.SessionManager]]
+            )
+
+            -- Populate items and delete one
+            populate_items()
+            local actions = get_fzf_actions()
+            actions["ctrl-x"].fn({
+                "1. 2024-01-01 09:20 - First chat",
+            })
+
+            -- Simulate reload and then select
+            populate_items()
+            actions["default"]({
+                "1. 2024-01-01 09:20 - First chat",
+            })
+
+            -- Conflict dialog goes through fzf_exec (mock is active)
+            -- fzf_exec called twice: session picker + conflict dialog
+            assert.equal(2, fzf_exec_spy.call_count)
+            -- Verify second call is the conflict dialog
+            local conflict_opts = get_fzf_opts(2)
+            assert.truthy(
+                conflict_opts.prompt:match("Current session has messages")
+            )
+        end)
+    end)
+
     describe("conflict detection", function()
         it("detects no conflict when current_session is nil", function()
             setup_list_stub()
