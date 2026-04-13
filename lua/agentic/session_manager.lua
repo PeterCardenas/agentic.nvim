@@ -1061,6 +1061,11 @@ function SessionManager:_handle_input_submit(input_text)
     self.message_writer:record_prompt_position()
     self.message_writer:write_message(user_message)
 
+    -- Force auto-scroll ON so the response is always visible.
+    -- Late session updates (e.g. background process acknowledgements after a
+    -- previous turn) can leave _should_auto_scroll in a stale state.
+    self.message_writer:enable_auto_scroll()
+
     --- @type agentic.ui.ChatHistory.UserMessage
     local user_msg = {
         type = "user",

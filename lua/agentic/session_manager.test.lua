@@ -655,6 +655,7 @@ describe("agentic.SessionManager", function()
                 message_writer = {
                     write_message = write_message_spy,
                     record_prompt_position = function() end,
+                    enable_auto_scroll = function() end,
                 },
                 status_animation = {
                     start = function() end,

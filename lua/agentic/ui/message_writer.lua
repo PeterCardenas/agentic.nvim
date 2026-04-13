@@ -425,6 +425,13 @@ function MessageWriter:_fix_scroll_after_fold()
     end
 end
 
+--- Force-enable auto-scroll for the current and subsequent writes.
+--- Call this at turn boundaries (e.g. after writing the user prompt)
+--- to guarantee new content is visible, regardless of prior scroll state.
+function MessageWriter:enable_auto_scroll()
+    self._should_auto_scroll = true
+end
+
 --- @param bufnr integer Buffer number to scroll
 function MessageWriter:_auto_scroll(bufnr)
     if self._should_auto_scroll ~= true then
