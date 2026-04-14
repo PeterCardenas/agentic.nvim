@@ -324,12 +324,17 @@ function Agentic.setup(opts)
         desc = "Cleanup Agentic processes on exit",
     })
 
-    -- Cleanup specific tab instance when tab is closed
+    -- Cleanup sessions whose tabpage no longer exists.
+    -- TabClosed ev.match gives the tab page number (position), not the handle,
+    -- so we scan all sessions instead of using ev.match as a key.
     vim.api.nvim_create_autocmd("TabClosed", {
         group = cleanup_group,
-        callback = function(ev)
-            local tab_id = tonumber(ev.match)
-            SessionRegistry.destroy_session(tab_id)
+        callback = function()
+            for tab_id, _ in pairs(SessionRegistry.sessions) do
+                if not vim.api.nvim_tabpage_is_valid(tab_id) then
+                    SessionRegistry.destroy_session(tab_id)
+                end
+            end
         end,
         desc = "Cleanup Agentic processes on tab close",
     })
