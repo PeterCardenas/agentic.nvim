@@ -14,9 +14,9 @@ local function load_fzf_lua()
 end
 
 --- @class agentic.SessionRegistry
---- @field sessions table<integer, agentic.SessionManager|nil> Weak map: tab_page_id -> SessionManager instance
+--- @field sessions table<integer, agentic.SessionManager|nil> Map: tab_page_id -> SessionManager instance
 local SessionRegistry = {
-    sessions = setmetatable({}, { __mode = "v" }),
+    sessions = {},
 }
 
 --- @param tab_page_id integer|nil

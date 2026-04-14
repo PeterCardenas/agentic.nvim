@@ -394,13 +394,20 @@ describe("agentic.SessionRegistry", function()
         end)
     end)
 
-    describe("sessions weak table", function()
-        it("uses weak value metatable", function()
-            local metatable = getmetatable(SessionRegistry.sessions)
+    describe("sessions table", function()
+        it(
+            "uses strong references to prevent GC from dropping active sessions",
+            function()
+                local metatable = getmetatable(SessionRegistry.sessions)
 
-            assert.is_not_nil(metatable)
-            assert.equal("v", metatable.__mode)
-        end)
+                -- sessions table must NOT use weak values; GC would silently
+                -- drop sessions whose widget windows are still visible, causing
+                -- toggle to create duplicate windows instead of hiding.
+                if metatable then
+                    assert.is_not.equal("v", metatable.__mode)
+                end
+            end
+        )
     end)
 
     describe("select_provider", function()
