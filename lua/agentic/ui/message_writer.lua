@@ -473,13 +473,16 @@ function MessageWriter:write_tool_call_block(tool_call_block)
         -- Always add a leading blank line for spacing the previous message chunk
         self:_append_lines({ "" })
 
-        local start_row = vim.api.nvim_buf_line_count(bufnr)
         local lines, highlight_ranges =
             self:_prepare_block_lines(tool_call_block)
 
         self:_append_lines(lines)
 
         local end_row = vim.api.nvim_buf_line_count(bufnr) - 1
+        -- Derive start_row from end_row after the append to handle the
+        -- empty-buffer edge case where _append_lines replaces from line 0
+        -- instead of appending.
+        local start_row = end_row - #lines + 1
 
         self:_apply_block_highlights(
             bufnr,
