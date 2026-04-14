@@ -24,6 +24,7 @@ local Logger = require("agentic.utils.logger")
 --- Cursor-specific adapter that extends ACPClient with Cursor-specific behaviors
 --- @class agentic.acp.CursorACPAdapter : agentic.acp.ACPClient
 --- @field _available_commands_updates table<string, table> Cursor sends available commands before session starts, indexed by session ID, to be processed after session creation
+--- @field _chunk_stream_started table<string, table<string, boolean>> Track whether a chunk stream started per session and chunk type
 local CursorACPAdapter = setmetatable({}, { __index = ACPClient })
 CursorACPAdapter.__index = CursorACPAdapter
 
@@ -39,6 +40,7 @@ function CursorACPAdapter:new(config, on_ready)
 
     -- Initialize session-indexed storage for available commands
     self._available_commands_updates = {}
+    self._chunk_stream_started = {}
 
     return self
 end
@@ -74,6 +76,7 @@ end
 function CursorACPAdapter:__handle_session_update(params)
     local update = params.update
     local update_type = update.sessionUpdate
+    local session_id = params.sessionId
 
     if update_type == "available_commands_update" then
         -- Store for later processing if session not yet subscribed
@@ -88,24 +91,36 @@ function CursorACPAdapter:__handle_session_update(params)
         end
     end
 
-    -- Cursor prefixes responses and pre-tool-call separators with leading
-    -- newlines (single \n before text, triple \n\n\n before tool calls).
-    -- Strip all leading newlines to avoid blank lines in the chat buffer.
+    -- Cursor may prefix the *first* streamed chunk with leading newlines.
+    -- Normalize that only at stream start; stripping every chunk drops
+    -- legitimate newline-only chunks ("\n", "\n\n"), which breaks markdown
+    -- code blocks and paragraph spacing.
     if
         update_type == "agent_message_chunk"
         or update_type == "agent_thought_chunk"
     then
         local content = update.content
+        local by_session = self._chunk_stream_started[session_id] or {}
+        local stream_started = by_session[update_type] == true
         if
             content
             and content.type == "text"
             and type(content.text) == "string"
         then
-            content.text = content.text:gsub("^\n+", "")
-            if content.text == "" then
-                return
+            if not stream_started then
+                content.text = content.text:gsub("^\n+", "")
+                if content.text == "" then
+                    by_session[update_type] = true
+                    self._chunk_stream_started[session_id] = by_session
+                    return
+                end
             end
         end
+        by_session[update_type] = true
+        self._chunk_stream_started[session_id] = by_session
+    elseif session_id and self._chunk_stream_started[session_id] then
+        -- A non-chunk update means the previous stream ended; reset.
+        self._chunk_stream_started[session_id] = nil
     end
 
     ACPClient.__handle_session_update(self, params)
