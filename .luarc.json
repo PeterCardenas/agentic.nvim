@@ -6,7 +6,6 @@
   },
   "diagnostics": {
     "disable": [
-      "missing-fields",
       "need-check-nil",
       "param-type-mismatch",
       "preferred-local-alias",

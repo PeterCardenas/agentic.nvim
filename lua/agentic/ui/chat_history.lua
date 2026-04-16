@@ -44,15 +44,12 @@ ChatHistory.__index = ChatHistory
 
 --- @return agentic.ui.ChatHistory
 function ChatHistory:new()
-    --- @type agentic.ui.ChatHistory
-    local instance = {
+    local instance = setmetatable({
         session_id = nil,
         timestamp = os.time(),
         messages = {},
         title = "",
-    }
-
-    setmetatable(instance, self)
+    }, self)
     return instance
 end
 

@@ -35,7 +35,7 @@ describe("object utils", function()
     it(
         "merges config with default config with keymaps overrides instead of merge",
         function()
-            --- @type agentic.UserConfig
+            --- @type table<string, any>
             local default_config = {
                 option1 = true,
                 option2 = {

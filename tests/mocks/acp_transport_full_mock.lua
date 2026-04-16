@@ -31,7 +31,6 @@ local NEXT_PROMPT_ID_KEY = "_next_prompt_request_id"
 --- @param callbacks agentic.acp.TransportCallbacks
 --- @return agentic.acp.ACPTransportInstance
 function M.create_stdio_transport(config, callbacks)
-    --- @type agentic.acp.ACPTransportFullMockInstance
     local transport = {
         stdin = nil,
         stdout = nil,
@@ -160,7 +159,9 @@ function M.create_stdio_transport(config, callbacks)
         })
     end
 
-    M.instance = transport
+    --- @type agentic.acp.ACPTransportFullMockInstance
+    local instance = transport
+    M.instance = instance
 
     return transport
 end

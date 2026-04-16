@@ -1,8 +1,4 @@
 --- Mock implementation of agentic.acp.ACPTransportModule for testing
---- @class (partial) agentic.acp.ACPTransportInstance
---- @field _started? boolean
---- @field _stopped? boolean
----
 --- @class agentic.acp.ACPTransportModuleMock
 local M = {}
 
@@ -11,7 +7,6 @@ local M = {}
 --- @param callbacks agentic.acp.TransportCallbacks
 --- @return agentic.acp.ACPTransportInstance
 function M.create_stdio_transport(config, callbacks)
-    --- @type agentic.acp.ACPTransportInstance
     local transport = {
         stdin = nil,
         stdout = nil,

@@ -3,6 +3,15 @@ local Logger = require("agentic.utils.logger")
 --- @class agentic.utils.BufHelpers
 local BufHelpers = {}
 
+--- @class agentic.utils.BufHelpers.KeymapOpts
+--- @field buffer? integer
+--- @field desc? string
+--- @field nowait? boolean
+--- @field silent? boolean
+--- @field noremap? boolean
+--- @field expr? boolean
+--- @field remap? boolean
+
 --- Executes a callback with the buffer set to modifiable.
 --- Returns false when the buffer is invalid or the callback errors.
 --- Otherwise returns the callback's own return value.
@@ -62,9 +71,9 @@ end
 --- @param mode string|string[]
 --- @param lhs string
 --- @param rhs string|fun():any
---- @param opts vim.keymap.set.Opts|nil
+--- @param opts agentic.utils.BufHelpers.KeymapOpts|nil
 function BufHelpers.keymap_set(bufnr, mode, lhs, rhs, opts)
-    --- @class vim.keymap.set.Opts
+    --- @type agentic.utils.BufHelpers.KeymapOpts
     local resolved = opts or {}
     resolved.buffer = bufnr
     vim.keymap.set(mode, lhs, rhs, resolved)
