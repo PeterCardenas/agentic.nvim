@@ -287,6 +287,7 @@ function ACPClient:_handle_message(message)
     -- Check if this is a notification (has method but no id, or has both method and id for notifications)
     if message.method and not message.result and not message.error then
         -- This is a notification
+        --- @diagnostic disable-next-line: param-type-mismatch
         self:_handle_notification(message.id, message.method, message.params)
     elseif message.id and (message.result or message.error) then
         local callback = self.callbacks[message.id]

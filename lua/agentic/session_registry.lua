@@ -23,9 +23,10 @@ local SessionRegistry = {
 --- @param callback fun(session: agentic.SessionManager)|nil
 --- @return agentic.SessionManager|nil session valid session instance or nil on failure
 function SessionRegistry.get_session_for_tab_page(tab_page_id, callback)
-    tab_page_id = tab_page_id ~= nil and tab_page_id
+    local resolved_tab_page_id = tab_page_id ~= nil and tab_page_id
         or vim.api.nvim_get_current_tabpage()
-    local instance = SessionRegistry.sessions[tab_page_id]
+    --- @cast resolved_tab_page_id integer
+    local instance = SessionRegistry.sessions[resolved_tab_page_id]
 
     if not instance then
         if not ACPHealth.check_configured_provider() then
@@ -35,9 +36,9 @@ function SessionRegistry.get_session_for_tab_page(tab_page_id, callback)
 
         local SessionManager = require("agentic.session_manager")
 
-        instance = SessionManager:new(tab_page_id) --[[@as agentic.SessionManager|nil]]
+        instance = SessionManager:new(resolved_tab_page_id)
         if instance ~= nil then
-            SessionRegistry.sessions[tab_page_id] = instance
+            SessionRegistry.sessions[resolved_tab_page_id] = instance
         end
     end
 
@@ -169,6 +170,7 @@ function SessionRegistry.select_provider(on_selected)
 
                 for _, provider in ipairs(sorted_providers) do
                     if format_provider(provider) == selected[1] then
+                        --- @cast provider.name agentic.UserConfig.ProviderName
                         on_selected(provider.name)
                         return
                     end

@@ -1,4 +1,4 @@
---- @diagnostic disable: need-check-nil
+--- @diagnostic disable: need-check-nil, param-type-mismatch
 local assert = require("tests.helpers.assert")
 local DiagnosticsContext = require("agentic.ui.diagnostics_context")
 

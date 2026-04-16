@@ -302,6 +302,7 @@ function ChatWidget:_submit_input()
         end
     end
 
+    --- @diagnostic disable-next-line: param-type-mismatch
     self.on_submit_input(prompt)
 
     for name, _ in pairs(self.buf_nrs) do

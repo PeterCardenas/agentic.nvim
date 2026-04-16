@@ -112,6 +112,7 @@ function DiagnosticsContext.format_diagnostics(diagnostics, chat_width)
         end
 
         vim.list_extend(xml_lines, {
+            --- @diagnostic disable-next-line: param-type-mismatch
             string.format("<file>%s</file>", escape_xml(absolute_file_path)),
             string.format("<line>%d</line>", line),
             string.format("<column>%d</column>", column),

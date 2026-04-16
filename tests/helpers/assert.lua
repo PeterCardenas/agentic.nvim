@@ -111,7 +111,9 @@ local function create_spy_chain(spy_or_stub)
                 end
             end,
             called_with = function(...)
-                expect.equality(spy_or_stub:called_with(...), true)
+                --- @type fun(self: TestSpy|TestStub, ...: any): boolean
+                local called_with = spy_or_stub.called_with
+                expect.equality(called_with(spy_or_stub, ...), true)
             end,
         },
     }

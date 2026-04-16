@@ -258,9 +258,11 @@ function SessionManager:_on_session_update(update)
     -- order the IF blocks in order of likeliness to be called for performance
     if update.sessionUpdate == "plan" then
         if Config.windows.todos.display then
+            --- @diagnostic disable-next-line: param-type-mismatch
             self.todo_list:render(update.entries)
         end
     elseif update.sessionUpdate == "agent_message_chunk" then
+        --- @cast update agentic.acp.AgentMessageChunk
         self.message_writer:write_message_chunk(update)
         self.status_animation:start("generating")
 
@@ -273,6 +275,7 @@ function SessionManager:_on_session_update(update)
             })
         end
     elseif update.sessionUpdate == "agent_thought_chunk" then
+        --- @cast update agentic.acp.AgentThoughtChunk
         self.message_writer:write_message_chunk(update)
         self.status_animation:start("thinking")
 
@@ -285,6 +288,7 @@ function SessionManager:_on_session_update(update)
             })
         end
     elseif update.sessionUpdate == "available_commands_update" then
+        --- @diagnostic disable-next-line: param-type-mismatch
         SlashCommands.setCommands(update.availableCommands)
     elseif update.sessionUpdate == "current_mode_update" then
         -- only for legacy modes, not for config_options
@@ -293,9 +297,11 @@ function SessionManager:_on_session_update(update)
                 update.currentModeId
             )
         then
+            --- @diagnostic disable-next-line: param-type-mismatch
             self:_set_mode_to_chat_header(update.currentModeId)
         end
     elseif update.sessionUpdate == "config_option_update" then
+        --- @diagnostic disable-next-line: param-type-mismatch
         self:_handle_new_config_options(update.configOptions)
     elseif update.sessionUpdate == "usage_update" then
         -- Usage updates contain token/cost information - currently informational only
@@ -1252,6 +1258,7 @@ function SessionManager:_handle_input_submit(input_text)
 
         local DiagnosticsContext = require("agentic.ui.diagnostics_context")
 
+        --- @diagnostic disable-next-line: param-type-mismatch
         local formatted_diagnostics =
             DiagnosticsContext.format_diagnostics(diagnostics, chat_width)
 

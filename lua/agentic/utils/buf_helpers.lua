@@ -85,7 +85,7 @@ end
 --- @param keymaps agentic.UserConfig.KeymapValue
 --- @param bufnr integer
 --- @param callback fun():any
---- @param opts vim.keymap.set.Opts|nil
+--- @param opts agentic.utils.BufHelpers.KeymapOpts|nil
 function BufHelpers.multi_keymap_set(keymaps, bufnr, callback, opts)
     if type(keymaps) == "string" then
         keymaps = { keymaps }
@@ -104,6 +104,7 @@ function BufHelpers.multi_keymap_set(keymaps, bufnr, callback, opts)
             keymap = key --[[@as string]]
         end
 
+        --- @diagnostic disable-next-line: param-type-mismatch
         BufHelpers.keymap_set(bufnr, modes, keymap, callback, opts)
     end
 end

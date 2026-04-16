@@ -43,12 +43,13 @@ function FilePicker:new(bufnr)
 
     --- @type agentic.ui.FilePicker
     local instance = setmetatable({ _files = {} }, self)
+    --- @diagnostic disable-next-line: param-type-mismatch
     instance:_setup_completion(bufnr)
     return instance
 end
 
 --- Sets up omnifunc completion and @ trigger detection
---- @param bufnr number
+--- @param bufnr integer
 function FilePicker:_setup_completion(bufnr)
     vim.bo[bufnr].omnifunc =
         "v:lua.require'agentic.ui.file_picker'.complete_func"

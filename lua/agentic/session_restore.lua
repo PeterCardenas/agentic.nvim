@@ -343,6 +343,7 @@ function SessionRestore.replay_messages(writer, messages)
             writer:record_prompt_position()
             writer:write_message(user_message)
         elseif msg.type == "agent" then
+            --- @diagnostic disable-next-line: param-type-mismatch
             local agent_message = ACPPayloads.generate_agent_message(msg.text)
             writer:write_message(agent_message)
         elseif msg.type == "thought" then

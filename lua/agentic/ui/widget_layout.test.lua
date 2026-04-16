@@ -1,4 +1,4 @@
---- @diagnostic disable: need-check-nil
+--- @diagnostic disable: need-check-nil, param-type-mismatch
 local assert = require("tests.helpers.assert")
 local spy = require("tests.helpers.spy")
 local WidgetLayout = require("agentic.ui.widget_layout")

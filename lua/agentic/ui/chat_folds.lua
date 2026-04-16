@@ -481,6 +481,7 @@ function ChatFolds:capture_visible_fold_states(tool_call_blocks)
             )
 
             if body_start then
+                --- @diagnostic disable-next-line: param-type-mismatch
                 local outer_state = ChatFolds._get_fold_state(winid, body_start)
                 if outer_state ~= nil then
                     fold.last_known_fold_state = outer_state
@@ -490,6 +491,7 @@ function ChatFolds:capture_visible_fold_states(tool_call_blocks)
                 if outer_state == false and fold.min_lines and body_end then
                     local inner_start = body_start + fold.min_lines
                     if inner_start <= body_end then
+                        --- @diagnostic disable-next-line: param-type-mismatch
                         local inner_state =
                             ChatFolds._get_fold_state(winid, inner_start)
                         if inner_state ~= nil then
@@ -527,6 +529,7 @@ function ChatFolds:capture_tool_call_fold_state(tool_call_id, tool_call_blocks)
     end
 
     local winid = winids[1]
+    --- @diagnostic disable-next-line: param-type-mismatch
     local outer_state = ChatFolds._get_fold_state(winid, body_start)
     if outer_state ~= nil then
         fold.last_known_fold_state = outer_state
@@ -536,6 +539,7 @@ function ChatFolds:capture_tool_call_fold_state(tool_call_id, tool_call_blocks)
     if outer_state == false and fold.min_lines and body_end then
         local inner_start = body_start + fold.min_lines
         if inner_start <= body_end then
+            --- @diagnostic disable-next-line: param-type-mismatch
             local inner_state = ChatFolds._get_fold_state(winid, inner_start)
             if inner_state ~= nil then
                 fold.last_known_inner_fold_state = inner_state

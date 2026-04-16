@@ -485,27 +485,39 @@ function M.setup_diff_navigation_keymaps(buf_nrs)
     local diff_keymaps = Config.keymaps.diff_preview
 
     for _, bufnr in pairs(buf_nrs) do
-        BufHelpers.keymap_set(bufnr, "n", diff_keymaps.next_hunk, function()
-            local diff_bufnr = M.get_active_diff_buffer()
-            if not diff_bufnr then
-                Logger.notify("No active diff preview", vim.log.levels.INFO)
-                return
-            end
-            HunkNavigation.navigate_next(diff_bufnr)
-        end, {
-            desc = "Go to next hunk - Agentic DiffPreview",
-        })
+        BufHelpers.keymap_set(
+            bufnr,
+            "n",
+            diff_keymaps.next_hunk,
+            function()
+                local diff_bufnr = M.get_active_diff_buffer()
+                if not diff_bufnr then
+                    Logger.notify("No active diff preview", vim.log.levels.INFO)
+                    return
+                end
+                HunkNavigation.navigate_next(diff_bufnr)
+            end,
+            {
+                desc = "Go to next hunk - Agentic DiffPreview",
+            }
+        )
 
-        BufHelpers.keymap_set(bufnr, "n", diff_keymaps.prev_hunk, function()
-            local diff_bufnr = M.get_active_diff_buffer()
-            if not diff_bufnr then
-                Logger.notify("No active diff preview", vim.log.levels.INFO)
-                return
-            end
-            HunkNavigation.navigate_prev(diff_bufnr)
-        end, {
-            desc = "Go to previous hunk - Agentic DiffPreview",
-        })
+        BufHelpers.keymap_set(
+            bufnr,
+            "n",
+            diff_keymaps.prev_hunk,
+            function()
+                local diff_bufnr = M.get_active_diff_buffer()
+                if not diff_bufnr then
+                    Logger.notify("No active diff preview", vim.log.levels.INFO)
+                    return
+                end
+                HunkNavigation.navigate_prev(diff_bufnr)
+            end,
+            {
+                desc = "Go to previous hunk - Agentic DiffPreview",
+            }
+        )
     end
 end
 

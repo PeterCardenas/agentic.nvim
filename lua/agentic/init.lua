@@ -223,6 +223,7 @@ end
 function Agentic.stop_generation()
     SessionRegistry.get_session_for_tab_page(nil, function(session)
         if session.is_generating then
+            --- @diagnostic disable-next-line: param-type-mismatch
             session.agent:stop_generation(session.session_id)
             session.permission_manager:clear()
             session.is_generating = false

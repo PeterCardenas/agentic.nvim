@@ -1,3 +1,4 @@
+--- @diagnostic disable: param-type-mismatch
 local assert = require("tests.helpers.assert")
 local HunkNavigation = require("agentic.ui.hunk_navigation")
 local Theme = require("agentic.theme")

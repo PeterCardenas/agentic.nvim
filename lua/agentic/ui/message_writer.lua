@@ -1068,7 +1068,7 @@ function MessageWriter:_apply_diff_highlights(start_row, highlight_ranges)
 end
 
 --- @param header_line integer 0-indexed header line number
---- @param status string Status value (pending, completed, etc.)
+--- @param status string|nil Status value (pending, completed, etc.)
 function MessageWriter:_apply_header_highlight(header_line, status)
     if not status or status == "" then
         return
@@ -1092,7 +1092,7 @@ function MessageWriter:_apply_header_highlight(header_line, status)
 end
 
 --- @param footer_line integer 0-indexed footer line number
---- @param status string Status value (pending, completed, etc.)
+--- @param status string|nil Status value (pending, completed, etc.)
 function MessageWriter:_apply_status_footer(footer_line, status)
     if
         not vim.api.nvim_buf_is_valid(self.bufnr)
