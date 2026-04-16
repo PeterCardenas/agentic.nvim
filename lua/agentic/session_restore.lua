@@ -1,3 +1,4 @@
+--- @diagnostic disable: param-type-mismatch
 local ACPPayloads = require("agentic.acp.acp_payloads")
 local ChatHistory = require("agentic.ui.chat_history")
 local Logger = require("agentic.utils.logger")

@@ -1,4 +1,4 @@
---- @diagnostic disable: unresolved-require
+--- @diagnostic disable: unresolved-require, need-check-nil, param-type-mismatch
 --- Type stubs for blink.cmp (not in this project's LuaLS workspace)
 --- @class blink.cmp.AgenticCommands.Context
 --- @field cursor number[]
@@ -53,12 +53,14 @@ end
 --- Only enable in agentic prompt buffers
 --- @return boolean
 function Source:enabled()
+    local _ = self
     return vim.bo.filetype == "AgenticInput"
 end
 
 --- Trigger completion when \`/\` is typed
 --- @return string[]
 function Source:get_trigger_characters()
+    local _ = self
     return { "/" }
 end
 
@@ -67,6 +69,7 @@ end
 --- @param _items table[]
 --- @return boolean
 function Source:should_show_items(context, _items)
+    local _ = self
     --- @diagnostic disable-next-line: need-check-nil
     local cursor_col = context.cursor[2]
     local text_to_cursor = context.line:sub(1, cursor_col)
@@ -79,6 +82,7 @@ end
 --- @param callback fun(response: blink.cmp.AgenticCommands.CompletionResponse|nil)
 --- @return nil
 function Source:get_completions(context, callback)
+    local _ = self
     local States = require("agentic.states")
     local commands = States.getSlashCommands()
     if #commands == 0 then

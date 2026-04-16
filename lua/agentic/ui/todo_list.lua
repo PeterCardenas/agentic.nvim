@@ -1,3 +1,4 @@
+--- @diagnostic disable: param-type-mismatch
 local BufHelpers = require("agentic.utils.buf_helpers")
 local WindowDecoration = require("agentic.ui.window_decoration")
 

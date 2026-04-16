@@ -22,6 +22,7 @@ end
 --- @param json_str string|nil
 --- @return any decoded_json
 function MistralVibeACPAdapter:_decode_json(json_str)
+    local _ = self
     local decode_ok, json = pcall(vim.json.decode, json_str or "{}")
 
     if not decode_ok then

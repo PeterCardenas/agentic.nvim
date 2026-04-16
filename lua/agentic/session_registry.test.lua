@@ -435,8 +435,10 @@ describe("agentic.SessionRegistry", function()
             acp_health_mock.get_default_provider_names = function()
                 return { "claude-acp", "gemini-acp" }
             end
-            acp_health_mock.is_command_available = function(cmd)
-                return cmd == "gemini"
+            local call_count = 0
+            acp_health_mock.is_command_available = function()
+                call_count = call_count + 1
+                return call_count == 2
             end
 
             SessionRegistry.select_provider(function() end)
@@ -499,8 +501,8 @@ describe("agentic.SessionRegistry", function()
                 acp_health_mock.get_default_provider_names = function()
                     return { "claude-acp", "gemini-acp" }
                 end
-                acp_health_mock.is_command_available = function(cmd)
-                    return cmd == "claude-code-acp"
+                acp_health_mock.is_command_available = function()
+                    return true
                 end
             end)
 

@@ -156,6 +156,7 @@ end
 --- All commands run in current working directory by default
 --- @return table[] commands List of command arrays to try
 function FilePicker:_build_scan_commands()
+    local _ = self
     local commands = {}
 
     if vim.fn.executable(FilePicker.CMD_RG[1]) == 1 then
@@ -216,6 +217,7 @@ FilePicker.GLOB_EXCLUDE_PATTERNS = {
 --- @param path string
 --- @return boolean
 function FilePicker:_should_exclude(path)
+    local _ = self
     for _, pattern in ipairs(FilePicker.GLOB_EXCLUDE_PATTERNS) do
         if path:match(pattern) then
             return true

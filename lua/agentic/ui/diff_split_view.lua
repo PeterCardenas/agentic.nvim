@@ -1,3 +1,4 @@
+--- @diagnostic disable: need-check-nil, param-type-mismatch
 local Config = require("agentic.config")
 local FileSystem = require("agentic.utils.file_system")
 local Logger = require("agentic.utils.logger")

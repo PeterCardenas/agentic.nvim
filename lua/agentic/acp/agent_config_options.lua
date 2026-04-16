@@ -378,6 +378,7 @@ end
 --- @param handle_change fun(mode: string, is_legacy: boolean): nil
 --- @return boolean shown
 function AgentConfigOptions:_show_selector(target, prompt, handle_change)
+    local _ = self
     if not target or not target.options or #target.options == 0 then
         return false
     end

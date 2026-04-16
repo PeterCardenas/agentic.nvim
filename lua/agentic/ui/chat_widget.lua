@@ -318,6 +318,7 @@ end
 --- @param winid integer|nil
 --- @param callback fun()|nil
 function ChatWidget:move_cursor_to(winid, callback)
+    local _ = self
     vim.schedule(function()
         if winid and vim.api.nvim_win_is_valid(winid) then
             if Config.settings.move_cursor_to_chat_on_submit then
@@ -745,6 +746,7 @@ end
 --- @param opts table<string, any>
 --- @return integer bufnr
 function ChatWidget:_create_new_buf(opts)
+    local _ = self
     local bufnr = vim.api.nvim_create_buf(false, true)
 
     local config = vim.tbl_deep_extend("force", {

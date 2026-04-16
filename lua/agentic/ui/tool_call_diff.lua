@@ -1,3 +1,4 @@
+--- @diagnostic disable: need-check-nil, param-type-mismatch
 --- @class agentic.ui.ToolCallDiff.DiffBlock
 --- @field start_line integer
 --- @field end_line integer

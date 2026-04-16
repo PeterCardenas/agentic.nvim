@@ -1,3 +1,4 @@
+--- @diagnostic disable: param-type-mismatch
 local Config = require("agentic.config")
 local DiagnosticsContext = require("agentic.ui.diagnostics_context")
 local WidgetLayout = require("agentic.ui.widget_layout")

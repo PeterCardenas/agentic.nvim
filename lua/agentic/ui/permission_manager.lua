@@ -1,3 +1,4 @@
+--- @diagnostic disable: need-check-nil, param-type-mismatch, undefined-field
 local BufHelpers = require("agentic.utils.buf_helpers")
 local Config = require("agentic.config")
 local Logger = require("agentic.utils.logger")

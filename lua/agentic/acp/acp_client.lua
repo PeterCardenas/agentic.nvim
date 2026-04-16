@@ -191,6 +191,7 @@ end
 --- @param data agentic.acp.JSONValue|nil
 --- @return agentic.acp.ACPError
 function ACPClient:__create_error(code, message, data)
+    local _ = self
     return {
         code = code,
         message = message,
@@ -429,6 +430,7 @@ end
 --- @param possible_string string|nil|vim.NIL
 --- @return string[] lines
 function ACPClient:safe_split(possible_string)
+    local _ = self
     if type(possible_string) == "string" then
         return vim.split(possible_string, "\n")
     end

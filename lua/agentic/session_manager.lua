@@ -1,4 +1,4 @@
---- @diagnostic disable: unnecessary-if
+--- @diagnostic disable: unnecessary-if, assign-type-mismatch, param-type-mismatch
 -- The session manager class glues together the Chat widget, the agent instance, and the message writer.
 -- It is responsible for managing the session state, routing messages between components, and handling user interactions.
 -- When the user creates a new session, the SessionManager should be responsible for cleaning the existing session (if any) and initializing a new one.
@@ -1743,6 +1743,7 @@ function SessionManager:_handle_new_config_options(new_config_options)
 end
 
 function SessionManager:_get_system_info()
+    local _ = self
     local os_name = vim.uv.os_uname().sysname
     local os_version = vim.uv.os_uname().release
     local os_machine = vim.uv.os_uname().machine

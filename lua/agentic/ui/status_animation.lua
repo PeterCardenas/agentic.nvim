@@ -38,6 +38,7 @@ StatusAnimation.__index = StatusAnimation
 --- @param bufnr number
 --- @return agentic.ui.StatusAnimation
 function StatusAnimation:new(bufnr)
+    local _ = self
     local instance = setmetatable({
         _bufnr = bufnr,
         _state = nil,

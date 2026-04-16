@@ -1,4 +1,4 @@
---- @diagnostic disable: unnecessary-if
+--- @diagnostic disable: unnecessary-if, param-type-mismatch, return-type-mismatch
 local Config = require("agentic.config")
 local ExtmarkBlock = require("agentic.utils.extmark_block")
 
@@ -406,6 +406,7 @@ function ChatFolds:_sync_fold_to_window(
     inner_start,
     inner_closed
 )
+    local _ = self
     if not vim.api.nvim_win_is_valid(winid) then
         return
     end

@@ -42,6 +42,7 @@ describe("agentic.SessionManager", function()
                 legacy_agent_modes = legacy_modes,
             }
             function config_options:get_mode_name(mode_id)
+                local _ = self
                 local mode = legacy_modes:get_mode(mode_id)
                 return mode and mode.name or nil
             end

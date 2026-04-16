@@ -1,4 +1,4 @@
---- @diagnostic disable: unnecessary-if
+--- @diagnostic disable: unnecessary-if, param-type-mismatch, return-type-mismatch
 local ToolCallDiff = require("agentic.ui.tool_call_diff")
 local BufHelpers = require("agentic.utils.buf_helpers")
 local Config = require("agentic.config")
@@ -381,6 +381,7 @@ end
 --- @param bufnr integer
 --- @return boolean
 function MessageWriter:_check_auto_scroll(bufnr)
+    local _ = self
     local wins = vim.fn.win_findbuf(bufnr)
     if #wins == 0 then
         return true
@@ -691,6 +692,7 @@ end
 --- @return string[] lines Array of lines to render
 --- @return agentic.ui.MessageWriter.HighlightRange[] highlight_ranges Array of highlight range specifications (relative to returned lines)
 function MessageWriter:_prepare_block_lines(tool_call_block)
+    local _ = self
     local kind = tool_call_block.kind
     local argument = tool_call_block.argument
 

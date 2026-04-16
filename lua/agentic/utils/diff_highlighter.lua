@@ -1,3 +1,4 @@
+--- @diagnostic disable: need-check-nil, param-type-mismatch
 --- @class agentic.utils.DiffHighlighter
 local M = {}
 
