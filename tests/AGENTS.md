@@ -201,7 +201,7 @@ local spy = require('tests.helpers.spy')
 -- Create a standalone spy
 local callback_spy = spy.new(function() end)
 
--- Pass spy as callback (type cast for luals)
+-- Pass spy as callback (type cast for emmylua)
 some_function(callback_spy --[[@as function]])
 
 -- Check call count using custom assert

@@ -29,7 +29,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  LUALS_VERSION: 3.16.2
+  EMMYLUA_VERSION: 0.22.0
   STYLUA_VERSION: 2.3.1
   SELENE_VERSION: 0.30.0
 
@@ -157,7 +157,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Setup directories
-        run: mkdir -p .local/nvim .local/bin .local/luals
+        run: mkdir -p .local/nvim .local/bin .local/emmylua
 
       - name: Cache Neovim
         id: cache-neovim
@@ -172,18 +172,20 @@ jobs:
           curl -sL "https://github.com/neovim/neovim/releases/download/${{ matrix.neovim-version }}/nvim-linux-x86_64.tar.gz" |
             tar xzf - --strip-components=1 -C .local/nvim
 
-      - name: Cache LuaLS
-        id: cache-luals
+      - name: Cache EmmyLua
+        id: cache-emmylua
         uses: actions/cache@v4
         with:
-          path: .local/luals
-          key: luals-${{ runner.os }}-${{ env.LUALS_VERSION }}
+          path: .local/emmylua
+          key: emmylua-${{ runner.os }}-${{ env.EMMYLUA_VERSION }}
 
-      - name: Install LuaLS
-        if: steps.cache-luals.outputs.cache-hit != 'true'
+      - name: Install EmmyLua check
+        if: steps.cache-emmylua.outputs.cache-hit != 'true'
         run: |
-          curl -sL "https://github.com/LuaLS/lua-language-server/releases/download/${{ env.LUALS_VERSION }}/lua-language-server-${{ env.LUALS_VERSION }}-linux-x64.tar.gz" |
-            tar xzf - -C .local/luals
+          ARCH=$(uname -m)
+          if [ "$ARCH" = "aarch64" ]; then EMMY_ARCH="linux-arm64-glibc.2.17"; else EMMY_ARCH="linux-x64-glibc.2.17"; fi
+          curl -sL "https://github.com/EmmyLuaLs/emmylua-analyzer-rust/releases/download/${{ env.EMMYLUA_VERSION }}/emmylua_check-${EMMY_ARCH}.tar.gz" |
+            tar xzf - -C .local/emmylua
 
       - name: Cache deps (mini.nvim)
         id: cache-deps
@@ -200,7 +202,7 @@ jobs:
 
       - name: Run type check
         run: |
-          ln -sf "$PWD/.local/luals/bin/lua-language-server" .local/bin/lua-language-server
+          ln -sf "$PWD/.local/emmylua/emmylua_check" .local/bin/emmylua_check
           ln -sf "$PWD/.local/nvim/bin/nvim" .local/bin/nvim
           export PATH="$PWD/.local/bin:$PATH"
-          make luals
+          make emmylua

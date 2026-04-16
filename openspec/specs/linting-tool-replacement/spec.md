@@ -168,7 +168,7 @@ Makefile MUST expose selene functionality through standard targets.
 
 **When** developer runs `make check`
 
-**Then** selene should run along with luals and format-check
+**Then** selene should run along with emmylua and format-check
 
 **And** execution should stop on first failure
 

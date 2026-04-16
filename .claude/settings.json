@@ -10,6 +10,7 @@
       "Bash(luac:*)",
       "Bash(make format:*)",
       "Bash(make luacheck:*)",
+      "Bash(make emmylua:*)",
       "Bash(make luals:*)",
       "Bash(make test-file:*)",
       "Bash(make test:*)",

@@ -159,8 +159,8 @@ end
   ```
 
   **Note:** The `@private` annotation is NOT necessary for private class methods
-  - LuaLS infers privacy from the `_` prefix automatically
-  - Only use `@protected` for protected methods (`__*`, luals limitation)
+  - EmmyLua infers privacy from the `_` prefix automatically
+  - Only use `@protected` for protected methods (`__*`, analyzer limitation)
 
 - **Document intent with LuaCATS** - Use visibility annotations:
 

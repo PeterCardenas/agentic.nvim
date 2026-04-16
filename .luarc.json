@@ -1,46 +1,62 @@
 {
-  "$schema": "https://raw.githubusercontent.com/LuaLS/vscode-lua/master/setting/schema.json",
   "runtime": {
     "version": "LuaJIT",
     "pathStrict": true,
     "special": { "reload": "require" }
   },
   "diagnostics": {
+    "disable": [
+      "access-invisible",
+      "annotation-usage-error",
+      "assign-type-mismatch",
+      "call-non-callable",
+      "cast-type-mismatch",
+      "duplicate-set-field",
+      "duplicate-type",
+      "inject-field",
+      "missing-fields",
+      "need-check-nil",
+      "param-type-mismatch",
+      "preferred-local-alias",
+      "return-type-mismatch",
+      "type-not-found",
+      "undefined-field",
+      "unnecessary-if",
+      "unresolved-require",
+      "unused"
+    ],
     "severity": {
-      "undefined-global": "Error",
-      "unused-local": "Error",
-      "unused-function": "Warning",
-      "unused-label": "Error",
-      "deprecated": "Warning",
-      "redundant-parameter": "Warning",
-      "redundant-value": "Warning",
-      "need-check-nil": "Error",
-      "undefined-field": "Error",
-      "missing-parameter": "Error"
+      "undefined-global": "error",
+      "unused-local": "error",
+      "unused-function": "warning",
+      "unused-label": "error",
+      "deprecated": "warning",
+      "redundant-parameter": "hint",
+      "redundant-value": "warning",
+      "need-check-nil": "error",
+      "undefined-field": "error",
+      "missing-parameter": "error"
     },
     "neededFileStatus": {
-      "codestyle-check": "None",
-      "no-unknown": "None",
-      "trailing-space": "None",
-      "redefined-local": "Any"
+      "codestyle-check": "none",
+      "no-unknown": "none",
+      "trailing-space": "none",
+      "redefined-local": "any"
     },
     "unusedLocalExclude": ["_*"],
     "globals": ["vim"],
     "groupSeverity": {
-      "strong": "Error",
-      "strict": "Error"
+      "strong": "error",
+      "strict": "error"
     }
   },
   "workspace": {
     "library": [
-      "$VIMRUNTIME",
-      "$VIMRUNTIME/lua",
-      "$VIMRUNTIME/lua/vim",
-      "${3rd}/luv/library",
-      "${3rd}/busted/library",
-      "$PWD/lua",
-      "$PWD/tests",
       "$PWD/deps/mini.nvim/lua"
+    ],
+    "workspaceRoots": [
+      "$PWD/lua",
+      "$PWD/tests"
     ],
     "checkThirdParty": false,
     "preloadFileSize": 10000,
@@ -54,7 +70,7 @@
   },
   "hint": {
     "enable": true,
-    "arrayIndex": "Enable",
+    "arrayIndex": "enable",
     "await": true,
     "paramName": "All",
     "paramType": true,

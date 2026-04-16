@@ -461,4 +461,4 @@ end
 - **Optional**: `img-clip.nvim` for clipboard image pasting
 - **Optional**: `pngpaste` (macOS), `xclip`/`wl-clipboard` (Linux) for clipboard
   images
-- **Build tools**: `lua-language-server`, `luacheck`, `stylua`
+- **Build tools**: `emmylua_check`, `selene`, `stylua`

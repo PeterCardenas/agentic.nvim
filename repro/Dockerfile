@@ -2,7 +2,7 @@
 FROM ubuntu:noble
 
 # Tool versions matching PR check workflow
-ENV LUALS_VERSION=3.16.2 \
+ENV EMMYLUA_VERSION=0.22.0 \
   STYLUA_VERSION=2.3.1 \
   SELENE_VERSION=0.30.0 \
   NVIM_VERSION=0.11.5 \
@@ -20,7 +20,7 @@ RUN apt-get update && \
   rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
 # Setup directories
-RUN mkdir -p /opt/nvim /opt/luals /usr/local/bin
+RUN mkdir -p /opt/nvim /opt/emmylua /usr/local/bin
 
 # Install Neovim (detect architecture)
 RUN ARCH=$(uname -m) && \
@@ -29,12 +29,12 @@ RUN ARCH=$(uname -m) && \
   tar xzf - --strip-components=1 -C /opt/nvim && \
   ln -sf /opt/nvim/bin/nvim /usr/local/bin/nvim
 
-# Install LuaLS (detect architecture)
+# Install EmmyLua check (detect architecture)
 RUN ARCH=$(uname -m) && \
-  if [ "$ARCH" = "aarch64" ]; then LUALS_ARCH="linux-arm64"; else LUALS_ARCH="linux-x64"; fi && \
-  curl -sL "https://github.com/LuaLS/lua-language-server/releases/download/${LUALS_VERSION}/lua-language-server-${LUALS_VERSION}-${LUALS_ARCH}.tar.gz" | \
-  tar xzf - -C /opt/luals && \
-  ln -sf /opt/luals/bin/lua-language-server /usr/local/bin/lua-language-server
+  if [ "$ARCH" = "aarch64" ]; then EMMYLUA_ARCH="linux-arm64-glibc.2.17"; else EMMYLUA_ARCH="linux-x64-glibc.2.17"; fi && \
+  curl -sL "https://github.com/EmmyLuaLs/emmylua-analyzer-rust/releases/download/${EMMYLUA_VERSION}/emmylua_check-${EMMYLUA_ARCH}.tar.gz" | \
+  tar xzf - -C /opt/emmylua && \
+  ln -sf /opt/emmylua/emmylua_check /usr/local/bin/emmylua_check
 
 # Install StyLua (detect architecture)
 RUN ARCH=$(uname -m) && \

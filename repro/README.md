@@ -5,7 +5,7 @@ Slim Docker image with all PR check tools matching the CI pipeline environment.
 ## Tools Included
 
 - **Neovim** v0.11.5
-- **LuaLS** (Lua Language Server) v3.16.2
+- **EmmyLua check** v0.22.0
 - **StyLua** v2.3.1
 - **Selene** v0.30.0
 
@@ -37,7 +37,7 @@ docker run --rm -it -v "`pwd`:/workspace" agentic-nvim-dev
 
 ```bash
 # Type checking
-docker run --rm -v "`pwd`:/workspace" agentic-nvim-dev make luals
+docker run --rm -v "`pwd`:/workspace" agentic-nvim-dev make emmylua
 
 # Linting
 docker run --rm -v "`pwd`:/workspace" agentic-nvim-dev make selene
@@ -49,7 +49,7 @@ docker run --rm -v "`pwd`:/workspace" agentic-nvim-dev make format-check
 ### Run All Checks
 
 ```bash
-docker run --rm -v "`pwd`:/workspace" agentic-nvim-dev sh -c "make luals && make selene && make format-check"
+docker run --rm -v "`pwd`:/workspace" agentic-nvim-dev sh -c "make emmylua && make selene && make format-check"
 ```
 
 ## Notes

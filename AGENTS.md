@@ -367,7 +367,7 @@ make validate
 This single command runs:
 
 - `make format` - Format all Lua files
-- `make luals` - Type checking
+- `make emmylua` - Type checking
 - `make selene` - Linting
 - `make test` - All tests
 
@@ -384,7 +384,7 @@ The `make validate` command outputs **only 5-6 short lines** to stdout. Example:
 
 ```bash
 format: 0 (took 1s) - log: .local/agentic_format_output.log
-luals: 0 (took 2s) - log: .local/agentic_luals_output.log
+emmylua: 0 (took 2s) - log: .local/agentic_emmylua_output.log
 selene: 0 (took 0s) - log: .local/agentic_selene_output.log
 test: 0 (took 1s) - log: .local/agentic_test_output.log
 Total: 4s
@@ -418,7 +418,7 @@ The `make validate` target writes verbose output to these **exact paths** in the
 project root:
 
 - `.local/agentic_format_output.log` - StyLua formatting output
-- `.local/agentic_luals_output.log` - LuaLS type checking output
+- `.local/agentic_emmylua_output.log` - EmmyLua type checking output
 - `.local/agentic_selene_output.log` - Selene linting output
 - `.local/agentic_test_output.log` - Test runner output
 
@@ -433,7 +433,7 @@ project root:
 
 - **NEVER use Read tool** - floods context with entire file
 - **Use targeted commands instead:**
-  - `tail -n 10 .local/agentic_luals_output.log` - Last 10 lines (errors usually
+  - `tail -n 10 .local/agentic_emmylua_output.log` - Last 10 lines (errors usually
     at end)
   - `rg "error|warning|fail" .local/agentic_test_output.log` - Search for
     specific patterns (smart-case by default)
@@ -447,12 +447,12 @@ project root:
 
 ### Type Checking
 
-`make luals` runs Lua Language Server headless diagnosis across all files in the
+`make emmylua` runs EmmyLua headless diagnosis across all files in the
 project and provides comprehensive type checking.
 
 ### Available Make targets:
 
-- `make luals` - Run Lua Language Server headless diagnosis (type checking) -
+- `make emmylua` - Run EmmyLua headless diagnosis (type checking) -
   **Use this for full project type checks**
 - `make selene` - Run Selene linter (Lua linting)
 - `make format` - Format all Lua files with StyLua
