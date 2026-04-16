@@ -6,7 +6,6 @@
   },
   "diagnostics": {
     "disable": [
-      "type-not-found",
       "undefined-field",
       "unnecessary-if",
       "unresolved-require",
