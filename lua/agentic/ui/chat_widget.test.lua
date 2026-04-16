@@ -530,7 +530,8 @@ describe("agentic.ui.ChatWidget", function()
 
                 widget:rotate_layout({ current })
 
-                assert.equal(current, widget.current_position)
+                local after_rotate = widget.current_position
+                assert.equal(current, after_rotate)
                 assert.spy(notify_stub).was.called(1)
                 local msg = notify_stub.calls[1][1]
                 assert.is_true(msg:find("Only one layout") ~= nil)
