@@ -1,12 +1,29 @@
 {
   "runtime": {
     "version": "LuaJIT",
+    "path": [
+      "?.lua",
+      "?/init.lua",
+      "lua/?.lua",
+      "lua/?/init.lua",
+      "tests/?.lua",
+      "tests/?/init.lua",
+      "tests/?/?.lua",
+      "tests/?/?/init.lua",
+      "../?.lua",
+      "../?/init.lua",
+      "../lua/?.lua",
+      "../lua/?/init.lua",
+      "../tests/?.lua",
+      "../tests/?/init.lua",
+      "../tests/?/?.lua",
+      "../tests/?/?/init.lua"
+    ],
     "pathStrict": true,
     "special": { "reload": "require" }
   },
   "diagnostics": {
     "disable": [
-      "unresolved-require",
       "unused"
     ],
     "severity": {

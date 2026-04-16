@@ -1,3 +1,4 @@
+--- @diagnostic disable: unresolved-require
 --- Type stubs for blink.cmp (not in this project's LuaLS workspace)
 --- @class blink.cmp.AgenticCommands.Context
 --- @field cursor number[]

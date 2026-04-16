@@ -1,3 +1,4 @@
+--- @diagnostic disable: unresolved-require
 local FileSystem = require("agentic.utils.file_system")
 local assert = require("tests.helpers.assert")
 local Child = require("tests.helpers.child")

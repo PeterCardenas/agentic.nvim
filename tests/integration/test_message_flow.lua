@@ -1,4 +1,4 @@
---- @diagnostic disable: redundant-parameter, cast-local-type
+--- @diagnostic disable: redundant-parameter, cast-local-type, unresolved-require
 local assert = require("tests.helpers.assert")
 local MiniTest = require("mini.test")
 local child = MiniTest.new_child_neovim()

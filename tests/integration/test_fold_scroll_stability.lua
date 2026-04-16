@@ -1,3 +1,4 @@
+--- @diagnostic disable: unresolved-require
 local assert = require("tests.helpers.assert")
 local Config = require("agentic.config")
 

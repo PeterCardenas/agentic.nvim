@@ -125,6 +125,7 @@ end
 --- @param fixed_session_id string|nil
 --- @return table
 local function create_session_previewer(fixed_session_id)
+    --- @diagnostic disable-next-line: unresolved-require
     local builtin = require("fzf-lua.previewer.builtin")
     local previewer = builtin.base:extend()
 

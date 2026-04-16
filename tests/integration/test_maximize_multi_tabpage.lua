@@ -1,4 +1,4 @@
---- @diagnostic disable: redundant-parameter, unnecessary-if
+--- @diagnostic disable: redundant-parameter, unnecessary-if, unresolved-require
 local assert = require("tests.helpers.assert")
 local Child = require("tests.helpers.child")
 

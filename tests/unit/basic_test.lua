@@ -1,3 +1,4 @@
+--- @diagnostic disable: unresolved-require
 local assert = require("tests.helpers.assert")
 
 describe("basic test suite", function()
