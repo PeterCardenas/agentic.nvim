@@ -6,7 +6,6 @@
   },
   "diagnostics": {
     "disable": [
-      "unnecessary-if",
       "unresolved-require",
       "unused"
     ],

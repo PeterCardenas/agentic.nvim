@@ -1,3 +1,4 @@
+--- @diagnostic disable: unnecessary-if
 -- The session manager class glues together the Chat widget, the agent instance, and the message writer.
 -- It is responsible for managing the session state, routing messages between components, and handling user interactions.
 -- When the user creates a new session, the SessionManager should be responsible for cleaning the existing session (if any) and initializing a new one.

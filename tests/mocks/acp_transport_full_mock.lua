@@ -1,3 +1,4 @@
+---@diagnostic disable: unnecessary-if
 --- Full mock transport that completes the ACP handshake and allows message injection.
 --- Unlike acp_transport_mock.lua which only sets "connecting" state,
 --- this mock transitions to "connected", auto-responds to initialize/session/new,

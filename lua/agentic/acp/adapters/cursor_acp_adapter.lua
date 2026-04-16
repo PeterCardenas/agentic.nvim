@@ -1,3 +1,4 @@
+--- @diagnostic disable: unnecessary-if
 local ACPClient = require("agentic.acp.acp_client")
 local FileSystem = require("agentic.utils.file_system")
 local Logger = require("agentic.utils.logger")

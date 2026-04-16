@@ -1,3 +1,4 @@
+---@diagnostic disable: unnecessary-if
 --- Mock implementation of agentic.acp.ACPTransportModule for testing
 --- @class agentic.acp.ACPTransportModuleMock
 local M = {}

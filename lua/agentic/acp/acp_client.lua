@@ -1,3 +1,4 @@
+--- @diagnostic disable: unnecessary-if
 local FileSystem = require("agentic.utils.file_system")
 local Logger = require("agentic.utils.logger")
 local transport_module = require("agentic.acp.acp_transport")

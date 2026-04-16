@@ -1,4 +1,4 @@
---- @diagnostic disable: need-check-nil
+--- @diagnostic disable: need-check-nil, unnecessary-if
 local assert = require("tests.helpers.assert")
 local spy = require("tests.helpers.spy")
 local Config = require("agentic.config")

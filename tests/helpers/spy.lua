@@ -1,3 +1,4 @@
+---@diagnostic disable: unnecessary-if
 -- Simple spy/stub implementation for mini.test
 -- Provides tracking of function calls without luassert dependency
 

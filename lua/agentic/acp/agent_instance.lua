@@ -1,3 +1,4 @@
+--- @diagnostic disable: unnecessary-if
 -- According to the ACP protocol, a single agent process can handle multiple sessions.
 -- A session is an isolated conversation with its own state and and context.
 -- This file maintain one Agent process per provider.

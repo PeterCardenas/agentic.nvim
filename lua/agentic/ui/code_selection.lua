@@ -1,3 +1,4 @@
+--- @diagnostic disable: unnecessary-if
 local FileSystem = require("agentic.utils.file_system")
 local BufHelpers = require("agentic.utils.buf_helpers")
 local Theme = require("agentic.theme")

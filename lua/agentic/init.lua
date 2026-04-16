@@ -1,3 +1,4 @@
+--- @diagnostic disable: unnecessary-if
 local Config = require("agentic.config")
 local AgentInstance = require("agentic.acp.agent_instance")
 local Theme = require("agentic.theme")

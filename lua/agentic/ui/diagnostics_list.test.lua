@@ -1,4 +1,4 @@
---- @diagnostic disable: need-check-nil, return-type-mismatch
+--- @diagnostic disable: need-check-nil, return-type-mismatch, unnecessary-if
 local assert = require("tests.helpers.assert")
 local spy = require("tests.helpers.spy")
 local Config = require("agentic.config")

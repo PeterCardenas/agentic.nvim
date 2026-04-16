@@ -1,3 +1,4 @@
+--- @diagnostic disable: unnecessary-if
 --- Health check for agentic.nvim
 --- This file is auto-discovered by :checkhealth
 --- Users can run :checkhealth agentic to see only agentic.nvim health

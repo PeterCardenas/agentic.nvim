@@ -1,3 +1,4 @@
+--- @diagnostic disable: unnecessary-if
 local Config = require("agentic.config")
 local BufHelpers = require("agentic.utils.buf_helpers")
 local DiffPreview = require("agentic.ui.diff_preview")

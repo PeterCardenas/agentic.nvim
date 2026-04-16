@@ -1,4 +1,4 @@
----@diagnostic disable: assign-type-mismatch, need-check-nil, undefined-field, duplicate-set-field
+---@diagnostic disable: assign-type-mismatch, need-check-nil, undefined-field, duplicate-set-field, unnecessary-if
 local assert = require("tests.helpers.assert")
 local spy = require("tests.helpers.spy")
 

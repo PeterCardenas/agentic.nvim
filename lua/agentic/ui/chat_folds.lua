@@ -1,3 +1,4 @@
+--- @diagnostic disable: unnecessary-if
 local Config = require("agentic.config")
 local ExtmarkBlock = require("agentic.utils.extmark_block")
 
