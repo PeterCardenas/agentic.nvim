@@ -1,10 +1,20 @@
---- @diagnostic disable: unnecessary-if
+--- @diagnostic disable: unnecessary-if, return-type-mismatch
 local ACPClient = require("agentic.acp.acp_client")
 local FileSystem = require("agentic.utils.file_system")
 local Logger = require("agentic.utils.logger")
 
 --- @class agentic.acp.CursorRawInput : agentic.acp.RawInput
 --- @field content? string For creating new files instead of new_string
+--- @field line? number
+--- @field start_line? number
+--- @field end_line? number
+--- @field offset? number
+--- @field limit? number
+--- @field path? string
+--- @field directory? string
+--- @field glob? string
+--- @field pattern? string
+--- @field search_term? string
 
 --- @class agentic.acp.CursorToolCallMessage : agentic.acp.ToolCallMessage
 --- @field rawInput? agentic.acp.CursorRawInput
@@ -21,6 +31,8 @@ local Logger = require("agentic.utils.logger")
 --- @class agentic.acp.CursorToolCallUpdate : agentic.acp.ToolCallUpdate
 --- @field rawOutput? agentic.acp.CursorRawOutput
 --- @field kind? agentic.acp.ToolKind
+--- @field title? string
+--- @field rawInput? agentic.acp.CursorRawInput
 
 --- Cursor-specific adapter that extends ACPClient with Cursor-specific behaviors
 --- @class agentic.acp.CursorACPAdapter : agentic.acp.ACPClient
@@ -44,6 +56,135 @@ function CursorACPAdapter:new(config, on_ready)
     self._chunk_stream_started = {}
 
     return self
+end
+
+--- @param value number|string|nil
+--- @return integer|nil
+local function to_integer(value)
+    if type(value) == "number" then
+        return math.floor(value)
+    end
+
+    if type(value) == "string" then
+        local parsed = tonumber(value)
+        if parsed then
+            return math.floor(parsed)
+        end
+    end
+
+    return nil
+end
+
+--- @param kind string
+--- @param title string|nil
+--- @return string
+local function strip_title_prefix(kind, title)
+    local trimmed = vim.trim(title or "")
+    if trimmed == "" then
+        return ""
+    end
+
+    local lowercase_kind = kind:lower()
+    local lowercase_title = trimmed:lower()
+    local prefix = lowercase_kind .. " "
+    if vim.startswith(lowercase_title, prefix) then
+        return vim.trim(trimmed:sub(#prefix + 1))
+    end
+
+    return trimmed
+end
+
+--- @param raw_input agentic.acp.CursorRawInput|nil
+--- @param title string|nil
+--- @return string
+function CursorACPAdapter:_format_read_argument(raw_input, title)
+    local fallback = strip_title_prefix("read", title)
+    if not raw_input or vim.tbl_isempty(raw_input) then
+        return fallback
+    end
+
+    local file_path = raw_input.file_path
+    local base_path = fallback
+    if type(file_path) == "string" and file_path ~= "" then
+        base_path = FileSystem.to_smart_path(file_path)
+    end
+    if base_path == "" then
+        return fallback
+    end
+
+    local start_line = to_integer(raw_input.line)
+        or to_integer(raw_input.start_line)
+        or to_integer(raw_input.offset)
+    local end_line = to_integer(raw_input.end_line)
+
+    if start_line and not end_line then
+        local limit = to_integer(raw_input.limit)
+        if limit and limit > 0 then
+            end_line = start_line + limit - 1
+        end
+    end
+
+    if start_line and start_line > 0 then
+        if end_line and end_line >= start_line then
+            return string.format("%s:%d-%d", base_path, start_line, end_line)
+        end
+        return string.format("%s:%d", base_path, start_line)
+    end
+
+    return base_path
+end
+
+--- @param raw_input agentic.acp.CursorRawInput|nil
+--- @param title string|nil
+--- @return string
+function CursorACPAdapter:_format_search_argument(raw_input, title)
+    local fallback = strip_title_prefix("search", title)
+    if not raw_input or vim.tbl_isempty(raw_input) then
+        return fallback
+    end
+
+    local query = raw_input.query
+        or raw_input.pattern
+        or raw_input.search_term
+        or ""
+    local path = raw_input.path or raw_input.file_path or raw_input.directory
+    local glob = raw_input.glob
+
+    --- @type string[]
+    local parts = {}
+    if type(query) == "string" and query ~= "" then
+        table.insert(parts, query)
+    end
+    if type(path) == "string" and path ~= "" then
+        table.insert(parts, "path=" .. FileSystem.to_smart_path(path))
+    end
+    if type(glob) == "string" and glob ~= "" then
+        table.insert(parts, "glob=" .. glob)
+    end
+
+    if #parts > 0 then
+        return table.concat(parts, " ")
+    end
+
+    return fallback
+end
+
+--- @param raw_input agentic.acp.CursorRawInput
+--- @return agentic.ui.MessageWriter.ToolCallDiff|nil diff
+function CursorACPAdapter:_build_edit_diff(raw_input)
+    local new_string = raw_input.content or raw_input.new_string
+    local old_string = raw_input.old_string
+    if new_string == nil and old_string == nil then
+        return nil
+    end
+
+    --- @type agentic.ui.MessageWriter.ToolCallDiff
+    local diff = {
+        new = self:safe_split(new_string),
+        old = self:safe_split(old_string),
+        all = raw_input.replace_all or false,
+    }
+    return diff
 end
 
 --- Overloading create_session to handle slash commands, as cursor sends them before session starts
@@ -162,23 +303,19 @@ function CursorACPAdapter:__handle_tool_call(session_id, update)
 
     if update.rawInput and not vim.tbl_isempty(update.rawInput) then
         -- rawInput available: extract provider-specific fields
-        if kind == "read" or kind == "edit" then
+        if kind == "read" then
+            message.argument =
+                self:_format_read_argument(update.rawInput, update.title)
+        elseif kind == "edit" then
             local file_path = update.rawInput.file_path
             if file_path and file_path ~= "" then
                 message.argument = FileSystem.to_smart_path(file_path)
             end
 
-            if kind == "edit" then
-                local new_string = update.rawInput.content
-                    or update.rawInput.new_string
-                local old_string = update.rawInput.old_string
-
-                message.diff = {
-                    new = self:safe_split(new_string),
-                    old = self:safe_split(old_string),
-                    all = update.rawInput.replace_all or false,
-                }
-            end
+            message.diff = self:_build_edit_diff(update.rawInput)
+        elseif kind == "search" then
+            message.argument =
+                self:_format_search_argument(update.rawInput, update.title)
         elseif kind == "fetch" then
             if update.rawInput.query then
                 message.kind = "WebSearch"
@@ -258,12 +395,25 @@ function CursorACPAdapter:__build_tool_call_update(update)
         elseif rawOutput.stdout then
             -- execute kind: rawOutput.stdout/stderr
             message.body = self:safe_split(rawOutput.stdout)
-        elseif rawOutput.totalFiles then
+        elseif rawOutput.totalFiles ~= nil then
             -- search kind: cursor only sends metadata, not actual results
+            local suffix = rawOutput.truncated and " (truncated)" or ""
             message.body = {
-                string.format("Found %d file(s)", rawOutput.totalFiles),
+                string.format(
+                    "Found %d file(s)%s",
+                    rawOutput.totalFiles,
+                    suffix
+                ),
             }
         end
+    end
+
+    if update.kind == "search" then
+        message.argument =
+            self:_format_search_argument(update.rawInput, update.title)
+    elseif update.kind == "read" then
+        message.argument =
+            self:_format_read_argument(update.rawInput, update.title)
     end
 
     -- Fall back to standard content extraction
@@ -420,6 +570,7 @@ end
 --- @param tool_call agentic.acp.ToolCall
 --- @return agentic.ui.MessageWriter.ToolCallBase|nil update
 function CursorACPAdapter:__build_permission_tool_call_update(tool_call)
+    local _ = self
     if
         not tool_call
         or not tool_call.toolCallId
