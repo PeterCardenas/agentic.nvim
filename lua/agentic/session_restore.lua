@@ -3,8 +3,6 @@ local ChatHistory = require("agentic.ui.chat_history")
 local Logger = require("agentic.utils.logger")
 local SessionRegistry = require("agentic.session_registry")
 
---- @alias agentic.RestoreMode "fork" | "continue"
-
 --- @class agentic.SessionRestore
 local SessionRestore = {}
 
@@ -18,11 +16,10 @@ local function load_fzf_lua()
     return fzf
 end
 
---- Load selected session, cancel current, and restore with given mode
+--- Load selected session, cancel current, and restore in continue mode
 --- @param session_id string
 --- @param tab_page_id integer
---- @param restore_mode agentic.RestoreMode
-local function do_restore(session_id, tab_page_id, restore_mode)
+local function do_restore(session_id, tab_page_id)
     ChatHistory.load(session_id, function(history, err)
         if err or not history then
             Logger.notify(
@@ -39,13 +36,133 @@ local function do_restore(session_id, tab_page_id, restore_mode)
             end
             session.widget:clear()
 
-            session:restore_from_history(history, {
-                replace_session = restore_mode == "continue",
-            })
+            session:restore_from_history(history, { replace_session = true })
 
             session.widget:show()
         end)
     end)
+end
+
+--- @param parsed table|nil
+--- @param fallback_title string
+--- @return string[] lines
+--- @return string preview_title
+local function build_preview_lines(parsed, fallback_title)
+    --- @param output string[]
+    --- @param text string|nil
+    local function append_text_lines(output, text)
+        local chunks = vim.split(text or "", "\n", { plain = true })
+        for _, chunk in ipairs(chunks) do
+            table.insert(output, chunk)
+        end
+    end
+
+    local lines = {
+        "# Session Preview",
+        "",
+    }
+    if not parsed then
+        table.insert(lines, "_Unable to load session preview_")
+        return lines, fallback_title
+    end
+
+    local title = (parsed.title or ""):gsub("\n", " ")
+    if title == "" then
+        title = fallback_title
+    end
+    table.insert(lines, "## " .. title)
+    table.insert(lines, "")
+
+    for _, msg in ipairs(parsed.messages or {}) do
+        if msg.type == "user" then
+            local timestamp_str = msg.timestamp
+                    and os.date("%Y-%m-%d %H:%M:%S", msg.timestamp)
+                or os.date("%Y-%m-%d %H:%M:%S")
+            table.insert(
+                lines,
+                string.format("##  User - %s", timestamp_str)
+            )
+            table.insert(lines, "")
+            append_text_lines(lines, msg.text)
+            table.insert(lines, "")
+            table.insert(
+                lines,
+                "### 󱚠 Agent - " .. (msg.provider_name or "Unknown")
+            )
+            table.insert(lines, "")
+        elseif msg.type == "agent" then
+            append_text_lines(lines, msg.text)
+            table.insert(lines, "")
+        end
+    end
+
+    return lines, title
+end
+
+--- @param session_id string
+--- @return table|nil
+local function load_session_from_disk_sync(session_id)
+    local path = ChatHistory.get_file_path(session_id)
+    if vim.fn.filereadable(path) == 0 then
+        return nil
+    end
+
+    local content = vim.fn.readfile(path)
+    if #content == 0 then
+        return nil
+    end
+
+    local ok, parsed = pcall(vim.json.decode, table.concat(content, "\n"))
+    if not ok or not parsed then
+        return nil
+    end
+
+    return parsed
+end
+
+--- @param fixed_session_id string|nil
+--- @return table
+local function create_session_previewer(fixed_session_id)
+    local builtin = require("fzf-lua.previewer.builtin")
+    local previewer = builtin.base:extend()
+
+    function previewer:new(o, opts, fzf_win)
+        self.super.new(self, o, opts, fzf_win)
+        setmetatable(self, previewer)
+        return self
+    end
+
+    function previewer:populate_preview_buf(entry_str)
+        local session_id = fixed_session_id
+        if not session_id then
+            session_id = entry_str:match("^([^\t]+)")
+        end
+
+        local buf = self:get_tmp_buffer()
+        vim.bo[buf].filetype = "markdown"
+
+        if not session_id or session_id == "" then
+            vim.api.nvim_buf_set_lines(buf, 0, -1, false, {
+                "# Session Preview",
+                "",
+                "_Unable to determine session id_",
+            })
+            self:set_preview_buf(buf)
+            self.win:update_preview_title("Session preview")
+            return
+        end
+
+        local parsed = load_session_from_disk_sync(session_id)
+        local lines, title =
+            build_preview_lines(parsed, "Session " .. session_id)
+        vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+        self:set_preview_buf(buf)
+        if self.win and self.win.update_preview_title then
+            self.win:update_preview_title(title)
+        end
+    end
+
+    return previewer
 end
 
 --- Show session picker using fzf-lua (with fallback to vim.ui.select)
@@ -68,60 +185,88 @@ local function show_fzf_picker(build_items, on_choice, on_delete)
     end
 
     -- Shared state: rebuilt each time the content function runs (initial + reload)
-    local current_items = {}
+    local current_items_by_session_id = {}
 
     --- @param fzf_cb fun(entry: string|nil)
     local function contents(fzf_cb)
-        current_items = build_items()
-        for i, item in ipairs(current_items) do
-            fzf_cb(string.format("%d. %s", i, item.display))
+        local current_items = build_items()
+        current_items_by_session_id = {}
+        for _, item in ipairs(current_items) do
+            current_items_by_session_id[item.session_id] = item
+            fzf_cb(string.format("%s\t%s", item.session_id, item.display))
         end
         fzf_cb() -- EOF
     end
 
+    --- @param selected string[]|nil
+    --- @return table|nil
+    local function get_selected(selected)
+        if not selected or #selected == 0 then
+            return nil
+        end
+
+        local session_id = selected[1]:match("^([^\t]+)\t")
+        if not session_id then
+            return nil
+        end
+
+        local item = current_items_by_session_id[session_id]
+        if not item then
+            return nil
+        end
+
+        return item
+    end
+
     local actions = {
         ["default"] = function(selected)
-            if not selected or #selected == 0 then
-                on_choice(nil)
-                return
-            end
-
-            local idx = tonumber(selected[1]:match("^(%d+)%."))
-            if idx and current_items[idx] then
-                on_choice(current_items[idx])
+            local item = get_selected(selected)
+            if item then
+                on_choice(item)
                 return
             end
             on_choice(nil)
         end,
     }
 
-    local fzf_opts = {}
+    local fzf_opts = {
+        ["--delimiter"] = "\t",
+        ["--with-nth"] = "2..",
+    }
 
     if on_delete then
         actions["ctrl-x"] = {
             fn = function(selected)
-                if not selected or #selected == 0 then
-                    return
-                end
-
-                local idx = tonumber(selected[1]:match("^(%d+)%."))
-                if idx and current_items[idx] then
-                    on_delete(current_items[idx])
+                local item = get_selected(selected)
+                if item then
+                    on_delete(item)
                 end
             end,
             reload = true,
         }
-        fzf_opts["--header"] = "ctrl-x: delete session"
     end
+
+    local header_lines = {
+        "enter: continue selected session",
+    }
+
+    if on_delete then
+        table.insert(header_lines, "ctrl-x: delete session")
+    end
+
+    fzf_opts["--header"] = table.concat(header_lines, "\n")
 
     fzf.fzf_exec(contents, {
         prompt = "Select session to restore> ",
         winopts = {
-            height = 0.4,
-            width = 0.6,
+            height = 0.85,
+            width = 0.9,
             row = 0.5,
             col = 0.5,
         },
+        previewer = function()
+            return create_session_previewer(nil)
+        end,
         fzf_opts = fzf_opts,
         actions = actions,
     })
@@ -160,11 +305,7 @@ function SessionRestore.show_picker(tab_page_id)
             return
         end
 
-        SessionRestore.show_restore_mode_picker(function(mode)
-            if mode then
-                do_restore(choice.session_id, tab_page_id, mode)
-            end
-        end)
+        do_restore(choice.session_id, tab_page_id)
     end, function(choice)
         ChatHistory.delete_session(choice.session_id, function(err)
             if err then
@@ -177,61 +318,6 @@ function SessionRestore.show_picker(tab_page_id)
             Logger.notify("Session deleted", vim.log.levels.INFO)
         end)
     end)
-end
-
---- Show restore mode picker (fork vs continue). Reusable from any entry point.
---- @param callback fun(mode: agentic.RestoreMode|nil)
-function SessionRestore.show_restore_mode_picker(callback)
-    local fzf = load_fzf_lua()
-
-    --- @type {id: agentic.RestoreMode, display: string}[]
-    local options = {
-        { id = "continue", display = "Continue session" },
-        { id = "fork", display = "Fork as new session" },
-    }
-
-    if not fzf then
-        vim.ui.select(options, {
-            prompt = "Restore mode:",
-            format_item = function(item)
-                return item.display
-            end,
-        }, function(choice)
-            callback(choice and choice.id or nil)
-        end)
-        return
-    end
-
-    local display_list = {}
-    for _, opt in ipairs(options) do
-        table.insert(display_list, opt.display)
-    end
-
-    fzf.fzf_exec(display_list, {
-        prompt = "Restore mode> ",
-        winopts = {
-            height = 0.15,
-            width = 0.4,
-            row = 0.5,
-            col = 0.5,
-        },
-        actions = {
-            ["default"] = function(selected)
-                if not selected or #selected == 0 then
-                    callback(nil)
-                    return
-                end
-
-                for _, opt in ipairs(options) do
-                    if opt.display == selected[1] then
-                        callback(opt.id)
-                        return
-                    end
-                end
-                callback(nil)
-            end,
-        },
-    })
 end
 
 --- Replay stored messages to the UI

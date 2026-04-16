@@ -83,23 +83,6 @@ describe("SessionRestore", function()
         callback(session_item)
     end
 
-    --- Simulate picking a restore mode (second vim.ui.select call)
-    --- @param mode_display string|nil The display text to select, or nil to cancel
-    local function select_restore_mode(mode_display)
-        local callback, items = get_ui_select_call(2)
-        if not mode_display then
-            callback(nil)
-            return
-        end
-        for _, item in ipairs(items) do
-            if item.display == mode_display then
-                callback(item)
-                return
-            end
-        end
-        callback(nil)
-    end
-
     before_each(function()
         package.loaded["agentic.session_restore"] = nil
         package.loaded["agentic.ui.chat_history"] = nil
@@ -173,32 +156,25 @@ describe("SessionRestore", function()
 
             select_session(nil)
 
-            -- No restore mode picker shown, no load attempted
+            -- No restore attempted when session selection is cancelled
             assert.spy(vim_ui_select_stub).was.called(1)
             assert.spy(chat_history_load_stub).was.called(0)
         end)
 
-        it("shows restore mode picker after selecting a session", function()
+        it("restores selected session immediately in continue mode", function()
+            local mock_session = create_mock_session()
             setup_list_stub()
+            setup_load_stub(mock_history)
+            setup_registry_stub(mock_session)
 
             SessionRestore.show_picker(1)
             select_session({ session_id = "session-1" })
 
-            -- Session picker + restore mode picker
-            assert.spy(vim_ui_select_stub).was.called(2)
-
-            local mode_opts = vim_ui_select_stub.calls[2][2]
-            assert.equal("Restore mode:", mode_opts.prompt)
-        end)
-
-        it("does nothing when user cancels restore mode picker", function()
-            setup_list_stub()
-
-            SessionRestore.show_picker(1)
-            select_session({ session_id = "session-1" })
-            select_restore_mode(nil)
-
-            assert.spy(chat_history_load_stub).was.called(0)
+            assert.spy(vim_ui_select_stub).was.called(1)
+            assert.spy(chat_history_load_stub).was.called(1)
+            assert.spy(mock_session.restore_from_history).was.called(1)
+            local restore_call = mock_session.restore_from_history.calls[1]
+            assert.is_true(restore_call[3].replace_session)
         end)
     end)
 
@@ -214,7 +190,6 @@ describe("SessionRestore", function()
                 SessionRestore.show_picker(1)
 
                 select_session({ session_id = "session-1" })
-                select_restore_mode("Continue session")
 
                 assert.spy(mock_session.agent.cancel_session).was.called(1)
                 -- :cancel_session(id) → calls[1] = {self, id}
@@ -241,7 +216,6 @@ describe("SessionRestore", function()
             SessionRestore.show_picker(1)
 
             select_session({ session_id = "session-1" })
-            select_restore_mode("Continue session")
 
             assert.spy(mock_session.agent.cancel_session).was.called(1)
             assert.spy(mock_session.widget.clear).was.called(1)
@@ -250,36 +224,6 @@ describe("SessionRestore", function()
             local restore_call = mock_session.restore_from_history.calls[1]
             assert.is_true(restore_call[3].replace_session)
         end)
-    end)
-
-    describe("restore with fork mode", function()
-        it(
-            "always cancels current session and passes replace_session=false",
-            function()
-                local mock_session = create_mock_session({
-                    chat_history = {
-                        messages = { { type = "user" } },
-                    },
-                })
-                setup_list_stub()
-                setup_load_stub(mock_history)
-                setup_registry_stub(mock_session)
-
-                SessionRestore.show_picker(1)
-
-                select_session({ session_id = "session-1" })
-                select_restore_mode("Fork as new session")
-
-                assert.spy(mock_session.agent.cancel_session).was.called(1)
-                assert.spy(mock_session.widget.clear).was.called(1)
-                assert.spy(mock_session.restore_from_history).was.called(1)
-
-                local restore_call = mock_session.restore_from_history.calls[1]
-                assert.equal(mock_history, restore_call[2])
-                assert.is_false(restore_call[3].replace_session)
-                assert.spy(mock_session.widget.show).was.called(1)
-            end
-        )
     end)
 
     describe("current session cancellation", function()
@@ -293,7 +237,6 @@ describe("SessionRestore", function()
             SessionRestore.show_picker(1)
 
             select_session({ session_id = "session-1" })
-            select_restore_mode("Continue session")
 
             -- cancel_session not called because session_id is nil
             assert.spy(mock_session.agent.cancel_session).was.called(0)
@@ -311,7 +254,6 @@ describe("SessionRestore", function()
             SessionRestore.show_picker(1)
 
             select_session({ session_id = "session-1" })
-            select_restore_mode("Continue session")
 
             assert.spy(logger_notify_stub).was.called(1)
             assert.truthy(
@@ -328,138 +270,10 @@ describe("SessionRestore", function()
             SessionRestore.show_picker(1)
 
             select_session({ session_id = "session-1" })
-            select_restore_mode("Fork as new session")
 
             assert.spy(logger_notify_stub).was.called(1)
             assert.truthy(logger_notify_stub.calls[1][1]:match("unknown error"))
             assert.spy(session_registry_stub).was.called(0)
-        end)
-    end)
-
-    describe("show_restore_mode_picker", function()
-        it("shows continue and fork options", function()
-            SessionRestore.show_restore_mode_picker(function() end)
-
-            assert.spy(vim_ui_select_stub).was.called(1)
-
-            local items = vim_ui_select_stub.calls[1][1]
-            assert.equal(2, #items)
-            assert.equal("continue", items[1].id)
-            assert.equal("Continue session", items[1].display)
-            assert.equal("fork", items[2].id)
-            assert.equal("Fork as new session", items[2].display)
-        end)
-
-        it("returns continue when Continue session selected", function()
-            local result = nil
-            SessionRestore.show_restore_mode_picker(function(mode)
-                result = mode
-            end)
-
-            local callback, items = get_ui_select_call(1)
-            callback(items[1]) -- "Continue session"
-
-            assert.equal("continue", result)
-        end)
-
-        it("returns fork when Fork as new session selected", function()
-            local result = nil
-            SessionRestore.show_restore_mode_picker(function(mode)
-                result = mode
-            end)
-
-            local callback, items = get_ui_select_call(1)
-            callback(items[2]) -- "Fork as new session"
-
-            assert.equal("fork", result)
-        end)
-
-        it("returns nil when user cancels", function()
-            --- @type string|nil
-            local result = "not-called"
-            SessionRestore.show_restore_mode_picker(function(mode)
-                result = mode
-            end)
-
-            local callback = get_ui_select_call(1)
-            callback(nil)
-
-            assert.is_nil(result)
-        end)
-
-        it("uses format_item to display option text", function()
-            SessionRestore.show_restore_mode_picker(function() end)
-
-            local opts = vim_ui_select_stub.calls[1][2]
-            assert.is_not_nil(opts.format_item)
-
-            local item = { id = "continue", display = "Continue session" }
-            assert.equal("Continue session", opts.format_item(item))
-        end)
-    end)
-
-    describe("show_restore_mode_picker (fzf-lua)", function()
-        --- @type TestSpy
-        local fzf_exec_spy
-
-        before_each(function()
-            fzf_exec_spy = spy.new(function() end)
-            package.loaded["fzf-lua"] = {
-                fzf_exec = fzf_exec_spy,
-            }
-        end)
-
-        after_each(function()
-            package.loaded["fzf-lua"] = nil
-        end)
-
-        it("passes display strings to fzf_exec", function()
-            SessionRestore.show_restore_mode_picker(function() end)
-
-            assert.spy(fzf_exec_spy).was.called(1)
-
-            local items = fzf_exec_spy.calls[1][1]
-            assert.equal(2, #items)
-            assert.equal("Continue session", items[1])
-            assert.equal("Fork as new session", items[2])
-        end)
-
-        it("returns correct mode from fzf selection", function()
-            local result = nil
-            SessionRestore.show_restore_mode_picker(function(mode)
-                result = mode
-            end)
-
-            local opts = fzf_exec_spy.calls[1][2]
-            opts.actions["default"]({ "Fork as new session" })
-
-            assert.equal("fork", result)
-        end)
-
-        it("returns nil for unrecognized fzf selection", function()
-            --- @type string|nil
-            local result = "not-called"
-            SessionRestore.show_restore_mode_picker(function(mode)
-                result = mode
-            end)
-
-            local opts = fzf_exec_spy.calls[1][2]
-            opts.actions["default"]({ "unknown option" })
-
-            assert.is_nil(result)
-        end)
-
-        it("returns nil when fzf selection is empty", function()
-            --- @type string|nil
-            local result = "not-called"
-            SessionRestore.show_restore_mode_picker(function(mode)
-                result = mode
-            end)
-
-            local opts = fzf_exec_spy.calls[1][2]
-            opts.actions["default"]({})
-
-            assert.is_nil(result)
         end)
     end)
 
@@ -503,6 +317,18 @@ describe("SessionRestore", function()
             return entries
         end
 
+        --- @param entries string[]
+        --- @param session_id string
+        --- @return string|nil
+        local function pick_entry(entries, session_id)
+            for _, entry in ipairs(entries) do
+                if entry:sub(1, #session_id + 1) == (session_id .. "\t") then
+                    return entry
+                end
+            end
+            return nil
+        end
+
         it("passes content function to fzf_exec", function()
             setup_list_stub()
             SessionRestore.show_picker(1)
@@ -521,10 +347,17 @@ describe("SessionRestore", function()
                 assert.is_table(ctrl_x)
                 assert.equal("function", type(ctrl_x.fn))
                 assert.is_true(ctrl_x.reload)
-                assert.equal(
-                    "ctrl-x: delete session",
-                    opts.fzf_opts["--header"]
+                assert.truthy(
+                    opts.fzf_opts["--header"]:match(
+                        "enter: continue selected session"
+                    )
                 )
+                assert.truthy(
+                    opts.fzf_opts["--header"]:match("ctrl%-x: delete")
+                )
+                assert.equal("\t", opts.fzf_opts["--delimiter"])
+                assert.equal("2..", opts.fzf_opts["--with-nth"])
+                assert.equal("function", type(opts.previewer))
             end
         )
 
@@ -537,12 +370,10 @@ describe("SessionRestore", function()
             SessionRestore.show_picker(1)
 
             -- Populate items so actions can resolve indices
-            populate_items()
+            local entries = populate_items()
 
             local actions = get_fzf_actions()
-            actions["ctrl-x"].fn({
-                "1. 2024-01-01 09:20 - First chat",
-            })
+            actions["ctrl-x"].fn({ pick_entry(entries, "session-1") })
 
             assert.spy(chat_history_delete_stub).was.called(1)
             assert.equal("session-1", chat_history_delete_stub.calls[1][1])
@@ -555,12 +386,10 @@ describe("SessionRestore", function()
             end)
 
             SessionRestore.show_picker(1)
-            populate_items()
+            local entries = populate_items()
 
             local actions = get_fzf_actions()
-            actions["ctrl-x"].fn({
-                "2. 2024-01-02 09:20 - Second chat",
-            })
+            actions["ctrl-x"].fn({ pick_entry(entries, "session-2") })
 
             assert.equal("session-2", chat_history_delete_stub.calls[1][1])
         end)
@@ -572,12 +401,10 @@ describe("SessionRestore", function()
             end)
 
             SessionRestore.show_picker(1)
-            populate_items()
+            local entries = populate_items()
 
             local actions = get_fzf_actions()
-            actions["ctrl-x"].fn({
-                "1. 2024-01-01 09:20 - First chat",
-            })
+            actions["ctrl-x"].fn({ pick_entry(entries, "session-1") })
 
             -- fzf_exec called only ONCE (reload is handled by fzf)
             assert.equal(1, fzf_exec_spy.call_count)
@@ -592,12 +419,10 @@ describe("SessionRestore", function()
             end)
 
             SessionRestore.show_picker(1)
-            populate_items()
+            local entries = populate_items()
 
             local actions = get_fzf_actions()
-            actions["ctrl-x"].fn({
-                "1. 2024-01-01 09:20 - First chat",
-            })
+            actions["ctrl-x"].fn({ pick_entry(entries, "session-1") })
 
             assert.is_true(
                 logger_notify_stub:called_with(
@@ -614,12 +439,10 @@ describe("SessionRestore", function()
             end)
 
             SessionRestore.show_picker(1)
-            populate_items()
+            local entries = populate_items()
 
             local actions = get_fzf_actions()
-            actions["ctrl-x"].fn({
-                "1. 2024-01-01 09:20 - First chat",
-            })
+            actions["ctrl-x"].fn({ pick_entry(entries, "session-1") })
 
             assert.spy(logger_notify_stub).was.called(1)
             assert.truthy(
@@ -664,37 +487,44 @@ describe("SessionRestore", function()
             assert.spy(chat_history_delete_stub).was.called(0)
         end)
 
-        it("does nothing when ctrl-x index is out of range", function()
-            setup_list_stub()
+        it(
+            "does nothing when ctrl-x session_id is missing from current items",
+            function()
+                setup_list_stub()
 
-            SessionRestore.show_picker(1)
-            populate_items()
+                SessionRestore.show_picker(1)
+                populate_items()
 
-            local actions = get_fzf_actions()
-            actions["ctrl-x"].fn({ "99. some session" })
+                local actions = get_fzf_actions()
+                actions["ctrl-x"].fn({
+                    "missing-session\tUnknown session",
+                })
 
-            assert.spy(chat_history_delete_stub).was.called(0)
-        end)
+                assert.spy(chat_history_delete_stub).was.called(0)
+            end
+        )
 
-        it("default action triggers restore mode picker", function()
-            setup_list_stub()
-            setup_load_stub(mock_history)
+        it(
+            "default action restores selected session in continue mode",
+            function()
+                local mock_session = create_mock_session()
+                setup_list_stub()
+                setup_load_stub(mock_history)
+                setup_registry_stub(mock_session)
 
-            SessionRestore.show_picker(1)
-            populate_items()
+                SessionRestore.show_picker(1)
+                local entries = populate_items()
 
-            local actions = get_fzf_actions()
-            actions["default"]({
-                "1. 2024-01-01 09:20 - First chat",
-            })
-
-            -- Session picker (fzf) + restore mode picker (fzf)
-            assert.equal(2, fzf_exec_spy.call_count)
-
-            -- Second fzf_exec is the restore mode picker
-            local mode_opts = get_fzf_opts(2)
-            assert.equal("Restore mode> ", mode_opts.prompt)
-        end)
+                local session_actions = get_fzf_actions()
+                session_actions["default"]({ pick_entry(entries, "session-1") })
+                assert.equal(1, fzf_exec_spy.call_count)
+                assert.spy(chat_history_load_stub).was.called(1)
+                assert.equal("session-1", chat_history_load_stub.calls[1][1])
+                assert.spy(mock_session.restore_from_history).was.called(1)
+                local restore_call = mock_session.restore_from_history.calls[1]
+                assert.is_true(restore_call[3].replace_session)
+            end
+        )
 
         it("default action handles empty selection in fzf", function()
             setup_list_stub()
@@ -708,7 +538,7 @@ describe("SessionRestore", function()
             assert.spy(chat_history_load_stub).was.called(0)
         end)
 
-        it("default action handles invalid index pattern in fzf", function()
+        it("default action handles invalid selection format in fzf", function()
             setup_list_stub()
 
             SessionRestore.show_picker(1)
@@ -745,20 +575,22 @@ describe("SessionRestore", function()
 
                 -- Delete first session
                 local actions = get_fzf_actions()
-                actions["ctrl-x"].fn({
-                    "1. 2024-01-01 09:20 - First chat",
-                })
+                actions["ctrl-x"].fn({ pick_entry(entries1, "session-1") })
 
                 -- Simulate fzf reload: call content function again
                 local entries2 = populate_items()
                 assert.equal(1, #entries2)
-                assert.truthy(entries2[1]:match("Second chat"))
+                assert.truthy(
+                    pick_entry(entries2, "session-2"):match("Second chat")
+                )
             end
         )
 
-        it("restore mode picker shown after reload and select", function()
+        it("restores in continue mode after reload and select", function()
+            local mock_session = create_mock_session()
             setup_list_stub()
             setup_load_stub(mock_history)
+            setup_registry_stub(mock_session)
             chat_history_delete_stub:invokes(function(_sid, callback)
                 callback(nil)
             end)
@@ -766,22 +598,18 @@ describe("SessionRestore", function()
             SessionRestore.show_picker(42)
 
             -- Populate items and delete one
-            populate_items()
             local actions = get_fzf_actions()
-            actions["ctrl-x"].fn({
-                "1. 2024-01-01 09:20 - First chat",
-            })
+            local entries = populate_items()
+            actions["ctrl-x"].fn({ pick_entry(entries, "session-1") })
 
             -- Simulate reload and then select
-            populate_items()
-            actions["default"]({
-                "1. 2024-01-01 09:20 - First chat",
-            })
+            local reloaded_entries = populate_items()
+            actions["default"]({ pick_entry(reloaded_entries, "session-2") })
+            assert.equal(1, fzf_exec_spy.call_count)
 
-            -- Session picker + restore mode picker
-            assert.equal(2, fzf_exec_spy.call_count)
-            local mode_opts = get_fzf_opts(2)
-            assert.equal("Restore mode> ", mode_opts.prompt)
+            assert.spy(mock_session.restore_from_history).was.called(1)
+            local restore_call = mock_session.restore_from_history.calls[1]
+            assert.is_true(restore_call[3].replace_session)
         end)
     end)
 end)

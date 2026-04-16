@@ -1600,9 +1600,9 @@ function SessionManager:restore_from_history(history, opts)
         or nil
     local original_timestamp = opts.replace_session and history.timestamp or nil
 
-    if opts.replace_session then
-        self._replace_session = true
-    end
+    -- Always reset this flag per restore operation so previous mode
+    -- does not leak into the next restore.
+    self._replace_session = opts.replace_session == true
 
     local SessionRestore = require("agentic.session_restore")
 
