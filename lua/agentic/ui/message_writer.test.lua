@@ -453,11 +453,17 @@ describe("agentic.ui.MessageWriter", function()
             assert.equal("below", lines[3])
         end)
 
-        it("clears pending newline on _clear_thought_state", function()
-            writer:write_message_chunk(make_message_update("text\n"))
+        it("clears pending newline on thought-to-message transition", function()
+            writer:write_message_chunk({
+                sessionUpdate = "agent_thought_chunk",
+                content = {
+                    type = "text",
+                    text = "thinking chunk that ends with newline\n",
+                },
+            })
             assert.is_true(writer._pending_newline)
 
-            writer:_clear_thought_state()
+            writer:write_message_chunk(make_message_update("regular chunk"))
             assert.is_nil(writer._pending_newline)
         end)
 
