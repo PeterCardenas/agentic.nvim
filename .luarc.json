@@ -6,7 +6,6 @@
   },
   "diagnostics": {
     "disable": [
-      "annotation-usage-error",
       "assign-type-mismatch",
       "call-non-callable",
       "cast-type-mismatch",

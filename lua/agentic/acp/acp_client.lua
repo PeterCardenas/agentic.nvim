@@ -509,15 +509,14 @@ function ACPClient:__handle_request_permission(message_id, request)
     self:__with_subscriber(session_id, function(subscriber)
         -- Every change to this block MUST be reflected in Gemini's ACP Adapter, as it has custom implementation @see gemini_acp_adapter.lua
         subscriber.on_request_permission(request, function(option_id)
-            self:__send_result(
-                message_id,
-                { --- @type agentic.acp.RequestPermissionOutcome
-                    outcome = {
-                        outcome = "selected",
-                        optionId = option_id,
-                    },
-                }
-            )
+            --- @type agentic.acp.RequestPermissionOutcome
+            local outcome = {
+                outcome = {
+                    outcome = "selected",
+                    optionId = option_id,
+                },
+            }
+            self:__send_result(message_id, outcome)
         end)
     end)
 end

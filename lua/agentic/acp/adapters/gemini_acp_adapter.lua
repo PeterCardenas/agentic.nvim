@@ -122,15 +122,14 @@ function GeminiACPAdapter:__handle_request_permission(message_id, request)
                 self:__handle_tool_call_update(session_id, update)
             end
 
-            self:__send_result(
-                message_id,
-                { --- @type agentic.acp.RequestPermissionOutcome
-                    outcome = {
-                        outcome = "selected",
-                        optionId = option_id,
-                    },
-                }
-            )
+            --- @type agentic.acp.RequestPermissionOutcome
+            local outcome = {
+                outcome = {
+                    outcome = "selected",
+                    optionId = option_id,
+                },
+            }
+            self:__send_result(message_id, outcome)
         end)
     end)
 end
