@@ -210,6 +210,13 @@ function Agentic.switch_model()
     end)
 end
 
+--- Switch a session config option via two-step picker (option/value).
+function Agentic.switch_config_option()
+    SessionRegistry.get_session_for_tab_page(nil, function(session)
+        session:switch_config_option()
+    end)
+end
+
 --- Stops the agent's current generation or tool execution
 --- The session remains active and ready for the next prompt
 --- Safe to call multiple times or when no generation is active
@@ -314,6 +321,14 @@ function Agentic.setup(opts)
         Config.keymaps.widget.switch_model_global,
         Agentic.switch_model,
         { desc = "Agentic: Switch model", silent = true }
+    )
+
+    -- Set up global keymap for switching config options
+    vim.keymap.set(
+        "n",
+        Config.keymaps.widget.switch_config_option_global,
+        Agentic.switch_config_option,
+        { desc = "Agentic: Switch config option", silent = true }
     )
 
     vim.api.nvim_create_autocmd("VimLeavePre", {

@@ -85,15 +85,19 @@ describe("agentic.acp.AgentConfigOptions", function()
     describe("constructor", function()
         it("registers keymaps for mode and model on all buffers", function()
             -- multi_keymap_set is stubbed in before_each; constructor called there
-            -- Each buffer gets 2 keymaps (change_mode + switch_model),
-            -- we pass 1 buffer so expect 2 calls
-            assert.stub(multi_keymap_stub).was.called(2)
+            -- Each buffer gets 3 keymaps
+            -- (change_mode + switch_model + switch_config_option)
+            -- we pass 1 buffer so expect 3 calls
+            assert.stub(multi_keymap_stub).was.called(3)
 
             local mode_call = multi_keymap_stub.calls[1]
             assert.equal("function", type(mode_call[3]))
 
             local model_call = multi_keymap_stub.calls[2]
             assert.equal("function", type(model_call[3]))
+
+            local config_call = multi_keymap_stub.calls[3]
+            assert.equal("function", type(config_call[3]))
         end)
     end)
 
@@ -229,7 +233,7 @@ describe("agentic.acp.AgentConfigOptions", function()
 
                 config_options:set_initial_mode(
                     "plan",
-                    handler --[[@as fun(mode: string, is_legacy: boolean|nil): any]]
+                    handler --[[@as fun(mode: string, is_legacy: boolean|nil): nil]]
                 )
 
                 assert.spy(handler).was.called(1)
@@ -255,7 +259,7 @@ describe("agentic.acp.AgentConfigOptions", function()
 
             config_options:set_initial_mode(
                 "legacy-plan",
-                handler --[[@as fun(mode: string, is_legacy: boolean|nil): any]]
+                handler --[[@as fun(mode: string, is_legacy: boolean|nil): nil]]
             )
 
             assert.spy(handler).was.called(1)
@@ -269,7 +273,7 @@ describe("agentic.acp.AgentConfigOptions", function()
 
             config_options:set_initial_mode(
                 "normal",
-                handler --[[@as fun(mode: string, is_legacy: boolean|nil): any]]
+                handler --[[@as fun(mode: string, is_legacy: boolean|nil): nil]]
             )
 
             assert.spy(handler).was.called(0)
@@ -280,7 +284,7 @@ describe("agentic.acp.AgentConfigOptions", function()
 
             config_options:set_initial_mode(
                 "nonexistent",
-                handler --[[@as fun(mode: string, is_legacy: boolean|nil): any]]
+                handler --[[@as fun(mode: string, is_legacy: boolean|nil): nil]]
             )
 
             assert.spy(handler).was.called(0)
@@ -295,11 +299,11 @@ describe("agentic.acp.AgentConfigOptions", function()
 
             config_options:set_initial_mode(
                 nil,
-                handler --[[@as fun(mode: string, is_legacy: boolean|nil): any]]
+                handler --[[@as fun(mode: string, is_legacy: boolean|nil): nil]]
             )
             config_options:set_initial_mode(
                 "",
-                handler --[[@as fun(mode: string, is_legacy: boolean|nil): any]]
+                handler --[[@as fun(mode: string, is_legacy: boolean|nil): nil]]
             )
 
             assert.spy(handler).was.called(0)
@@ -319,7 +323,7 @@ describe("agentic.acp.AgentConfigOptions", function()
                 assert.has_no_errors(function()
                     fresh:set_initial_mode(
                         "nonexistent",
-                        handler --[[@as fun(mode: string, is_legacy: boolean|nil): any]]
+                        handler --[[@as fun(mode: string, is_legacy: boolean|nil): nil]]
                     )
                 end)
 
@@ -364,7 +368,7 @@ describe("agentic.acp.AgentConfigOptions", function()
                 end)
 
                 config_options:show_mode_selector(
-                    handler --[[@as fun(mode: string, is_legacy: boolean): any]]
+                    handler --[[@as fun(mode: string, is_legacy: boolean): nil]]
                 )
 
                 assert.spy(handler).was.called_with("plan", false)
@@ -378,14 +382,14 @@ describe("agentic.acp.AgentConfigOptions", function()
                 on_choice(items[1])
             end)
             config_options:show_mode_selector(
-                handler --[[@as fun(mode: string, is_config_option: boolean): any]]
+                handler --[[@as fun(mode: string, is_config_option: boolean): nil]]
             )
 
             select_stub:invokes(function(_items, _opts, on_choice)
                 on_choice(nil)
             end)
             config_options:show_mode_selector(
-                handler --[[@as fun(mode: string, is_config_option: boolean): any]]
+                handler --[[@as fun(mode: string, is_config_option: boolean): nil]]
             )
 
             assert.spy(handler).was.called(0)
@@ -421,7 +425,7 @@ describe("agentic.acp.AgentConfigOptions", function()
                 end)
 
                 local shown = fresh:show_mode_selector(
-                    handler --[[@as fun(mode: string, is_config_option: boolean): any]]
+                    handler --[[@as fun(mode: string, is_config_option: boolean): nil]]
                 )
 
                 assert.is_true(shown)
@@ -499,7 +503,7 @@ describe("agentic.acp.AgentConfigOptions", function()
                 end)
 
                 config_options:show_model_selector(
-                    handler --[[@as fun(model: string, is_legacy: boolean): any]]
+                    handler --[[@as fun(model: string, is_legacy: boolean): nil]]
                 )
 
                 assert.spy(handler).was.called_with("claude-opus", false)
@@ -536,7 +540,7 @@ describe("agentic.acp.AgentConfigOptions", function()
                 end)
 
                 local shown = fresh:show_model_selector(
-                    handler --[[@as fun(model: string, is_legacy: boolean): any]]
+                    handler --[[@as fun(model: string, is_legacy: boolean): nil]]
                 )
 
                 assert.is_true(shown)
@@ -565,6 +569,62 @@ describe("agentic.acp.AgentConfigOptions", function()
 
             notify_stub:revert()
         end)
+    end)
+
+    describe("show_config_option_picker", function()
+        --- @type TestStub
+        local select_stub
+
+        before_each(function()
+            select_stub = spy.stub(vim.ui, "select")
+        end)
+
+        after_each(function()
+            select_stub:revert()
+        end)
+
+        it("returns false and notifies when no config options exist", function()
+            local Logger = require("agentic.utils.logger")
+            local notify_stub = spy.stub(Logger, "notify")
+
+            local shown = config_options:show_config_option_picker(
+                function() end
+            )
+
+            assert.is_false(shown)
+            assert.stub(notify_stub).was.called(1)
+
+            notify_stub:revert()
+        end)
+
+        it(
+            "opens two-step picker and returns selected option id/value",
+            function()
+                config_options:set_options({ mode_option, thought_option })
+
+                local handler = spy.new(function() end)
+                local call_index = 0
+                select_stub:invokes(function(items, _opts, on_choice)
+                    call_index = call_index + 1
+                    if call_index == 1 then
+                        on_choice(items[1])
+                    else
+                        on_choice(items[2])
+                    end
+                end)
+
+                local shown = config_options:show_config_option_picker(
+                    handler --[[@as fun(config_id: string, option_value: string): nil]]
+                )
+
+                assert.is_true(shown)
+                assert.stub(select_stub).was.called(2)
+                assert.spy(handler).was.called(1)
+                local args = handler.calls[1]
+                assert.equal("mode-1", args[1])
+                assert.equal("plan", args[2])
+            end
+        )
     end)
 
     describe("set_legacy_models", function()

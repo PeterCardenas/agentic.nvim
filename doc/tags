@@ -66,6 +66,7 @@ agentic.restore_session()	agentic.txt	/*agentic.restore_session()*
 agentic.rotate_layout()	agentic.txt	/*agentic.rotate_layout()*
 agentic.setup()	agentic.txt	/*agentic.setup()*
 agentic.stop_generation()	agentic.txt	/*agentic.stop_generation()*
+agentic.switch_config_option()	agentic.txt	/*agentic.switch_config_option()*
 agentic.switch_provider()	agentic.txt	/*agentic.switch_provider()*
 agentic.toggle()	agentic.txt	/*agentic.toggle()*
 agentic.txt	agentic.txt	/*agentic.txt*

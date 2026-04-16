@@ -75,6 +75,10 @@ function ACPClient:new(config, on_ready)
                 writeTextFile = false,
             },
             terminal = false,
+            _meta = {
+                -- Cursor ACP needs this to show parameterized config options
+                parameterizedModelPicker = true,
+            },
         },
         callbacks = {},
         transport = nil,
@@ -181,7 +185,7 @@ end
 --- @protected
 --- @param code number
 --- @param message string
---- @param data any|nil
+--- @param data agentic.acp.JSONValue|nil
 --- @return agentic.acp.ACPError
 function ACPClient:__create_error(code, message, data)
     return {
@@ -588,6 +592,71 @@ function ACPClient:_authenticate(method_id)
     end)
 end
 
+--- @param config_options agentic.acp.ConfigOption[]|nil
+--- @param config_id string
+--- @return agentic.acp.ConfigOption|nil
+local function find_config_option(config_options, config_id)
+    if type(config_options) ~= "table" then
+        return nil
+    end
+
+    for _, option in ipairs(config_options) do
+        if option.id == config_id then
+            return option
+        end
+    end
+
+    return nil
+end
+
+--- @param option agentic.acp.ConfigOption
+--- @param value string
+--- @return boolean
+local function config_option_supports_value(option, value)
+    if not option.options then
+        return false
+    end
+
+    for _, opt in ipairs(option.options) do
+        if opt.value == value then
+            return true
+        end
+    end
+
+    return false
+end
+
+--- @param default_config_options table<string, string>
+--- @return string[] ordered_ids
+local function build_default_config_apply_order(default_config_options)
+    --- @type string[]
+    local ordered_ids = {}
+
+    if default_config_options.model then
+        table.insert(ordered_ids, "model")
+    end
+
+    for config_id, _ in pairs(default_config_options) do
+        if config_id ~= "model" then
+            table.insert(ordered_ids, config_id)
+        end
+    end
+
+    table.sort(ordered_ids, function(a, b)
+        if a == "model" then
+            return true
+        end
+
+        if b == "model" then
+            return false
+        end
+
+        return a < b
+    end)
+
+    return ordered_ids
+end
+
 --- @param handlers agentic.acp.ClientHandlers
 --- @param callback fun(result: agentic.acp.SessionCreationResponse|nil, err: agentic.acp.ACPError|nil)
 function ACPClient:create_session(handlers, callback)
@@ -627,31 +696,133 @@ function ACPClient:create_session(handlers, callback)
             callback(result, nil)
         end
 
-        if self.provider_config.default_model then
-            self:_send_request("session/set_model", {
-                sessionId = result.sessionId,
-                modelId = self.provider_config.default_model,
-            }, function(_set_model_result, set_model_err)
-                if set_model_err then
-                    Logger.notify(
-                        "Failed to set default model: "
-                            .. (
-                                set_model_err.message
-                                or vim.inspect(set_model_err)
-                            ),
-                        vim.log.levels.ERROR,
-                        { title = "🐞 Session creation error" }
-                    )
+        --- @type table<string, string>
+        local default_config_options = vim.tbl_extend(
+            "force",
+            {},
+            self.provider_config.default_config_options or {}
+        )
 
-                    callback(nil, set_model_err)
+        if
+            self.provider_config.default_model
+            and default_config_options.model == nil
+        then
+            default_config_options.model = self.provider_config.default_model
+        end
+
+        if vim.tbl_isempty(default_config_options) then
+            cb()
+            return
+        end
+
+        local config_apply_order =
+            build_default_config_apply_order(default_config_options)
+        local current_config_options = result.configOptions
+
+        local function apply_next(index)
+            local config_id = config_apply_order[index]
+            if not config_id then
+                if current_config_options ~= nil then
+                    result.configOptions = current_config_options
+                end
+                cb()
+                return
+            end
+
+            local desired_value = default_config_options[config_id]
+            if desired_value == nil or desired_value == "" then
+                apply_next(index + 1)
+                return
+            end
+
+            local config_option =
+                find_config_option(current_config_options, config_id)
+
+            if config_option then
+                if
+                    not config_option_supports_value(
+                        config_option,
+                        desired_value
+                    )
+                then
+                    Logger.debug(
+                        "Skipping unsupported default config option value",
+                        config_id,
+                        desired_value
+                    )
+                    apply_next(index + 1)
                     return
                 end
 
-                cb()
-            end)
-        else
-            cb()
+                if config_option.currentValue == desired_value then
+                    apply_next(index + 1)
+                    return
+                end
+
+                self:set_config_option(
+                    result.sessionId,
+                    config_id,
+                    desired_value,
+                    function(set_result, set_err)
+                        if set_err then
+                            Logger.notify(
+                                string.format(
+                                    "Failed to set default config '%s': %s",
+                                    config_id,
+                                    set_err.message or vim.inspect(set_err)
+                                ),
+                                vim.log.levels.ERROR,
+                                { title = "🐞 Session creation error" }
+                            )
+
+                            callback(nil, set_err)
+                            return
+                        end
+
+                        if set_result and set_result.configOptions then
+                            current_config_options = set_result.configOptions
+                        end
+
+                        apply_next(index + 1)
+                    end
+                )
+                return
+            end
+
+            if config_id == "model" then
+                self:set_model(
+                    result.sessionId,
+                    desired_value,
+                    function(set_result, set_model_err)
+                        if set_model_err then
+                            Logger.notify(
+                                "Failed to set default model: "
+                                    .. (
+                                        set_model_err.message
+                                        or vim.inspect(set_model_err)
+                                    ),
+                                vim.log.levels.ERROR,
+                                { title = "🐞 Session creation error" }
+                            )
+
+                            callback(nil, set_model_err)
+                            return
+                        end
+
+                        if set_result and set_result.configOptions then
+                            current_config_options = set_result.configOptions
+                        end
+
+                        apply_next(index + 1)
+                    end
+                )
+                return
+            end
+
+            apply_next(index + 1)
         end
+
+        apply_next(1)
     end)
 end
 
@@ -780,6 +951,10 @@ return ACPClient
 --- @class agentic.acp.ClientCapabilities
 --- @field fs agentic.acp.FileSystemCapability
 --- @field terminal boolean
+--- @field _meta? agentic.acp.ClientCapabilityMeta
+
+--- @class agentic.acp.ClientCapabilityMeta
+--- @field parameterizedModelPicker? boolean
 
 --- @class agentic.acp.InitializeParams
 --- @field protocolVersion number
@@ -855,6 +1030,11 @@ return ACPClient
 --- | "medium"
 --- | "low"
 
+--- @alias agentic.acp.JSONPrimitive string|number|boolean|nil
+--- @alias agentic.acp.JSONValue agentic.acp.JSONPrimitive|agentic.acp.JSONObject|agentic.acp.JSONArray
+--- @alias agentic.acp.JSONObject table<string, agentic.acp.JSONValue>
+--- @alias agentic.acp.JSONArray agentic.acp.JSONValue[]
+
 --- @class agentic.acp.RawInput
 --- @field file_path string
 --- @field new_string? string
@@ -901,7 +1081,7 @@ return ACPClient
 --- @class agentic.acp.AvailableCommand
 --- @field name string
 --- @field description string
---- @field input? table<string, any>
+--- @field input? table<string, agentic.acp.JSONValue>
 
 --- @class agentic.acp.AgentMode
 --- @field id string
@@ -930,6 +1110,7 @@ return ACPClient
 --- | "mode"
 --- | "model"
 --- | "thought_level"
+--- | "model_config"
 
 --- @class agentic.acp.ConfigOption
 --- @field id string
@@ -1029,7 +1210,7 @@ return ACPClient
 --- @class agentic.acp.ACPError
 --- @field code number
 --- @field message string
---- @field data? any
+--- @field data? agentic.acp.JSONValue
 
 --- @alias agentic.acp.ClientHandlers.on_session_update fun(update: agentic.acp.SessionUpdateMessage): nil
 --- @alias agentic.acp.ClientHandlers.on_request_permission fun(request: agentic.acp.RequestPermission, callback: fun(option_id: string | nil)): nil
@@ -1072,5 +1253,6 @@ return ACPClient
 --- @field auth_method? string Authentication method
 --- @field default_mode? string Default mode ID to set on session creation
 --- @field default_model? string Default model ID to set on session creation
+--- @field default_config_options? table<string, string> Default config options to set on session creation (model-dependent options are re-evaluated after model changes)
 --- @field auto_approve? boolean Automatically approve all permission requests
 --- @field mcp_servers? agentic.acp.McpServer[] MCP servers to connect on session creation

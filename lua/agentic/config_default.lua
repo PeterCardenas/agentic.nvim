@@ -58,7 +58,7 @@
 
 --- Window options passed to nvim_set_option_value
 --- Overrides default options (wrap, linebreak, winfixbuf, winfixheight)
---- @alias agentic.UserConfig.WinOpts table<string, any>
+--- @alias agentic.UserConfig.WinOpts table<string, boolean|number|string>
 
 --- @class agentic.UserConfig.ChatIcons
 --- @field user string
@@ -246,6 +246,7 @@ local ConfigDefault = {
             },
             switch_provider = "<localLeader>s",
             switch_model = "<localLeader>m",
+            switch_config_option = "<localLeader>o",
             cycle_windows = {
                 {
                     "<Tab>",
@@ -260,6 +261,7 @@ local ConfigDefault = {
             },
             toggle_prompt_code = "<leader>af", -- Global keymap to toggle between prompt and code window
             switch_model_global = "<leader>am", -- Global keymap to switch model
+            switch_config_option_global = "<leader>ao", -- Global keymap to switch config options
         },
 
         --- Keys bindings for the prompt buffer

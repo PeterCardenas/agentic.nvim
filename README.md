@@ -257,6 +257,10 @@ property:
 - `env` (table, optional) - Environment variables to set for the process
 - `default_mode` (string, optional) - Default mode ID to set on session creation
   (e.g., `"bypassPermissions"`, `"plan"`)
+- `default_model` (string, optional) - Default model ID to set on session creation
+- `default_config_options` (table<string, string>, optional) - Default session
+  config options to apply after session creation (for example `model`,
+  `reasoning`, `fast`)
 
 > [!NOTE]  
 > Customizing a provider only requires specifying the fields you want to
@@ -285,10 +289,10 @@ configure it per provider:
 The mode will only be set if it's available from the provider. Use `<S-Tab>` to
 see available modes for your provider.
 
-#### Setting an Initial Model
+#### Setting an Initial Model and Parameterized Options
 
-If you want to start sessions with a specific model instead of the provider's
-default:
+If you want to start sessions with a specific model (and model-dependent
+options) instead of the provider's default:
 
 ```lua
 {
@@ -298,15 +302,25 @@ default:
     acp_providers = {
       ["claude-agent-acp"] = {
         -- Automatically switch to this model when a new session starts
-        initial_model = "haiku",
+        default_model = "haiku",
+      },
+      ["cursor-acp"] = {
+        -- Cursor exposes parameterized config IDs like reasoning/fast
+        -- automatically; just set the values you want.
+        -- Model is set first, then dependent options are validated and applied
+        default_config_options = {
+          model = "gpt-5.3-codex",
+          reasoning = "high",
+          fast = "true",
+        },
       },
     },
   },
 }
 ```
 
-The model will only be set if it's available from the provider. Use
-`<localLeader>m` to see available models for your provider.
+The model and options are only applied when supported by the provider and by
+the selected model's current `configOptions` surface.
 
 ### Window Layout
 
@@ -422,6 +436,7 @@ header parts:
 | `:lua require("agentic").stop_generation()`                  | Stop current generation or tool execution (session stays active)  |
 | `:lua require("agentic").restore_session()`                  | Show session picker to restore a previous session and continue    |
 | `:lua require("agentic").switch_provider()`                  | Switch ACP provider mid-session (shows picker, preserves history) |
+| `:lua require("agentic").switch_config_option()`             | Two-step picker for session config options (name then value)      |
 | `:lua require("agentic").rotate_layout()`                    | Rotate window position through layouts (right → bottom → left)    |
 
 ### Optional Parameters
@@ -464,6 +479,8 @@ These keybindings are automatically set in Agentic buffers:
 | `<C-v>`          | i     | Paste image from clipboard (same as Claude-code)                |
 | `<localLeader>s` | n     | Switch ACP provider (preserves chat history)                    |
 | `<localLeader>m` | n     | Switch model without (preserves chat history)                   |
+| `<localLeader>o` | n     | Two-step config picker (select option, then value)              |
+| `<leader>ao`     | n     | Global two-step config picker (option, then value)              |
 | `q`              | n     | Close chat widget                                               |
 | `d`              | n     | Remove file, code selection, or diagnostic at cursor            |
 | `d`              | v     | Remove multiple selected files, code selections, or diagnostics |
@@ -492,6 +509,8 @@ your setup:
         },
         switch_provider = "<localLeader>s",  -- Switch ACP provider
         switch_model = "<localLeader>m",     -- Switch model
+        switch_config_option = "<localLeader>o", -- Two-step config picker
+        switch_config_option_global = "<leader>ao", -- Global two-step config picker
       },
 
       -- Keybindings for the prompt buffer only

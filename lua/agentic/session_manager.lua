@@ -193,6 +193,9 @@ function SessionManager:new(tab_page_id)
         end,
         function(model_id, is_legacy)
             self:_handle_model_change(model_id, is_legacy)
+        end,
+        function(config_id, option_value)
+            self:_handle_config_option_change(config_id, option_value)
         end
     )
 
@@ -828,15 +831,70 @@ function SessionManager:_handle_model_change(model_id, is_legacy)
                 vim.log.levels.ERROR
             )
         else
-            if result and result.configOptions then
+            local latest_config_options = result and result.configOptions or nil
+            if latest_config_options then
                 Logger.debug("received result after setting model")
-                self:_handle_new_config_options(result.configOptions)
+                self:_handle_new_config_options(latest_config_options)
             end
 
-            Logger.notify(
-                "Model changed to: " .. model_id,
-                vim.log.levels.INFO,
-                { title = "Agentic Model changed" }
+            if is_legacy then
+                Logger.notify(
+                    "Model changed to: " .. model_id,
+                    vim.log.levels.INFO,
+                    { title = "Agentic Model changed" }
+                )
+                return
+            end
+
+            local defaults = self.agent.provider_config.default_config_options
+            if type(defaults) ~= "table" or vim.tbl_isempty(defaults) then
+                Logger.notify(
+                    "Model changed to: " .. model_id,
+                    vim.log.levels.INFO,
+                    { title = "Agentic Model changed" }
+                )
+                return
+            end
+
+            --- @type table<string, string>
+            local dependent_defaults = {}
+            for config_id, value in pairs(defaults) do
+                if config_id ~= "model" and type(value) == "string" then
+                    dependent_defaults[config_id] = value
+                end
+            end
+
+            if vim.tbl_isempty(dependent_defaults) then
+                Logger.notify(
+                    "Model changed to: " .. model_id,
+                    vim.log.levels.INFO,
+                    { title = "Agentic Model changed" }
+                )
+                return
+            end
+
+            self:_apply_default_config_options(
+                dependent_defaults,
+                latest_config_options,
+                function(_applied_result, apply_err)
+                    if apply_err then
+                        Logger.notify(
+                            string.format(
+                                "Model changed, but failed to apply dependent options: %s",
+                                apply_err.message or vim.inspect(apply_err)
+                            ),
+                            vim.log.levels.WARN,
+                            { title = "Agentic Model changed" }
+                        )
+                        return
+                    end
+
+                    Logger.notify(
+                        "Model changed to: " .. model_id,
+                        vim.log.levels.INFO,
+                        { title = "Agentic Model changed" }
+                    )
+                end
             )
         end
     end
@@ -851,6 +909,160 @@ function SessionManager:_handle_model_change(model_id, is_legacy)
             callback
         )
     end
+end
+
+--- @param config_id string
+--- @param config_value string
+function SessionManager:_handle_config_option_change(config_id, config_value)
+    if not self.session_id then
+        return
+    end
+
+    if config_id == "model" then
+        self:_handle_model_change(config_value, false)
+        return
+    end
+
+    self.agent:set_config_option(
+        self.session_id,
+        config_id,
+        config_value,
+        function(result, err)
+            if err then
+                Logger.notify(
+                    string.format(
+                        "Failed to change %s to '%s': %s",
+                        config_id,
+                        config_value,
+                        err.message
+                    ),
+                    vim.log.levels.ERROR
+                )
+                return
+            end
+
+            if result and result.configOptions then
+                self:_handle_new_config_options(result.configOptions)
+            end
+
+            Logger.notify(
+                string.format("Updated %s to: %s", config_id, config_value),
+                vim.log.levels.INFO,
+                { title = "Agentic Config changed" }
+            )
+        end
+    )
+end
+
+--- @param config_options agentic.acp.ConfigOption[]|nil
+--- @param config_id string
+--- @return agentic.acp.ConfigOption|nil
+function P.find_config_option(config_options, config_id)
+    if type(config_options) ~= "table" then
+        return nil
+    end
+
+    for _, option in ipairs(config_options) do
+        if option.id == config_id then
+            return option
+        end
+    end
+
+    return nil
+end
+
+--- @param option agentic.acp.ConfigOption
+--- @param value string
+--- @return boolean
+function P.config_option_supports_value(option, value)
+    if not option.options then
+        return false
+    end
+
+    for _, opt in ipairs(option.options) do
+        if opt.value == value then
+            return true
+        end
+    end
+
+    return false
+end
+
+--- @param default_config_options table<string, string>
+--- @return string[] ordered_ids
+function P.build_default_config_order(default_config_options)
+    --- @type string[]
+    local ordered_ids = {}
+    for config_id, _ in pairs(default_config_options) do
+        table.insert(ordered_ids, config_id)
+    end
+    table.sort(ordered_ids)
+    return ordered_ids
+end
+
+--- @param default_config_options table<string, string>
+--- @param config_options agentic.acp.ConfigOption[]|nil
+--- @param callback fun(result: table|nil, err: agentic.acp.ACPError|nil)
+function SessionManager:_apply_default_config_options(
+    default_config_options,
+    config_options,
+    callback
+)
+    local ordered_ids = P.build_default_config_order(default_config_options)
+    local current_config_options = config_options
+
+    local function apply_next(index)
+        local config_id = ordered_ids[index]
+        if not config_id then
+            callback({ configOptions = current_config_options }, nil)
+            return
+        end
+
+        local target_value = default_config_options[config_id]
+        if target_value == nil or target_value == "" then
+            apply_next(index + 1)
+            return
+        end
+
+        local option = P.find_config_option(current_config_options, config_id)
+        if not option then
+            apply_next(index + 1)
+            return
+        end
+
+        if not P.config_option_supports_value(option, target_value) then
+            apply_next(index + 1)
+            return
+        end
+
+        if option.currentValue == target_value then
+            apply_next(index + 1)
+            return
+        end
+
+        self.agent:set_config_option(
+            self.session_id,
+            config_id,
+            target_value,
+            function(result, err)
+                if err then
+                    callback(nil, err)
+                    return
+                end
+
+                if result and result.configOptions then
+                    current_config_options = result.configOptions
+                    --- @type agentic.acp.ConfigOption[]
+                    local updated_options = result.configOptions
+                    self:_handle_new_config_options(updated_options)
+                end
+
+                apply_next(index + 1)
+            end
+        )
+    end
+
+    apply_next(1)
 end
 
 --- Schedule a coalesced re-render of function-based headers.
@@ -1342,6 +1554,15 @@ function SessionManager:switch_model()
     self.config_options:show_model_selector(function(model_id, is_legacy)
         self:_handle_model_change(model_id, is_legacy)
     end)
+end
+
+--- Show a two-step picker (option name, then option value) and apply selection.
+function SessionManager:switch_config_option()
+    self.config_options:show_config_option_picker(
+        function(config_id, option_value)
+            self:_handle_config_option_change(config_id, option_value)
+        end
+    )
 end
 
 --- Switch to a different ACP provider while preserving chat UI and history.

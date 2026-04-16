@@ -228,14 +228,19 @@ acp_providers ~
 
   Customize built-in providers or add new ACP-compatible providers.
   Each entry supports: `name`, `command`, `args`, `env`,
-  `default_mode`, `initial_model`.
+  `default_mode`, `default_model`, `default_config_options`,
 
   `default_mode`   Start every session in this mode (e.g.,
                    `"bypassPermissions"`). Use <S-Tab> in the
                    chat widget to see modes your provider offers.
-  `initial_model`  Override the provider's default model (e.g.,
+  `default_model`  Override the provider's default model (e.g.,
                    `"haiku"`). Use <localLeader>m in the chat
                    widget to see available models.
+  `default_config_options`
+                   Apply default config options after session
+                   creation. Model is applied first, then dependent
+                   options are validated against current provider
+                   config options.
 
 >lua
   --- @type agentic.PartialUserConfig
@@ -243,9 +248,17 @@ acp_providers ~
     acp_providers = {
       ["claude-agent-acp"] = {
         default_mode = "bypassPermissions",
-        initial_model = "haiku",
+        default_model = "haiku",
         env = {
           ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY"),
+        },
+      },
+      ["cursor-acp"] = {
+        -- Cursor parameterized options are enabled automatically.
+        default_config_options = {
+          model = "gpt-5.3-codex",
+          reasoning = "high",
+          fast = "true",
         },
       },
       ["my-custom-provider"] = {
@@ -432,6 +445,12 @@ agentic.stop_generation()
   Stop the agent's current generation or tool execution. The
   session remains active and ready for the next prompt.
 
+                                       *agentic.switch_config_option()*
+agentic.switch_config_option()
+  Open a two-step picker for session config options:
+  1) select config option name
+  2) select the value for that option
+
                                              *agentic.restore_session()*
 agentic.restore_session()
   Show the provider's session picker to restore a previous
@@ -460,6 +479,8 @@ These keybindings are automatically set in Agentic buffers:
   <C-v>                  i       Paste image from clipboard
   <localLeader>s         n       Switch ACP provider (keeps history)
   <localLeader>m         n       Switch model (keeps history)
+  <localLeader>o         n       Two-step config picker
+  <leader>ao             n       Global two-step config picker
   q                      n       Close chat widget
   d                      n/v     Remove file/selection/diagnostic
   ]c                     n       Next diff hunk
@@ -480,6 +501,8 @@ Override default keybindings via the `keymaps` config option:
         },
         switch_provider = "<localLeader>s",
         switch_model = "<localLeader>m",
+        switch_config_option = "<localLeader>o",
+        switch_config_option_global = "<leader>ao",
       },
       prompt = {
         submit = {
