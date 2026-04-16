@@ -165,12 +165,9 @@ function MessageWriter:_clear_thought_state()
 end
 
 --- Writes a full message to the chat buffer and append two blank lines after
---- @param update agentic.acp.SessionUpdateMessage
+--- @param update agentic.acp.UserMessageChunk|agentic.acp.AgentMessageChunk
 function MessageWriter:write_message(update)
-    local text = extract_content_text(
-        --- @cast update agentic.acp.AgentMessageChunk|agentic.acp.UserMessageChunk
-        update.content
-    )
+    local text = extract_content_text(update.content)
 
     if not text or text == "" then
         return
@@ -243,9 +240,8 @@ end
 
 --- Appends message chunks to the last line and column in the chat buffer
 --- Some ACP providers stream chunks instead of full messages
---- @param update agentic.acp.SessionUpdateMessage
+--- @param update agentic.acp.AgentMessageChunk|agentic.acp.AgentThoughtChunk
 function MessageWriter:write_message_chunk(update)
-    --- @cast update agentic.acp.AgentMessageChunk|agentic.acp.AgentThoughtChunk
     local text = extract_content_text(update.content)
 
     if not text or text == "" then

@@ -6,7 +6,6 @@
   },
   "diagnostics": {
     "disable": [
-      "cast-type-mismatch",
       "duplicate-set-field",
       "duplicate-type",
       "inject-field",

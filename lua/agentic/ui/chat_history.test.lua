@@ -365,7 +365,9 @@ describe("ChatHistory", function()
             vim.fn.mkdir(dir, "p")
             local f = io.open(file_path, "w")
             assert.is_not_nil(f)
-            --- @cast f file*
+            if not f then
+                error("failed to create session file")
+            end
             f:write(vim.json.encode({
                 session_id = session_id,
                 title = "Test " .. session_id,
