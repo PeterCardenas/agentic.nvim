@@ -382,6 +382,7 @@ function ChatWidget:_cycle_windows(direction)
     for offset = 1, len do
         local next_idx = (current_idx + direction * offset - 1) % len + 1
         local next_panel = CYCLE_ORDER[next_idx]
+        --- @cast next_panel agentic.ui.ChatWidget.PanelNames
         local next_winid = self.win_nrs[next_panel]
 
         if next_winid and vim.api.nvim_win_is_valid(next_winid) then

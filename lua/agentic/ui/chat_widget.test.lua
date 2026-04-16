@@ -12,7 +12,7 @@ describe("agentic.ui.ChatWidget", function()
 
     --- Helper to populate a dynamic buffer with content
     --- @param widget agentic.ui.ChatWidget
-    --- @param name string
+    --- @param name agentic.ui.ChatWidget.PanelNames
     --- @param content string[]
     local function fill_buffer(widget, name, content)
         local bufnr = widget.buf_nrs[name]
