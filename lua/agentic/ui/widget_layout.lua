@@ -75,12 +75,12 @@ end
 
 --- @param bufnr integer
 --- @param enter boolean
---- @param opts vim.api.keyset.win_config
+--- @param opts table<string, any>
 --- @param window_name agentic.ui.ChatWidget.PanelNames
 --- @param win_opts table<string, any>
 --- @return integer
 local function open_win(bufnr, enter, opts, window_name, win_opts)
-    --- @type vim.api.keyset.win_config
+    --- @type table<string, any>
     local default_opts = {
         split = "right",
         win = -1,
@@ -110,9 +110,9 @@ local function open_win(bufnr, enter, opts, window_name, win_opts)
 end
 
 --- @param win_nrs agentic.ui.ChatWidget.WinNrs
---- @param panel_name string
+--- @param panel_name agentic.ui.ChatWidget.PanelNames
 --- @param bufnr integer
---- @param open_opts vim.api.keyset.win_config
+--- @param open_opts table<string, any>
 --- @param win_opts table<string, any>
 --- @return integer
 local function get_or_create_window(
@@ -144,7 +144,7 @@ end
 --- @param buf_nrs agentic.ui.ChatWidget.BufNrs
 --- @param win_nrs agentic.ui.ChatWidget.WinNrs
 --- @param window_name agentic.ui.ChatWidget.PanelNames
---- @param open_win_opts vim.api.keyset.win_config
+--- @param open_win_opts table<string, any>
 --- @param max_height integer
 --- @param position agentic.UserConfig.Windows.Position
 local function open_or_resize_dynamic_window(
@@ -192,7 +192,7 @@ local function show_layout(params, position)
     local split_direction = is_bottom and "below"
         or (position == "left" and "left" or "right")
 
-    --- @type vim.api.keyset.win_config
+    --- @type table<string, any>
     local chat_opts = {
         win = -1,
         split = split_direction,
@@ -212,7 +212,7 @@ local function show_layout(params, position)
 
     -- Input window: right splits below chat with height, bottom splits right
     -- of chat with computed stack width
-    --- @type vim.api.keyset.win_config
+    --- @type table<string, any>
     local input_opts = { win = win_nrs.chat, fixed = true }
     if is_bottom then
         local chat_width = vim.api.nvim_win_get_width(win_nrs.chat)

@@ -236,6 +236,7 @@ describe("hunk_navigation", function()
     end)
 
     describe("navigation with center_on_navigate_hunks config", function()
+        --- @type agentic.UserConfig
         local Config
         local original_center_setting
         local winid
@@ -275,6 +276,7 @@ describe("hunk_navigation", function()
     end)
 
     describe("get_scroll_cmd", function()
+        --- @type agentic.UserConfig
         local Config
         local original_center_setting
         local winid
@@ -337,6 +339,7 @@ describe("hunk_navigation", function()
     end)
 
     describe("keymap management", function()
+        --- @type agentic.UserConfig
         local Config
         local original_keymaps
 

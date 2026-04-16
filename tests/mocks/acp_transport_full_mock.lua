@@ -20,6 +20,7 @@ local NEXT_PROMPT_ID_KEY = "_next_prompt_request_id"
 
 --- @class agentic.acp.ACPTransportFullMockInstance : agentic.acp.ACPTransportInstance
 --- @field _callbacks agentic.acp.TransportCallbacks
+--- @field _started boolean
 --- @field _stopped boolean
 --- @field _sent table[] Captured outgoing requests for assertions
 --- @field _next_prompt_request_id number|nil The JSON-RPC id of the pending session/prompt request

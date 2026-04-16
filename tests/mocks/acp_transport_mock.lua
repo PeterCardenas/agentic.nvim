@@ -1,4 +1,8 @@
 --- Mock implementation of agentic.acp.ACPTransportModule for testing
+--- @class (partial) agentic.acp.ACPTransportInstance
+--- @field _started? boolean
+--- @field _stopped? boolean
+---
 --- @class agentic.acp.ACPTransportModuleMock
 local M = {}
 

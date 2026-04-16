@@ -18,6 +18,7 @@ end
 
 --- @class agentic.ui.DiagnosticsList.Diagnostic : vim.Diagnostic
 --- @field file_path string Full file path
+--- @field bufnr integer|nil
 
 --- @class agentic.ui.DiagnosticsList
 --- @field _diagnostics agentic.ui.DiagnosticsList.Diagnostic[]

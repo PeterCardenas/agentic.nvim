@@ -6,7 +6,6 @@
   },
   "diagnostics": {
     "disable": [
-      "inject-field",
       "missing-fields",
       "need-check-nil",
       "param-type-mismatch",

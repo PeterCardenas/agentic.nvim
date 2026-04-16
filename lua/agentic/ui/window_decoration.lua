@@ -100,7 +100,7 @@ end
 --- Resolves the final header text applying user customization
 --- Returns the header text and an error message if user function failed
 --- @param dynamic_header agentic.ui.ChatWidget.HeaderParts Runtime header parts
---- @param window_name string Window name for Config.headers lookup and error messages
+--- @param window_name agentic.ui.ChatWidget.PanelNames Window name for Config.headers lookup and error messages
 --- @return string|nil header_text The resolved header text or nil for empty
 --- @return string|nil error_message Error message if user function failed
 local function resolve_header_text(dynamic_header, window_name)
@@ -225,7 +225,7 @@ end
 --- Renders a header for a window, handling user customization, winbar, and buffer naming
 --- Derives all context from bufnr: winid, tab_page_id, and dynamic header from vim.t
 --- @param bufnr integer Buffer number - stable reference to derive window and tab context
---- @param window_name string Name of the window (for Config.headers lookup and error messages)
+--- @param window_name agentic.ui.ChatWidget.PanelNames Name of the window (for Config.headers lookup and error messages)
 --- @param context string|nil Optional context to set in header (e.g., "Mode: chat", "3 files")
 function WindowDecoration.render_header(bufnr, window_name, context)
     vim.schedule(function()
