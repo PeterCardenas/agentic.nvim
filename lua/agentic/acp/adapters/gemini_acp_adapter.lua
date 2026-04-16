@@ -61,9 +61,13 @@ function GeminiACPAdapter:__handle_tool_call(session_id, update)
     elseif kind == "execute" then
         --- Gemini "execute" title format:
         --- "command [context maybe path] (optional description)"
-        message.argument = type(update.title) == "string"
-                and vim.trim(vim.split(update.title, " %[")[1] or "")
-            or ""
+        if type(update.title) == "string" then
+            local parts = vim.split(update.title, " %[")
+            local raw_argument = type(parts[1]) == "string" and parts[1] or ""
+            message.argument = vim.trim(raw_argument)
+        else
+            message.argument = ""
+        end
 
         local desc = type(update.title) == "string"
             and update.title:match("%((.-)%)")

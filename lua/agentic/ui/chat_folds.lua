@@ -715,7 +715,7 @@ function ChatFolds.foldtext()
     local bufnr = vim.api.nvim_get_current_buf()
     local foldstart = vim.v.foldstart
     local foldend = vim.v.foldend
-    local line_count = foldend - foldstart + 1
+    local line_count = math.floor(foldend - foldstart + 1)
 
     local folding = Config.folding
     if folding.foldtext then

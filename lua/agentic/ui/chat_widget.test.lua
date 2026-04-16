@@ -26,6 +26,7 @@ describe("agentic.ui.ChatWidget", function()
 
         describe(string.format("(%s layout)", position), function()
             local tab_page_id
+            --- @type agentic.ui.ChatWidget
             local widget
             local original_position
 
@@ -518,11 +519,11 @@ describe("agentic.ui.ChatWidget", function()
         it(
             "stays on same layout and warns when only one is provided",
             function()
-                widget.current_position = "bottom"
+                local current = widget.current_position
 
-                widget:rotate_layout({ "bottom" })
+                widget:rotate_layout({ current })
 
-                assert.equal("bottom", widget.current_position)
+                assert.equal(current, widget.current_position)
                 assert.spy(notify_stub).was.called(1)
                 local msg = notify_stub.calls[1][1]
                 assert.is_true(msg:find("Only one layout") ~= nil)
@@ -543,11 +544,17 @@ describe("agentic.ui.ChatWidget", function()
         end)
 
         it("falls back to first layout when current is not in list", function()
-            widget.current_position = "bottom"
+            local layouts = { "right", "bottom", "left" }
+            local filtered = {}
+            for _, layout in ipairs(layouts) do
+                if layout ~= widget.current_position then
+                    table.insert(filtered, layout)
+                end
+            end
 
-            widget:rotate_layout({ "right", "left" })
+            widget:rotate_layout(filtered)
 
-            assert.equal("right", widget.current_position)
+            assert.equal(filtered[1], widget.current_position)
         end)
 
         it("calls show with focus_prompt false", function()

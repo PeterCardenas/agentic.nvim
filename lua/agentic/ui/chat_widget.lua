@@ -19,14 +19,13 @@ local AGENTIC_FILETYPES = {
     AgenticDiagnostics = true,
 }
 
---- Ordered list of panels for window cycling
---- @type agentic.ui.ChatWidget.PanelNames[]
 --- Panels that are not user-attached content (excluded from "has other content" checks)
+--- @type table<agentic.ui.ChatWidget.PanelNames, boolean>
 local NON_CONTENT_PANELS = {
     chat = true,
     input = true,
     todos = true,
-} --- @type table<agentic.ui.ChatWidget.PanelNames, boolean>
+}
 
 --- Ordered list of panels for window cycling
 --- @type agentic.ui.ChatWidget.PanelNames[]
@@ -62,6 +61,7 @@ local CYCLE_ORDER = { "chat", "todos", "code", "files", "diagnostics", "input" }
 --- @field _on_before_hide? fun()
 --- @field _on_after_show? fun(chat_winid: integer|nil)
 --- @field _is_hiding? boolean
+--- @field current_position agentic.UserConfig.Windows.Position
 local ChatWidget = {}
 ChatWidget.__index = ChatWidget
 

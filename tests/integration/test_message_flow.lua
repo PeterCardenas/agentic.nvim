@@ -213,12 +213,13 @@ describe("Tool call - enriched argument preserved in chat history", function()
             --- @type agentic.ui.ChatHistory.ToolCall|nil
             local tool_msg = nil
             for i = #messages, 1, -1 do
+                local candidate = messages[i]
                 if
-                    messages[i].type == "tool_call"
-                    and messages[i].tool_call_id == "tool-exec-001"
+                    candidate.type == "tool_call"
+                    and candidate.tool_call_id == "tool-exec-001"
                 then
-                    --- @cast tool_msg agentic.ui.ChatHistory.ToolCall
-                    tool_msg = messages[i]
+                    --- @cast candidate agentic.ui.ChatHistory.ToolCall
+                    tool_msg = candidate
                     break
                 end
             end
@@ -266,12 +267,13 @@ describe("Tool call - enriched argument preserved in chat history", function()
             --- @type agentic.ui.ChatHistory.ToolCall|nil
             local tool_msg = nil
             for i = #messages, 1, -1 do
+                local candidate = messages[i]
                 if
-                    messages[i].type == "tool_call"
-                    and messages[i].tool_call_id == "tool-edit-001"
+                    candidate.type == "tool_call"
+                    and candidate.tool_call_id == "tool-edit-001"
                 then
-                    --- @cast tool_msg agentic.ui.ChatHistory.ToolCall
-                    tool_msg = messages[i]
+                    --- @cast candidate agentic.ui.ChatHistory.ToolCall
+                    tool_msg = candidate
                     break
                 end
             end

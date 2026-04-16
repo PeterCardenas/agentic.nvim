@@ -352,10 +352,13 @@ function SessionRestore.replay_messages(writer, messages)
             }
             writer:write_message_chunk(thought_chunk)
         elseif msg.type == "tool_call" then
+            local tool_call_id = msg.tool_call_id or ""
+            local kind = msg.kind or "execute"
+
             --- @type agentic.ui.MessageWriter.ToolCallBlock
             local tool_block = {
-                tool_call_id = msg.tool_call_id,
-                kind = msg.kind,
+                tool_call_id = tool_call_id,
+                kind = kind,
                 argument = msg.argument or "",
                 status = msg.status,
                 body = msg.body,

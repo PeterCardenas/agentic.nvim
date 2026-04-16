@@ -256,7 +256,6 @@ end
 --- @param update agentic.acp.SessionUpdateMessage
 function SessionManager:_on_session_update(update)
     -- order the IF blocks in order of likeliness to be called for performance
-
     if update.sessionUpdate == "plan" then
         if Config.windows.todos.display then
             self.todo_list:render(update.entries)
@@ -634,6 +633,7 @@ function SessionManager:_handle_cursor_create_plan(ctx)
                     then
                         kind = "allow_once"
                     end
+                    --- @cast kind "allow_once"|"allow_always"|"reject_once"|"reject_always"
 
                     --- @type agentic.acp.PermissionOption
                     local opt = {

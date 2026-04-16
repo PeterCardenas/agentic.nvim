@@ -319,7 +319,7 @@ function MessageWriter:write_message_chunk(update)
         if is_thought then
             if is_first_thought then
                 -- The "\n" prefix puts "Thinking: " on the line after last_line
-                local label_row = last_line + 1
+                local label_row = math.floor(last_line + 1)
                 self._thought_label_row = label_row
                 self._thought_label_start_col = 0
                 vim.api.nvim_buf_set_extmark(
@@ -478,11 +478,13 @@ function MessageWriter:write_tool_call_block(tool_call_block)
 
         self:_append_lines(lines)
 
-        local end_row = vim.api.nvim_buf_line_count(bufnr) - 1
+        local end_row = math.floor(vim.api.nvim_buf_line_count(bufnr) - 1)
         -- Derive start_row from end_row after the append to handle the
         -- empty-buffer edge case where _append_lines replaces from line 0
         -- instead of appending.
-        local start_row = end_row - #lines + 1
+        local start_row = math.floor(end_row - #lines + 1)
+        local body_start = math.floor(start_row + 1)
+        local body_end = math.floor(end_row - 1)
 
         self:_apply_block_highlights(
             bufnr,
@@ -495,8 +497,8 @@ function MessageWriter:write_tool_call_block(tool_call_block)
         tool_call_block.decoration_extmark_ids =
             ExtmarkBlock.render_block(bufnr, NS_DECORATIONS, {
                 header_line = start_row,
-                body_start = start_row + 1,
-                body_end = end_row - 1,
+                body_start = body_start,
+                body_end = body_end,
                 footer_line = end_row,
                 hl_group = Theme.HL_GROUPS.CODE_BLOCK_FENCE,
             })

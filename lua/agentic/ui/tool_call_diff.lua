@@ -111,7 +111,9 @@ local function hunk_to_block(diff_block, hunk)
 
     if count_a > 0 then
         local end_a = math.min(start_a + count_a - 1, #diff_block.old_lines)
-        old_lines = vim.list_slice(diff_block.old_lines, start_a, end_a)
+        --- @type string[]
+        local sliced_old = vim.list_slice(diff_block.old_lines, start_a, end_a)
+        old_lines = sliced_old
         start_line = diff_block.start_line + start_a - 1
         end_line = start_line + count_a - 1
     else
@@ -123,7 +125,9 @@ local function hunk_to_block(diff_block, hunk)
 
     if count_b > 0 then
         local end_b = math.min(start_b + count_b - 1, #diff_block.new_lines)
-        new_lines = vim.list_slice(diff_block.new_lines, start_b, end_b)
+        --- @type string[]
+        local sliced_new = vim.list_slice(diff_block.new_lines, start_b, end_b)
+        new_lines = sliced_new
     else
         new_lines = {}
     end

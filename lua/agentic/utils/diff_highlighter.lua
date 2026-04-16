@@ -36,7 +36,7 @@ local Theme = require("agentic.theme")
 --- Find character-level changes between two lines (UTF-8 aware)
 --- @param old_line string
 --- @param new_line string
---- @return { old_start: integer, old_end: integer, new_start: integer, new_end: integer }|nil
+--- @return { old_start: number, old_end: number, new_start: number, new_end: number }|nil
 function M.find_inline_change(old_line, new_line)
     if old_line == new_line then
         return nil
@@ -68,9 +68,13 @@ function M.find_inline_change(old_line, new_line)
     end
 
     -- Calculate byte positions for change regions
+    --- @type number
     local old_start = 0
+    --- @type number
     local old_end = 0
+    --- @type number
     local new_start = 0
+    --- @type number
     local new_end = 0
 
     if prefix_chars > 0 then

@@ -120,9 +120,11 @@ function ACPClient:_setup_transport()
     local transport_type = self.provider_config.transport_type or "stdio"
 
     if transport_type == "stdio" then
+        local command = self.provider_config.command --[[@as string]]
+
         --- @type agentic.acp.StdioTransportConfig
         local transport_config = {
-            command = self.provider_config.command,
+            command = command,
             args = self.provider_config.args,
             env = self.provider_config.env,
             enable_reconnect = self.provider_config.reconnect,
@@ -1195,8 +1197,7 @@ return ACPClient
 --- @field toolCall agentic.acp.ToolCall
 
 --- @class agentic.acp.RequestPermissionOutcome
---- @field outcome "cancelled" | "selected"
---- @field optionId? string
+--- @field outcome { outcome: "cancelled" | "selected", optionId?: string }
 
 --- @alias agentic.acp.ClientConnectionState
 --- | "disconnected"

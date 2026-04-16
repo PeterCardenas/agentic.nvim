@@ -18,12 +18,15 @@ describe("config_default", function()
         end)
 
         it("accepts partial nested windows config", function()
+            --- @type agentic.PartialUserConfig.Windows
+            local windows = {
+                width = "50%",
+                position = "left",
+            }
+
             --- @type agentic.PartialUserConfig
             local cfg = {
-                windows = {
-                    width = "50%",
-                    position = "left",
-                },
+                windows = windows,
             }
 
             assert.equal("50%", cfg.windows.width)
@@ -31,12 +34,15 @@ describe("config_default", function()
         end)
 
         it("accepts partial nested sub-window config", function()
+            --- @type agentic.PartialUserConfig.Windows
+            local windows = {
+                input = { height = 20 },
+                todos = { display = false },
+            }
+
             --- @type agentic.PartialUserConfig
             local cfg = {
-                windows = {
-                    input = { height = 20 },
-                    todos = { display = false },
-                },
+                windows = windows,
             }
 
             assert.equal(20, cfg.windows.input.height)

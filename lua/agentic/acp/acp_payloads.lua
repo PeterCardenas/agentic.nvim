@@ -28,7 +28,6 @@ function M._generate_message_chunk(text, role)
         content_text = vim.inspect(text)
     end
 
-    --- @type agentic.acp.UserMessageChunk|agentic.acp.AgentMessageChunk|agentic.acp.AgentThoughtChunk
     local message_chunk = {
         sessionUpdate = role,
         content = {

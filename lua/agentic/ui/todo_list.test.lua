@@ -2,7 +2,7 @@ local assert = require("tests.helpers.assert")
 local spy = require("tests.helpers.spy")
 
 --- @param content string
---- @param status string
+--- @param status agentic.acp.PlanEntryStatus
 --- @return agentic.acp.PlanEntry
 local function entry(content, status)
     --- @type agentic.acp.PlanEntry

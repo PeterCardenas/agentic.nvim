@@ -143,10 +143,9 @@ end
 --- @return agentic.ui.DiagnosticsList.Diagnostic[] diagnostics Converted diagnostics
 function DiagnosticsList.get_buffer_diagnostics(bufnr, opts)
     bufnr = bufnr or vim.api.nvim_get_current_buf()
-    opts = opts or {}
 
     --- @type vim.Diagnostic[]
-    local vim_diagnostics = vim.diagnostic.get(bufnr, opts)
+    local vim_diagnostics = vim.diagnostic.get(bufnr, opts or {})
     local file_path = vim.api.nvim_buf_get_name(bufnr)
 
     --- @type agentic.ui.DiagnosticsList.Diagnostic[]
@@ -167,7 +166,6 @@ end
 --- @return agentic.ui.DiagnosticsList.Diagnostic[] diagnostics Diagnostics at the cursor line
 function DiagnosticsList.get_diagnostics_at_cursor(bufnr, opts)
     bufnr = bufnr or vim.api.nvim_get_current_buf()
-    opts = opts or {}
 
     local winid = vim.fn.bufwinid(bufnr)
     if winid == -1 then
@@ -182,7 +180,7 @@ function DiagnosticsList.get_diagnostics_at_cursor(bufnr, opts)
     local cursor_line = cursor_pos[1] - 1 -- Convert to 0-indexed
 
     --- @type vim.Diagnostic[]
-    local vim_diagnostics = vim.diagnostic.get(bufnr, opts)
+    local vim_diagnostics = vim.diagnostic.get(bufnr, opts or {})
     local file_path = vim.api.nvim_buf_get_name(bufnr)
 
     --- @type agentic.ui.DiagnosticsList.Diagnostic[]
@@ -246,7 +244,7 @@ function DiagnosticsList:_render()
     local did_render = BufHelpers.with_modifiable(self._bufnr, function(bufnr)
         vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
         return true
-    end)
+    end) == true
 
     if did_render then
         self._on_change(self)
