@@ -410,6 +410,70 @@ function CursorACPAdapter:_emit_cursor_extension(message_id, method, params)
     end)
 end
 
+--- Cursor sends `tool_call` for execute kind with `title = "Terminal"` and no
+--- `rawInput.command`, but the permission request for the same tool call
+--- contains the actual command in `toolCall.title` wrapped in backticks.
+--- Build a partial tool call update from the permission payload only for
+--- execute kind, so the chat block above the permission buttons shows the
+--- actual terminal command.
+--- @param tool_call agentic.acp.ToolCall
+--- @return agentic.ui.MessageWriter.ToolCallBase|nil update
+function CursorACPAdapter:__build_permission_tool_call_update(tool_call)
+    if
+        not tool_call
+        or not tool_call.toolCallId
+        or tool_call.kind ~= "execute"
+    then
+        return nil
+    end
+
+    local raw_input = tool_call.rawInput --[[@as agentic.acp.CursorRawInput|nil]]
+    local argument
+    if raw_input and not vim.tbl_isempty(raw_input) then
+        local command = raw_input.command
+        if type(command) == "table" then
+            command = table.concat(command, " ")
+        end
+        if type(command) == "string" and command ~= "" then
+            argument = command
+        end
+    end
+
+    if not argument and tool_call.title then
+        argument = tool_call.title:match("^`(.+)`$") or tool_call.title
+    end
+
+    if not argument or argument == "" then
+        return nil
+    end
+
+    --- @type agentic.ui.MessageWriter.ToolCallBase
+    local update = {
+        tool_call_id = tool_call.toolCallId,
+        kind = "execute",
+        argument = argument,
+    }
+    return update
+end
+
+--- Extract it and update the tool call block argument before the permission
+--- buttons are rendered.
+--- @protected
+--- @param message_id number
+--- @param request agentic.acp.RequestPermission
+function CursorACPAdapter:__handle_request_permission(message_id, request)
+    local update = self:__build_permission_tool_call_update(request.toolCall)
+    if update then
+        local session_id = request.sessionId
+
+        self:__with_subscriber(session_id, function(subscriber)
+            subscriber.on_tool_call_update(update)
+        end)
+    end
+
+    ACPClient.__handle_request_permission(self, message_id, request)
+end
+
 --- Override notification handler to intercept Cursor extension methods.
 --- @param message_id number|nil
 --- @param method string

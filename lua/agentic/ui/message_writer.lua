@@ -81,7 +81,7 @@ end
 
 --- @class agentic.ui.MessageWriter.ToolCallBase
 --- @field tool_call_id string
---- @field status agentic.acp.ToolCallStatus
+--- @field status? agentic.acp.ToolCallStatus
 --- @field body? string[]
 --- @field diff? agentic.ui.MessageWriter.ToolCallDiff
 --- @field kind? agentic.acp.ToolKind
