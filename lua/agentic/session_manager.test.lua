@@ -38,21 +38,22 @@ describe("agentic.SessionManager", function()
                 currentModeId = "plan",
             })
 
+            local config_options = {
+                legacy_agent_modes = legacy_modes,
+            }
+            function config_options:get_mode_name(mode_id)
+                local mode = legacy_modes:get_mode(mode_id)
+                return mode and mode.name or nil
+            end
+
             session = {
-                config_options = {
-                    legacy_agent_modes = legacy_modes,
-                    get_mode_name = function(_self, mode_id)
-                        local mode = legacy_modes:get_mode(mode_id)
-                        return mode and mode.name or nil
-                    end,
-                },
+                config_options = config_options,
                 widget = {
                     render_header = render_header_spy,
                     buf_nrs = { chat = test_bufnr },
                 },
-                _on_session_update = SessionManager._on_session_update,
-                _set_mode_to_chat_header = SessionManager._set_mode_to_chat_header,
-            } --[[@as agentic.SessionManager]]
+            }
+            setmetatable(session, { __index = SessionManager })
         end)
 
         after_each(function()
@@ -61,7 +62,7 @@ describe("agentic.SessionManager", function()
         end)
 
         it("updates state, re-renders header, notifies user", function()
-            session:_on_session_update(mode_update("code"))
+            SessionManager._on_session_update(session, mode_update("code"))
 
             assert.equal(
                 "code",
@@ -79,7 +80,10 @@ describe("agentic.SessionManager", function()
         end)
 
         it("rejects invalid mode and keeps current state", function()
-            session:_on_session_update(mode_update("nonexistent"))
+            SessionManager._on_session_update(
+                session,
+                mode_update("nonexistent")
+            )
 
             assert.equal(
                 "plan",
@@ -124,10 +128,8 @@ describe("agentic.SessionManager", function()
                     render_header = render_header_spy,
                     buf_nrs = { chat = test_bufnr },
                 },
-                _on_session_update = SessionManager._on_session_update,
-                _set_mode_to_chat_header = SessionManager._set_mode_to_chat_header,
-                _handle_new_config_options = SessionManager._handle_new_config_options,
-            } --[[@as agentic.SessionManager]]
+            }
+            setmetatable(session, { __index = SessionManager })
         end)
 
         after_each(function()
@@ -156,7 +158,7 @@ describe("agentic.SessionManager", function()
                 },
             }
 
-            session:_on_session_update(update)
+            SessionManager._on_session_update(session, update)
 
             assert.is_not_nil(session.config_options.mode)
             assert.equal("plan", session.config_options.mode.currentValue)
@@ -223,10 +225,9 @@ describe("agentic.SessionManager", function()
         it("blocks when is_generating is true", function()
             local session = {
                 is_generating = true,
-                switch_provider = SessionManager.switch_provider,
-            } --[[@as agentic.SessionManager]]
+            }
 
-            session:switch_provider()
+            SessionManager.switch_provider(session)
 
             assert.spy(notify_stub).was.called(1)
             local msg = notify_stub.calls[1][1]
@@ -281,10 +282,9 @@ describe("agentic.SessionManager", function()
                     _is_first_message = false,
                     _history_to_send = nil,
                     new_session = new_session_spy,
-                    switch_provider = SessionManager.switch_provider,
-                } --[[@as agentic.SessionManager]]
+                }
 
-                session:switch_provider()
+                SessionManager.switch_provider(session)
 
                 assert.spy(cancel_spy).was.called(1)
                 assert.is_nil(session.session_id)
@@ -345,10 +345,9 @@ describe("agentic.SessionManager", function()
                     _is_first_message = false,
                     _history_to_send = nil,
                     new_session = new_session_spy,
-                    switch_provider = SessionManager.switch_provider,
-                } --[[@as agentic.SessionManager]]
+                }
 
-                session:switch_provider()
+                SessionManager.switch_provider(session)
 
                 assert.is_not_nil(captured_on_created)
 
@@ -394,10 +393,9 @@ describe("agentic.SessionManager", function()
                 _is_first_message = false,
                 _history_to_send = nil,
                 new_session = spy.new(function() end),
-                switch_provider = SessionManager.switch_provider,
-            } --[[@as agentic.SessionManager]]
+            }
 
-            session:switch_provider()
+            SessionManager.switch_provider(session)
 
             assert.spy(mock_agent.cancel_session).was.called(0)
             assert.spy(session.permission_manager.clear).was.called(1)
@@ -451,7 +449,7 @@ describe("agentic.SessionManager", function()
                 status_animation = { start = function() end },
                 _clear_diff_in_buffer = function() end,
                 chat_history = { update_tool_call = function() end },
-            } --[[@as agentic.SessionManager]]
+            }
         end
 
         before_each(function()
@@ -545,7 +543,6 @@ describe("agentic.SessionManager", function()
 
         it("resets is_generating to false", function()
             local ChatHistory = require("agentic.ui.chat_history")
-            --- @type agentic.SessionManager
             local session = {
                 is_generating = true,
                 _is_restoring_session = true,
@@ -571,10 +568,9 @@ describe("agentic.SessionManager", function()
                 message_writer = {
                     reset_sender_tracking = function() end,
                 },
-                _cancel_session = SessionManager._cancel_session,
-            } --[[@as agentic.SessionManager]]
+            }
 
-            session:_cancel_session()
+            SessionManager._cancel_session(session)
 
             assert.is_false(session.is_generating)
             assert.spy(session.status_animation.stop).was.called(1)
@@ -585,15 +581,13 @@ describe("agentic.SessionManager", function()
         it("allows /new even when is_generating is true", function()
             local new_session_spy = spy.new(function() end)
 
-            --- @type agentic.SessionManager
             local session = {
                 is_generating = true,
                 todo_list = { close_if_all_completed = function() end },
                 new_session = new_session_spy,
-                _handle_input_submit = SessionManager._handle_input_submit,
-            } --[[@as agentic.SessionManager]]
+            }
 
-            session:_handle_input_submit("/new")
+            SessionManager._handle_input_submit(session, "/new")
 
             assert.spy(new_session_spy).was.called(1)
         end)
