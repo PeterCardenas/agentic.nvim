@@ -62,6 +62,7 @@ function M.execute_fallback(mapping, default_key)
                     result =
                         vim.api.nvim_replace_termcodes(result, true, true, true)
                 end
+                --- @diagnostic disable-next-line: return-type-mismatch
                 return result
             end
             -- Callback returned non-string, use default

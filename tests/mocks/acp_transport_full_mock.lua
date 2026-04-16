@@ -18,7 +18,7 @@ M.instance = nil
 local SESSION_ID = "mock-session-001"
 local NEXT_PROMPT_ID_KEY = "_next_prompt_request_id"
 
---- @class agentic.acp.ACPTransportFullMockInstance : agentic.acp.ACPTransportInstance
+--- @class agentic.acp.ACPTransportFullMockInstance
 --- @field _callbacks agentic.acp.TransportCallbacks
 --- @field _started boolean
 --- @field _stopped boolean
@@ -29,7 +29,7 @@ local NEXT_PROMPT_ID_KEY = "_next_prompt_request_id"
 
 --- @param config agentic.acp.StdioTransportConfig
 --- @param callbacks agentic.acp.TransportCallbacks
---- @return agentic.acp.ACPTransportInstance
+--- @return agentic.acp.ACPTransportFullMockInstance
 function M.create_stdio_transport(config, callbacks)
     local transport = {
         stdin = nil,

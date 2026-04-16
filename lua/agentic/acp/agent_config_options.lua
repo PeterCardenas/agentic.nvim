@@ -9,6 +9,7 @@ local function load_fzf_lua()
     if not ok then
         return nil
     end
+    --- @diagnostic disable-next-line: return-type-mismatch
     return fzf
 end
 

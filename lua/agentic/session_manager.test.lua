@@ -434,7 +434,7 @@ describe("agentic.SessionManager", function()
         local schedule_stub
 
         --- @param tool_call_blocks table<string, table>
-        --- @return agentic.SessionManager
+        --- @return table<string, any>
         local function make_session(tool_call_blocks)
             return {
                 message_writer = {

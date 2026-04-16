@@ -32,7 +32,7 @@ describe("DiffSplitView", function()
     end)
 
     --- @return number bufnr
-    --- @return number tabpage
+    --- @return integer tabpage
     local function setup_and_show_split()
         local bufnr = vim.fn.bufadd(test_file_path)
 
@@ -44,7 +44,15 @@ describe("DiffSplitView", function()
             end,
         })
 
-        return bufnr, test_tabpage
+        --- @type integer
+        local current_tabpage
+        if test_tabpage then
+            current_tabpage = test_tabpage
+        else
+            current_tabpage = vim.api.nvim_get_current_tabpage()
+        end
+        --- @cast current_tabpage integer
+        return bufnr, current_tabpage
     end
 
     describe("show_split_diff", function()

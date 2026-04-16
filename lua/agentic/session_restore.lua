@@ -13,6 +13,7 @@ local function load_fzf_lua()
     if not ok then
         return nil
     end
+    --- @diagnostic disable-next-line: return-type-mismatch
     return fzf
 end
 
@@ -96,6 +97,7 @@ local function build_preview_lines(parsed, fallback_title)
         end
     end
 
+    --- @diagnostic disable-next-line: return-type-mismatch
     return lines, title
 end
 

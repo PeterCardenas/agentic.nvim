@@ -322,6 +322,7 @@ function M.normalize_to_lines(lines)
         lines = vim.list_slice(lines, 1, #lines - 1)
     end
 
+    --- @cast lines string[]
     return lines
 end
 

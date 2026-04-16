@@ -2,10 +2,20 @@
 --- @class agentic.acp.ACPTransportModuleMock
 local M = {}
 
+--- @class agentic.acp.ACPTransportModuleMockInstance
+--- @field stdin any
+--- @field stdout any
+--- @field process any
+--- @field _config agentic.acp.StdioTransportConfig
+--- @field _callbacks agentic.acp.TransportCallbacks
+--- @field _started boolean
+--- @field _stopped boolean
+--- @field callbacks agentic.acp.TransportCallbacks
+
 --- Create a mock stdio transport for testing
 --- @param config agentic.acp.StdioTransportConfig
 --- @param callbacks agentic.acp.TransportCallbacks
---- @return agentic.acp.ACPTransportInstance
+--- @return agentic.acp.ACPTransportModuleMockInstance
 function M.create_stdio_transport(config, callbacks)
     local transport = {
         stdin = nil,
