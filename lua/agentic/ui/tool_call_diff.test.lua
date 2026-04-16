@@ -7,7 +7,9 @@ describe("tool_call_diff", function()
     --- @type agentic.utils.FileSystem
     local FileSystem
 
+    --- @type TestStub
     local read_stub
+    --- @type TestStub
     local path_stub
 
     before_each(function()

@@ -7,8 +7,11 @@ local Logger = require("agentic.utils.logger")
 
 describe("diff_preview", function()
     describe("show_diff", function()
+        --- @type TestStub
         local read_stub
+        --- @type TestSpy
         local get_winid_spy
+        --- @type TestSpy
         local notify_spy
         local orig_layout
 

@@ -343,6 +343,7 @@ describe("agentic.ui.ChatWidget", function()
     -- Right and left layouts behave identically, only split direction differs
     for _, side in ipairs({ "right", "left" }) do
         describe(string.format("(%s layout) specific", side), function()
+            --- @type agentic.ui.ChatWidget
             local widget
             local original_position
 
@@ -397,6 +398,7 @@ describe("agentic.ui.ChatWidget", function()
     end
 
     describe("(bottom layout) specific", function()
+        --- @type agentic.ui.ChatWidget
         local widget
         local original_position
 
@@ -459,11 +461,16 @@ describe("agentic.ui.ChatWidget", function()
     end)
 
     describe("rotate_layout", function()
+        --- @type agentic.ui.ChatWidget
         local widget
         local original_position
+        --- @type TestStub
         local show_stub
+        --- @type TestStub
         local notify_stub
+        --- @type agentic.ui.ChatWidget|nil
         local widget2
+        --- @type TestStub|nil
         local show_stub2
 
         before_each(function()

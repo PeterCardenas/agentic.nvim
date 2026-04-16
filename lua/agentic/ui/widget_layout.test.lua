@@ -5,6 +5,7 @@ local Config = require("agentic.config")
 local Logger = require("agentic.utils.logger")
 
 describe("WidgetLayout", function()
+    --- @type TestStub
     local notify_stub
 
     before_each(function()

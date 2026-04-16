@@ -72,6 +72,7 @@ describe("SessionRestore", function()
 
     --- Get callback and items from vim.ui.select call at given index
     local function get_ui_select_call(index)
+        --- @type fun(choice: table|nil): nil
         local callback = vim_ui_select_stub.calls[index][3]
         local items = vim_ui_select_stub.calls[index][1]
         return callback, items
@@ -79,7 +80,7 @@ describe("SessionRestore", function()
 
     --- Simulate selecting a session from the picker (first vim.ui.select call)
     local function select_session(session_item)
-        local callback = get_ui_select_call(1)
+        local callback, _ = get_ui_select_call(1)
         callback(session_item)
     end
 

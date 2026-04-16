@@ -6,7 +6,6 @@
   },
   "diagnostics": {
     "disable": [
-      "call-non-callable",
       "cast-type-mismatch",
       "duplicate-set-field",
       "duplicate-type",

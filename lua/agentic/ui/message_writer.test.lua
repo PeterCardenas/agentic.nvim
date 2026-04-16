@@ -502,7 +502,9 @@ describe("agentic.ui.MessageWriter", function()
 
     describe("_prepare_block_lines", function()
         local FileSystem
+        --- @type TestStub
         local read_stub
+        --- @type TestStub
         local path_stub
 
         before_each(function()

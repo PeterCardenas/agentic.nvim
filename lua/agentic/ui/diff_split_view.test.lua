@@ -6,7 +6,9 @@ describe("DiffSplitView", function()
     local FileSystem = require("agentic.utils.file_system")
 
     local test_file_path = "/tmp/test_diff_split_view_fake.lua"
+    --- @type integer|nil
     local test_tabpage
+    --- @type TestStub
     local read_stub
 
     --- @param lines string[]|nil
