@@ -24,7 +24,7 @@
   },
   "diagnostics": {
     "disable": [
-      "unused"
+
     ],
     "severity": {
       "undefined-global": "error",
