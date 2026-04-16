@@ -63,6 +63,7 @@ local function reconstruct_modified_file(
     for i = #blocks, 1, -1 do
         local block = blocks[i]
 
+        --- @diagnostic disable-next-line: need-check-nil
         -- Remove old lines
         for j = block.end_line, block.start_line, -1 do
             table.remove(modified_lines, j)

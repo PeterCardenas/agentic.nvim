@@ -332,7 +332,7 @@ function MessageWriter:write_message_chunk(update)
                 )
             end
 
-            if self._thought_label_row then
+            if self._thought_label_row and self._thought_label_start_col then
                 local new_last_line = vim.api.nvim_buf_line_count(bufnr) - 1
                 local new_last_text = vim.api.nvim_buf_get_lines(
                     bufnr,

@@ -98,6 +98,7 @@ end
 --- @param hunk integer[]
 --- @return agentic.ui.ToolCallDiff.DiffBlock
 local function hunk_to_block(diff_block, hunk)
+    --- @diagnostic disable-next-line: need-check-nil
     local start_a, count_a, start_b, count_b = unpack(hunk)
 
     --- @type number|nil
@@ -264,6 +265,7 @@ function M.filter_unchanged_lines(old_lines, new_lines)
     })
 
     for _, hunk in ipairs(patch) do
+        --- @diagnostic disable-next-line: need-check-nil
         local start_a, count_a, start_b, count_b = unpack(hunk)
         local pair_count = math.min(count_a, count_b)
 

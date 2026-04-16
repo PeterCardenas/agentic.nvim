@@ -19,6 +19,7 @@ local function format_debug_message(...)
     end
 
     local info = debug.getinfo(3, "Sl")
+    --- @diagnostic disable-next-line: need-check-nil
     local caller_source = info.source:match("@(.+)$") or "unknown"
     local caller_module =
         caller_source:gsub("^.*/lua/", ""):gsub("%.lua$", ""):gsub("/", ".")
@@ -29,6 +30,7 @@ local function format_debug_message(...)
             "[%s] [%s:%d]",
             timestamp,
             caller_module,
+            --- @diagnostic disable-next-line: need-check-nil
             info.currentline
         ),
     }

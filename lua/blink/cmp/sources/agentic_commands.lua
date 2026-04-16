@@ -66,6 +66,7 @@ end
 --- @param _items table[]
 --- @return boolean
 function Source:should_show_items(context, _items)
+    --- @diagnostic disable-next-line: need-check-nil
     local cursor_col = context.cursor[2]
     local text_to_cursor = context.line:sub(1, cursor_col)
     local current_word = text_to_cursor:match("%S*$") or ""
@@ -84,12 +85,14 @@ function Source:get_completions(context, callback)
         return nil
     end
 
+    --- @diagnostic disable-next-line: need-check-nil
     local cursor_col = context.cursor[2]
     local text_to_cursor = context.line:sub(1, cursor_col)
     local current_word = text_to_cursor:match("%S*$") or ""
     -- 0-indexed position of the slash; character after slash = slash_pos + 1
     local slash_char = cursor_col - #current_word
 
+    --- @diagnostic disable-next-line: need-check-nil
     local cursor_row = context.cursor[1] - 1 -- 0-indexed line
     local range = {
         start = { line = cursor_row, character = slash_char + 1 },

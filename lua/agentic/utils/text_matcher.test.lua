@@ -1,3 +1,4 @@
+--- @diagnostic disable: need-check-nil
 local TextMatcher = require("agentic.utils.text_matcher")
 local assert = require("tests.helpers.assert")
 

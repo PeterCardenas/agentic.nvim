@@ -147,6 +147,7 @@ local function find_hunk(bufnr, direction)
         end
     end
 
+    --- @diagnostic disable-next-line: need-check-nil
     return anchors[new_index + 1] + 1 -- 1-indexed
 end
 

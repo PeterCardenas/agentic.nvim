@@ -205,6 +205,7 @@ local function show_fzf_picker(build_items, on_choice, on_delete)
             return nil
         end
 
+        --- @diagnostic disable-next-line: need-check-nil
         local session_id = selected[1]:match("^([^\t]+)\t")
         if not session_id then
             return nil

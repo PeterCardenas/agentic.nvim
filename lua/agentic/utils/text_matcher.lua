@@ -218,7 +218,7 @@ function M._try_find_prefix_boundary_matches(
             local last_idx = i + #target_lines - 1
             local file_line = original_lines[last_idx]
 
-            if starts_with_fn(file_line, last_target) then
+            if file_line and starts_with_fn(file_line, last_target) then
                 local suffix = file_line:sub(#last_target + 1)
                 table.insert(matches, {
                     start_line = i,

@@ -81,6 +81,7 @@ function PermissionManager:_process_next()
         return
     end
 
+    --- @diagnostic disable-next-line: need-check-nil
     local item = table.remove(self.queue, 1)
     local toolCallId = item[1]
     local request = item[2]
@@ -121,6 +122,7 @@ function PermissionManager:_reanchor_permission_prompt()
     local current = self.current_request
 
     local ok, err = pcall(function()
+        --- @diagnostic disable-next-line: need-check-nil
         self.message_writer:remove_permission_buttons(
             current.button_start_row,
             current.button_end_row

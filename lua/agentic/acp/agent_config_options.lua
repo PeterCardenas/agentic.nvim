@@ -140,6 +140,7 @@ function AgentConfigOptions:set_initial_mode(target_mode, handle_mode_change)
     local can_switch = false
 
     if self:get_mode(target_mode) ~= nil then
+        --- @diagnostic disable-next-line: need-check-nil
         can_switch = target_mode ~= self.mode.currentValue
         Logger.debug("Setting initial config mode", target_mode, can_switch)
     elseif self.legacy_agent_modes:get_mode(target_mode) ~= nil then

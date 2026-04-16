@@ -79,7 +79,9 @@ function M.find_inline_change(old_line, new_line)
 
     if prefix_chars > 0 then
         local prefix_char = old_chars[prefix_chars]
+        --- @diagnostic disable-next-line: need-check-nil
         old_start = prefix_char.byte_pos + #prefix_char.text
+        --- @diagnostic disable-next-line: need-check-nil
         new_start = new_chars[prefix_chars].byte_pos
             + #new_chars[prefix_chars].text
     end
@@ -87,12 +89,14 @@ function M.find_inline_change(old_line, new_line)
     local old_suffix_idx = #old_chars - suffix_chars
     if old_suffix_idx > 0 then
         local suffix_char = old_chars[old_suffix_idx]
+        --- @diagnostic disable-next-line: need-check-nil
         old_end = suffix_char.byte_pos + #suffix_char.text
     end
 
     local new_suffix_idx = #new_chars - suffix_chars
     if new_suffix_idx > 0 then
         local suffix_char = new_chars[new_suffix_idx]
+        --- @diagnostic disable-next-line: need-check-nil
         new_end = suffix_char.byte_pos + #suffix_char.text
     end
 

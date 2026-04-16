@@ -1,4 +1,4 @@
---- @diagnostic disable: missing-fields
+--- @diagnostic disable: missing-fields, need-check-nil
 local assert = require("tests.helpers.assert")
 
 -- These tests exist to force LuaLS type checking and Selene linting on

@@ -6,7 +6,6 @@
   },
   "diagnostics": {
     "disable": [
-      "need-check-nil",
       "param-type-mismatch",
       "preferred-local-alias",
       "return-type-mismatch",
