@@ -8,10 +8,6 @@ local Config = require("agentic.config")
 local Logger = require("agentic.utils.logger")
 
 --- @class agentic.acp.AgentInstance
---- @field chat_widget agentic.ui.ChatWidget
---- @field agent_client agentic.acp.ACPClient
-
---- @class agentic.acp.AgentInstance
 local AgentInstance = {}
 
 --- A Keyed list of agent instances by name

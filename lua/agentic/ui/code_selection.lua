@@ -199,7 +199,7 @@ function CodeSelection.get_selected_text()
 
         local buf_name = vim.api.nvim_buf_get_name(0)
 
-        --- @class agentic.Selection
+        --- @type agentic.Selection
         local selection = {
             lines = lines,
             start_line = start_line,

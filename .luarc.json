@@ -6,7 +6,6 @@
   },
   "diagnostics": {
     "disable": [
-      "duplicate-type",
       "inject-field",
       "missing-fields",
       "need-check-nil",
