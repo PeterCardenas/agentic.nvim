@@ -1,4 +1,3 @@
---- @diagnostic disable: unnecessary-if
 local FileSystem = require("agentic.utils.file_system")
 local Config = require("agentic.config")
 local Logger = require("agentic.utils.logger")
@@ -38,7 +37,8 @@ local instances_by_buffer = setmetatable({}, { __mode = "v" })
 --- @param bufnr number
 --- @return agentic.ui.FilePicker|nil
 function FilePicker:new(bufnr)
-    if not Config.file_picker.enabled then
+    local file_picker_enabled = Config.file_picker.enabled --[[@as boolean]]
+    if not file_picker_enabled then
         return nil
     end
 

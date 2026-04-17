@@ -1,4 +1,3 @@
----@diagnostic disable: unnecessary-if
 --- Mock implementation of agentic.acp.ACPTransportModule for testing
 --- @class agentic.acp.ACPTransportModuleMock
 local M = {}
@@ -12,12 +11,16 @@ local M = {}
 --- @field _started boolean
 --- @field _stopped boolean
 --- @field callbacks agentic.acp.TransportCallbacks
+--- @field send? fun(self: agentic.acp.ACPTransportModuleMockInstance, data: string): boolean
+--- @field start? fun(self: agentic.acp.ACPTransportModuleMockInstance)
+--- @field stop? fun(self: agentic.acp.ACPTransportModuleMockInstance)
 
 --- Create a mock stdio transport for testing
 --- @param config agentic.acp.StdioTransportConfig
 --- @param callbacks agentic.acp.TransportCallbacks
 --- @return agentic.acp.ACPTransportModuleMockInstance
 function M.create_stdio_transport(config, callbacks)
+    --- @type agentic.acp.ACPTransportModuleMockInstance
     local transport = {
         stdin = nil,
         stdout = nil,

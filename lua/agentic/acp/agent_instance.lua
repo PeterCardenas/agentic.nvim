@@ -1,4 +1,3 @@
---- @diagnostic disable: unnecessary-if
 -- According to the ACP protocol, a single agent process can handle multiple sessions.
 -- A session is an isolated conversation with its own state and and context.
 -- This file maintain one Agent process per provider.
@@ -17,14 +16,14 @@ local AgentInstance = {}
 AgentInstance._instances = {}
 
 --- @param provider_name agentic.UserConfig.ProviderName
---- @param on_ready fun(client: agentic.acp.ACPClient)
+--- @param on_ready fun(client: agentic.acp.ACPClient)|nil
+--- @return agentic.acp.ACPClient|nil
 function AgentInstance.get_instance(provider_name, on_ready)
     local client = AgentInstance._instances[provider_name]
+    local ready_callback = on_ready or function() end
 
     if client then
-        if on_ready then
-            on_ready(client)
-        end
+        ready_callback(client)
         return client
     end
 
@@ -42,35 +41,35 @@ function AgentInstance.get_instance(provider_name, on_ready)
     if provider_name == "claude-acp" then
         local ClaudeACPAdapter =
             require("agentic.acp.adapters.claude_acp_adapter")
-        client = ClaudeACPAdapter:new(config, on_ready)
+        client = ClaudeACPAdapter:new(config, ready_callback)
     elseif provider_name == "claude-agent-acp" then
         local ClaudeAgentACPAdapter =
             require("agentic.acp.adapters.claude_agent_acp_adapter")
-        client = ClaudeAgentACPAdapter:new(config, on_ready)
+        client = ClaudeAgentACPAdapter:new(config, ready_callback)
     elseif provider_name == "codex-acp" then
         local CodexACPAdapter =
             require("agentic.acp.adapters.codex_acp_adapter")
-        client = CodexACPAdapter:new(config, on_ready)
+        client = CodexACPAdapter:new(config, ready_callback)
     elseif provider_name == "gemini-acp" then
         local GeminiACPAdapter =
             require("agentic.acp.adapters.gemini_acp_adapter")
-        client = GeminiACPAdapter:new(config, on_ready)
+        client = GeminiACPAdapter:new(config, ready_callback)
     elseif provider_name == "opencode-acp" then
         local OpenCodeACPAdapter =
             require("agentic.acp.adapters.opencode_acp_adapter")
-        client = OpenCodeACPAdapter:new(config, on_ready)
+        client = OpenCodeACPAdapter:new(config, ready_callback)
     elseif provider_name == "cursor-acp" then
         local CursorACPAdapter =
             require("agentic.acp.adapters.cursor_acp_adapter")
-        client = CursorACPAdapter:new(config, on_ready)
+        client = CursorACPAdapter:new(config, ready_callback)
     elseif provider_name == "auggie-acp" then
         local AuggieACPAdapter =
             require("agentic.acp.adapters.auggie_acp_adapter")
-        client = AuggieACPAdapter:new(config, on_ready)
+        client = AuggieACPAdapter:new(config, ready_callback)
     elseif provider_name == "mistral-vibe-acp" then
         local MistralVibeACPAdapter =
             require("agentic.acp.adapters.mistral_vibe_acp_adapter")
-        client = MistralVibeACPAdapter:new(config, on_ready)
+        client = MistralVibeACPAdapter:new(config, ready_callback)
     else
         error("Unsupported ACP provider: " .. provider_name)
     end
@@ -85,11 +84,9 @@ end
 --- Can also be called manually if needed
 function AgentInstance:cleanup_all()
     for _name, instance in pairs(self._instances) do
-        if instance then
-            pcall(function()
-                instance:stop()
-            end)
-        end
+        pcall(function()
+            instance:stop()
+        end)
     end
 
     self._instances = {}

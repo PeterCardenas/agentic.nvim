@@ -1,4 +1,3 @@
----@diagnostic disable: unnecessary-if
 -- Simple spy/stub implementation for mini.test
 -- Provides tracking of function calls without luassert dependency
 
@@ -53,8 +52,15 @@ function M.new(fn)
 
     --- Revert a spy to the original function
     function spy:revert()
-        if self._target and self._method and self._original_fn then
-            self._target[self._method] = self._original_fn
+        --- @type table|nil
+        local target = self._target
+        --- @type string|nil
+        local method = self._method
+        --- @type function|nil
+        local original_fn = self._original_fn
+
+        if target and method and original_fn then
+            target[method] = original_fn
         end
     end
 

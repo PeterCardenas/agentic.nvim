@@ -1,4 +1,3 @@
---- @diagnostic disable: unnecessary-if
 --- Health check for agentic.nvim
 --- This file is auto-discovered by :checkhealth
 --- Users can run :checkhealth agentic to see only agentic.nvim health
@@ -110,8 +109,9 @@ function M.check()
 
     local managers = { "pnpm", "bun", "yarn", "npm" }
     for _, name in ipairs(managers) do
+        --- @type fun(): boolean|nil
         local check_fn = ACPHealth["is_" .. name .. "_installed"]
-        if check_fn and check_fn() then
+        if check_fn ~= nil and check_fn() then
             if name == "npm" then
                 vim_health.ok(
                     string.format(

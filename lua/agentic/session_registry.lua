@@ -1,4 +1,3 @@
---- @diagnostic disable: unnecessary-if
 local Logger = require("agentic.utils.logger")
 local Config = require("agentic.config")
 local DefaultConfig = require("agentic.config_default")
@@ -73,7 +72,7 @@ end
 function SessionRegistry.destroy_session(tab_page_id)
     tab_page_id = tab_page_id ~= nil and tab_page_id
         or vim.api.nvim_get_current_tabpage()
-    local session = SessionRegistry.sessions[tab_page_id]
+    local session = rawget(SessionRegistry.sessions, tab_page_id)
 
     if session then
         SessionRegistry.sessions[tab_page_id] = nil

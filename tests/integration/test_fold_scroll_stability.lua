@@ -1,9 +1,12 @@
---- @diagnostic disable: unresolved-require
+--- @diagnostic disable-next-line: unresolved-require
 local assert = require("tests.helpers.assert")
+--- @diagnostic disable-next-line: unresolved-require
 local Config = require("agentic.config")
 
 describe("Fold scroll stability", function()
+    --- @diagnostic disable-next-line: unresolved-require
     local ChatFolds = require("agentic.ui.chat_folds")
+    --- @diagnostic disable-next-line: unresolved-require
     local MessageWriter = require("agentic.ui.message_writer")
 
     --- @type agentic.UserConfig.Folding

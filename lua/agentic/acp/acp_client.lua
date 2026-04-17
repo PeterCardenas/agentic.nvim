@@ -1,4 +1,3 @@
---- @diagnostic disable: unnecessary-if
 local FileSystem = require("agentic.utils.file_system")
 local Logger = require("agentic.utils.logger")
 local transport_module = require("agentic.acp.acp_transport")
@@ -10,6 +9,7 @@ DO NOT REMOVE them. Only update them if the underlying types change.
 
 --- Known ACP protocol tool call kinds.
 --- Used to detect unknown kinds from providers we don't use daily.
+--- @type table<string, boolean|nil>
 local KNOWN_ACP_KINDS = {
     read = true,
     edit = true,
@@ -36,7 +36,8 @@ local KNOWN_ACP_KINDS = {
 --- @field client_info agentic.acp.ClientInfo
 --- @field capabilities agentic.acp.ClientCapabilities
 --- @field agent_capabilities? agentic.acp.AgentCapabilities
---- @field callbacks table<number, fun(result: table|nil, err: agentic.acp.ACPError|nil)>
+--- @field callbacks table<number, fun(result: table|nil, err: agentic.acp.ACPError|nil)|nil>
+--- @field reconnect_count number
 --- @field transport? agentic.acp.ACPTransportInstance
 --- @field subscribers table<string, agentic.acp.ClientHandlers>
 
@@ -292,7 +293,7 @@ function ACPClient:_handle_message(message)
         --- @diagnostic disable-next-line: param-type-mismatch
         self:_handle_notification(message.id, message.method, message.params)
     elseif message.id and (message.result or message.error) then
-        local callback = self.callbacks[message.id]
+        local callback = rawget(self.callbacks, message.id)
         if callback then
             self.callbacks[message.id] = nil
             callback(message.result, message.error)
@@ -538,6 +539,9 @@ function ACPClient:_connect()
 
     self.transport:start()
 
+    -- transport:start() updates self.state synchronously via on_state_change(),
+    -- but LuaLS cannot follow that callback-driven mutation across modules.
+    --- @diagnostic disable-next-line: unnecessary-if
     if self.state ~= "connected" then
         local error = self:__create_error(
             self.ERROR_CODES.PROTOCOL_ERROR,
@@ -631,7 +635,7 @@ local function config_option_supports_value(option, value)
     return false
 end
 
---- @param default_config_options table<string, string>
+--- @param default_config_options table<string, string|nil>
 --- @return string[] ordered_ids
 local function build_default_config_apply_order(default_config_options)
     --- @type string[]
@@ -1134,9 +1138,9 @@ return ACPClient
 --- @class agentic.acp.ResponseRaw
 --- @field id? number
 --- @field jsonrpc string
---- @field method string
+--- @field method? string
 --- @field result? table
---- @field params? { sessionId: string, update: agentic.acp.SessionUpdateMessage }
+--- @field params? table
 --- @field error? agentic.acp.ACPError
 
 --- @class agentic.acp.ToolCallMessage
@@ -1174,6 +1178,9 @@ return ACPClient
 --- @field size number Total context window size in tokens
 --- @field cost? { amount: number, currency: string } Cumulative session cost
 
+--- @class agentic.acp.SessionInfoUpdate
+--- @field sessionUpdate "session_info_update"
+
 --- @class agentic.acp.ConfigOptionsUpdate
 --- @field sessionUpdate "config_option_update"
 --- @field configOptions agentic.acp.ConfigOption[]
@@ -1188,6 +1195,7 @@ return ACPClient
 --- | agentic.acp.AvailableCommandsUpdate
 --- | agentic.acp.CurrentModeUpdate
 --- | agentic.acp.UsageUpdate
+--- | agentic.acp.SessionInfoUpdate
 --- | agentic.acp.ConfigOptionsUpdate
 
 --- @class agentic.acp.PermissionOption
@@ -1246,9 +1254,9 @@ return ACPClient
 --- @field on_cursor_extension? agentic.acp.ClientHandlers.on_cursor_extension
 
 --- @class agentic.acp.ACPProviderConfig
---- @field name? string Provider name
+--- @field name string Provider name
 --- @field transport_type? agentic.acp.TransportType
---- @field command? string Command to spawn agent (for stdio)
+--- @field command string Command to spawn agent (for stdio)
 --- @field args? string[] Arguments for agent command
 --- @field env? table<string, string|nil> Environment variables
 --- @field timeout? number Request timeout in milliseconds
@@ -1257,6 +1265,6 @@ return ACPClient
 --- @field auth_method? string Authentication method
 --- @field default_mode? string Default mode ID to set on session creation
 --- @field default_model? string Default model ID to set on session creation
---- @field default_config_options? table<string, string> Default config options to set on session creation (model-dependent options are re-evaluated after model changes)
+--- @field default_config_options? table<string, string|nil> Default config options to set on session creation (model-dependent options are re-evaluated after model changes)
 --- @field auto_approve? boolean Automatically approve all permission requests
 --- @field mcp_servers? agentic.acp.McpServer[] MCP servers to connect on session creation

@@ -1,4 +1,3 @@
---- @diagnostic disable: unnecessary-if, assign-type-mismatch, param-type-mismatch
 -- The session manager class glues together the Chat widget, the agent instance, and the message writer.
 -- It is responsible for managing the session state, routing messages between components, and handling user interactions.
 -- When the user creates a new session, the SessionManager should be responsible for cleaning the existing session (if any) and initializing a new one.
@@ -17,6 +16,7 @@ local SlashCommands = require("agentic.acp.slash_commands")
 --- @class agentic._SessionManagerPrivate
 local P = {}
 
+--- @type table<string, boolean|nil>
 --- Tool call kinds that mutate files on disk.
 --- When these complete, buffers must be reloaded via checktime.
 local FILE_MUTATING_KINDS = {
@@ -76,7 +76,33 @@ function P.invoke_hook(hook_name, data)
     end
 end
 
---- @class agentic.SessionManager
+--- Data fields initialized in the constructor. Kept separate from the full class
+--- so LuaLS does not require prototype methods on the constructor table literal.
+--- @class agentic.SessionManagerData
+--- @field session_id? string
+--- @field tab_page_id integer
+--- @field _is_first_message boolean
+--- @field is_generating boolean
+--- @field _turn_start_time? number
+--- @field _pending_input? string
+--- @field widget? agentic.ui.ChatWidget
+--- @field agent? agentic.acp.ACPClient
+--- @field message_writer? agentic.ui.MessageWriter
+--- @field permission_manager? agentic.ui.PermissionManager
+--- @field status_animation? agentic.ui.StatusAnimation
+--- @field file_list? agentic.ui.FileList
+--- @field code_selection? agentic.ui.CodeSelection
+--- @field diagnostics_list? agentic.ui.DiagnosticsList
+--- @field config_options? agentic.acp.AgentConfigOptions
+--- @field todo_list? agentic.ui.TodoList
+--- @field chat_history? agentic.ui.ChatHistory
+--- @field chat_folds? agentic.ui.ChatFolds
+--- @field _header_refresh_scheduled boolean
+--- @field _history_to_send? agentic.ui.ChatHistory.Message[]
+--- @field _restoring boolean
+--- @field _replace_session boolean
+
+--- @class agentic.SessionManager : agentic.SessionManagerData
 --- @field session_id? string
 --- @field tab_page_id integer
 --- @field _is_first_message boolean Whether this is the first message in the session, used to add system info only once
@@ -95,6 +121,7 @@ end
 --- @field todo_list agentic.ui.TodoList
 --- @field chat_history agentic.ui.ChatHistory
 --- @field chat_folds agentic.ui.ChatFolds
+--- @field _header_refresh_scheduled boolean
 --- @field _history_to_send? agentic.ui.ChatHistory.Message[] Messages to prepend on next prompt submit
 --- @field _restoring boolean Flag to prevent auto-new_session during restore
 --- @field _replace_session boolean When true, preserve loaded session identity on next submit (continue mode)
@@ -116,6 +143,7 @@ function SessionManager._generate_welcome_header(provider_name, session_id)
 end
 
 --- @param tab_page_id integer
+--- @return agentic.SessionManager|nil
 function SessionManager:new(tab_page_id)
     local AgentInstance = require("agentic.acp.agent_instance")
     local ChatWidget = require("agentic.ui.chat_widget")
@@ -128,14 +156,17 @@ function SessionManager:new(tab_page_id)
     local TodoList = require("agentic.ui.todo_list")
     local AgentConfigOptions = require("agentic.acp.agent_config_options")
 
-    self = setmetatable({
+    --- @type agentic.SessionManagerData
+    local instance = {
         session_id = nil,
         tab_page_id = tab_page_id,
         _is_first_message = true,
         is_generating = false,
+        _header_refresh_scheduled = false,
         _restoring = false,
         _replace_session = false,
-    }, self)
+    }
+    self = setmetatable(instance, self)
 
     local agent = AgentInstance.get_instance(Config.provider, function(_client)
         vim.schedule(function()
@@ -258,8 +289,8 @@ end
 function SessionManager:_on_session_update(update)
     -- order the IF blocks in order of likeliness to be called for performance
     if update.sessionUpdate == "plan" then
+        --- @cast update agentic.acp.PlanUpdate
         if Config.windows.todos.display then
-            --- @diagnostic disable-next-line: param-type-mismatch
             self.todo_list:render(update.entries)
         end
     elseif update.sessionUpdate == "agent_message_chunk" then
@@ -289,20 +320,20 @@ function SessionManager:_on_session_update(update)
             })
         end
     elseif update.sessionUpdate == "available_commands_update" then
-        --- @diagnostic disable-next-line: param-type-mismatch
+        --- @cast update agentic.acp.AvailableCommandsUpdate
         SlashCommands.setCommands(update.availableCommands)
     elseif update.sessionUpdate == "current_mode_update" then
+        --- @cast update agentic.acp.CurrentModeUpdate
         -- only for legacy modes, not for config_options
         if
             self.config_options.legacy_agent_modes:handle_agent_update_mode(
                 update.currentModeId
             )
         then
-            --- @diagnostic disable-next-line: param-type-mismatch
             self:_set_mode_to_chat_header(update.currentModeId)
         end
     elseif update.sessionUpdate == "config_option_update" then
-        --- @diagnostic disable-next-line: param-type-mismatch
+        --- @cast update agentic.acp.ConfigOptionsUpdate
         self:_handle_new_config_options(update.configOptions)
     elseif update.sessionUpdate == "session_info_update" then
         -- Cursor may emit session metadata updates (e.g. title); ignore for now.
@@ -750,19 +781,19 @@ function SessionManager:_on_tool_call_update(tool_call_update)
 
     -- Reload buffers when file-mutating tool calls complete
     if tool_call_update.status == "completed" then
-        local tracker =
-            self.message_writer.tool_call_blocks[tool_call_update.tool_call_id]
+        local tracker = rawget(
+            self.message_writer.tool_call_blocks,
+            tool_call_update.tool_call_id
+        )
 
-        if tracker and tracker.kind and FILE_MUTATING_KINDS[tracker.kind] then
+        if tracker and FILE_MUTATING_KINDS[tracker.kind] then
             vim.cmd.checktime()
 
-            if tracker.argument then
-                P.invoke_hook("on_file_edit", {
-                    file_path = tracker.argument,
-                    session_id = self.session_id,
-                    tab_page_id = self.tab_page_id,
-                })
-            end
+            P.invoke_hook("on_file_edit", {
+                file_path = tracker.argument,
+                session_id = self.session_id,
+                tab_page_id = self.tab_page_id,
+            })
         end
     end
 
@@ -1049,8 +1080,19 @@ function SessionManager:_apply_default_config_options(
             return
         end
 
+        local session_id = self.session_id
+        if not session_id then
+            --- @type agentic.acp.ACPError
+            local error = {
+                code = self.agent.ERROR_CODES.SESSION_NOT_FOUND,
+                message = "Cannot set config option before session is initialized",
+            }
+            callback(nil, error)
+            return
+        end
+
         self.agent:set_config_option(
-            self.session_id,
+            session_id,
             config_id,
             target_value,
             function(result, err)
@@ -1258,6 +1300,7 @@ function SessionManager:_handle_input_submit(input_text)
         if chat_winid and vim.api.nvim_win_is_valid(chat_winid) then
             chat_width = vim.api.nvim_win_get_width(chat_winid)
         end
+        --- @cast chat_width integer
 
         local DiagnosticsContext = require("agentic.ui.diagnostics_context")
 
@@ -1371,7 +1414,7 @@ end
 --- @param opts {restore_mode?: boolean, on_created?: fun()}|nil
 function SessionManager:new_session(opts)
     opts = opts or {}
-    local restore_mode = opts.restore_mode or false
+    local restore_mode = opts.restore_mode == true
     local on_created = opts.on_created
     if not restore_mode then
         self:_cancel_session()
@@ -1546,9 +1589,7 @@ function SessionManager:_cancel_session()
         self.diagnostics_list:clear()
         self.config_options:clear()
 
-        if self.chat_folds then
-            self.chat_folds:reset()
-        end
+        self.chat_folds:reset()
     end
 
     self.session_id = nil

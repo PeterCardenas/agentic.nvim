@@ -1,4 +1,3 @@
----@diagnostic disable: unnecessary-if
 --- Full mock transport that completes the ACP handshake and allows message injection.
 --- Unlike acp_transport_mock.lua which only sets "connecting" state,
 --- this mock transitions to "connected", auto-responds to initialize/session/new,
@@ -25,6 +24,9 @@ local NEXT_PROMPT_ID_KEY = "_next_prompt_request_id"
 --- @field _stopped boolean
 --- @field _sent table[] Captured outgoing requests for assertions
 --- @field _next_prompt_request_id number|nil The JSON-RPC id of the pending session/prompt request
+--- @field send? fun(self: agentic.acp.ACPTransportFullMockInstance, data: string): boolean
+--- @field start? fun(self: agentic.acp.ACPTransportFullMockInstance)
+--- @field stop? fun(self: agentic.acp.ACPTransportFullMockInstance)
 --- @field inject_notification? fun(self: agentic.acp.ACPTransportFullMockInstance, session_id: string, update: table)
 --- @field complete_prompt? fun(self: agentic.acp.ACPTransportFullMockInstance, stop_reason: string|nil)
 
@@ -32,6 +34,7 @@ local NEXT_PROMPT_ID_KEY = "_next_prompt_request_id"
 --- @param callbacks agentic.acp.TransportCallbacks
 --- @return agentic.acp.ACPTransportFullMockInstance
 function M.create_stdio_transport(config, callbacks)
+    --- @type agentic.acp.ACPTransportFullMockInstance
     local transport = {
         stdin = nil,
         stdout = nil,

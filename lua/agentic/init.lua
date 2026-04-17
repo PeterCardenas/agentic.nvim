@@ -1,4 +1,3 @@
---- @diagnostic disable: unnecessary-if
 local Config = require("agentic.config")
 local AgentInstance = require("agentic.acp.agent_instance")
 local Theme = require("agentic.theme")
@@ -376,15 +375,15 @@ function Agentic.setup(opts)
                     return false
                 end
 
-                local ret = session.file_list:add(file_path) or false
+                local added = session.file_list:add(file_path)
 
-                if ret then
+                if added == true then
                     session.widget:show({
                         focus_prompt = false,
                     })
                 end
 
-                return ret
+                return added
             end,
         })
     end

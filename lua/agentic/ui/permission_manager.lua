@@ -1,4 +1,3 @@
---- @diagnostic disable: need-check-nil, param-type-mismatch, undefined-field
 local BufHelpers = require("agentic.utils.buf_helpers")
 local Config = require("agentic.config")
 local Logger = require("agentic.utils.logger")
@@ -17,11 +16,28 @@ local PERMISSION_KIND_PRIORITY = {
     reject_always = 4,
 }
 
+--- @class agentic.ui.PermissionManager.QueueItem
+--- @field toolCallId string
+--- @field request agentic.acp.RequestPermission
+--- @field callback fun(option_id: string|nil)
+
+--- @class agentic.ui.PermissionManager.KeymapInfo
+--- @field mode string
+--- @field lhs string
+
+--- @class agentic.ui.PermissionManager.PermissionRequest
+--- @field toolCallId string
+--- @field request agentic.acp.RequestPermission
+--- @field callback fun(option_id: string|nil)
+--- @field button_start_row integer
+--- @field button_end_row integer
+--- @field option_mapping table<integer, string>
+
 --- @class agentic.ui.PermissionManager
 --- @field message_writer agentic.ui.MessageWriter Reference to MessageWriter instance
---- @field queue table[] Queue of pending requests {toolCallId, request, callback}
+--- @field queue agentic.ui.PermissionManager.QueueItem[]
 --- @field current_request? agentic.ui.PermissionManager.PermissionRequest Currently displayed request with button positions
---- @field keymap_info table[] Keymap info for cleanup {mode, lhs}
+--- @field keymap_info agentic.ui.PermissionManager.KeymapInfo[] Keymap info for cleanup
 --- @field _reanchoring boolean Guard flag to prevent recursive on_content_changed during reanchor
 local PermissionManager = {}
 PermissionManager.__index = PermissionManager
@@ -70,7 +86,11 @@ function PermissionManager:add_request(request, callback)
         end
     end
 
-    table.insert(self.queue, { toolCallId, request, callback })
+    table.insert(self.queue, {
+        toolCallId = toolCallId,
+        request = request,
+        callback = callback,
+    })
 
     if not self.current_request then
         self:_process_next()
@@ -82,11 +102,14 @@ function PermissionManager:_process_next()
         return
     end
 
-    --- @diagnostic disable-next-line: need-check-nil
     local item = table.remove(self.queue, 1)
-    local toolCallId = item[1]
-    local request = item[2]
-    local callback = item[3]
+    if not item then
+        return
+    end
+
+    local toolCallId = item.toolCallId
+    local request = item.request
+    local callback = item.callback
     local sorted_options = self._sort_permission_options(request.options)
 
     local button_start_row, button_end_row, option_mapping =
@@ -95,7 +118,6 @@ function PermissionManager:_process_next()
             sorted_options
         )
 
-    ---@class agentic.ui.PermissionManager.PermissionRequest
     self.current_request = {
         toolCallId = toolCallId,
         request = request,
@@ -123,7 +145,6 @@ function PermissionManager:_reanchor_permission_prompt()
     local current = self.current_request
 
     local ok, err = pcall(function()
-        --- @diagnostic disable-next-line: need-check-nil
         self.message_writer:remove_permission_buttons(
             current.button_start_row,
             current.button_end_row
@@ -225,7 +246,7 @@ function PermissionManager:clear()
     end
 
     for _, item in ipairs(self.queue) do
-        local callback = item[3]
+        local callback = item.callback
         pcall(callback, nil)
     end
 
@@ -236,7 +257,7 @@ end
 --- @param toolCallId string
 function PermissionManager:remove_request_by_tool_call_id(toolCallId)
     self.queue = vim.tbl_filter(function(item)
-        return item[1] ~= toolCallId
+        return item.toolCallId ~= toolCallId
     end, self.queue)
 
     if

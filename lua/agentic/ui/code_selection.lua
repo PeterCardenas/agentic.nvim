@@ -1,4 +1,3 @@
---- @diagnostic disable: unnecessary-if
 local FileSystem = require("agentic.utils.file_system")
 local BufHelpers = require("agentic.utils.buf_helpers")
 local Theme = require("agentic.theme")
@@ -29,7 +28,7 @@ end
 
 --- @param selection agentic.Selection
 function CodeSelection:add(selection)
-    if selection and #selection.lines > 0 then
+    if #selection.lines > 0 then
         table.insert(self._selections, selection)
         self:_render()
     end
@@ -45,6 +44,7 @@ function CodeSelection:remove_at_cursor(line)
     -- Find the code fence block that contains the cursor line
     local query = vim.treesitter.query.parse("markdown", CODE_FENCE_QUERY)
 
+    --- @type integer|nil
     local fence_index = nil
     local match_count = 0
 
@@ -124,8 +124,8 @@ end
 --- @private
 --- @return TSNode|nil root
 function CodeSelection:_get_tree_root()
-    local parser = vim.treesitter.get_parser(self._bufnr, "markdown")
-    if not parser then
+    local ok, parser = pcall(vim.treesitter.get_parser, self._bufnr, "markdown")
+    if not ok or not parser then
         return nil
     end
 

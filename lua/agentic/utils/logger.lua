@@ -1,4 +1,3 @@
---- @diagnostic disable: unnecessary-if
 local Config = require("agentic.config")
 
 --- @class agentic.utils.Logger
@@ -9,7 +8,8 @@ function Logger.get_timestamp()
 end
 
 local function format_debug_message(...)
-    if not Config.debug then
+    local debug_enabled = Config.debug --[[@as boolean]]
+    if not debug_enabled then
         return nil
     end
 
@@ -20,20 +20,20 @@ local function format_debug_message(...)
     end
 
     local info = debug.getinfo(3, "Sl")
-    --- @diagnostic disable-next-line: need-check-nil
-    local caller_source = info.source:match("@(.+)$") or "unknown"
+    local caller_source = "unknown"
+    local caller_line = 0
+
+    if info then
+        caller_source = info.source:match("@(.+)$") or caller_source
+        caller_line = info.currentline
+    end
+
     local caller_module =
         caller_source:gsub("^.*/lua/", ""):gsub("%.lua$", ""):gsub("/", ".")
 
     local timestamp = Logger.get_timestamp()
     local log_parts = {
-        string.format(
-            "[%s] [%s:%d]",
-            timestamp,
-            caller_module,
-            --- @diagnostic disable-next-line: need-check-nil
-            info.currentline
-        ),
+        string.format("[%s] [%s:%d]", timestamp, caller_module, caller_line),
     }
 
     for _, arg in ipairs(args) do

@@ -1,5 +1,6 @@
---- @diagnostic disable: unresolved-require
+--- @diagnostic disable-next-line: unresolved-require
 local assert = require("tests.helpers.assert")
+--- @diagnostic disable-next-line: unresolved-require
 local Child = require("tests.helpers.child")
 
 describe("Open and Close Chat Widget", function()
