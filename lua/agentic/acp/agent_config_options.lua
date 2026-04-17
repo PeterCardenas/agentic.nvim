@@ -57,8 +57,12 @@ local function build_config_option_preview_lines(target)
 
     local max_preview_values = 8
     local shown = math.min(#target.options, max_preview_values)
-    for i = 1, shown do
-        local option = target.options[i]
+    local shown_count = 0
+    for _, option in ipairs(target.options) do
+        shown_count = shown_count + 1
+        if shown_count > shown then
+            break
+        end
         local prefix = option.value == current_value and "*" or "-"
         table.insert(
             lines,
@@ -79,6 +83,7 @@ end
 --- @param options_by_id table<string, agentic.acp.ConfigOption>
 --- @return table
 local function create_config_option_previewer(options_by_id)
+    --- @diagnostic disable-next-line: unresolved-require
     local builtin = require("fzf-lua.previewer.builtin")
     local previewer = builtin.base:extend()
 
