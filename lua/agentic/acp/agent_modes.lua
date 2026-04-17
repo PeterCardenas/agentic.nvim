@@ -1,18 +1,6 @@
---- Manages agent modes for ACP sessions
---- Provides mode selection via fzf-lua (with fallback to vim.ui.select)
+--- Manages legacy agent modes for ACP sessions
 
 local Logger = require("agentic.utils.logger")
-
---- Lazily load fzf-lua module
---- @return table|nil fzf_lua module or nil if not available
-local function load_fzf_lua()
-    local ok, fzf = pcall(require, "fzf-lua")
-    if not ok then
-        return nil
-    end
-    --- @diagnostic disable-next-line: return-type-mismatch
-    return fzf
-end
 
 --- @class agentic.acp.AgentModes
 --- @field _modes agentic.acp.AgentMode[]
@@ -46,80 +34,6 @@ function AgentModes:get_mode(mode_id)
         end
     end
     return nil
-end
-
---- @param set_mode_callback fun(mode_id: string)
---- @return boolean shown
-function AgentModes:show_mode_selector(set_mode_callback)
-    if #self._modes == 0 then
-        return false
-    end
-
-    local fzf = load_fzf_lua()
-
-    --- @param item agentic.acp.AgentMode
-    --- @return string
-    local function format_mode(item)
-        local prefix = item.id == self.current_mode_id and "● " or "  "
-        if item.description and item.description ~= "" then
-            return string.format(
-                "%s%s: %s",
-                prefix,
-                item.name,
-                item.description
-            )
-        end
-        return prefix .. item.name
-    end
-
-    local on_select = function(selected_mode)
-        if selected_mode and selected_mode.id ~= self.current_mode_id then
-            set_mode_callback(selected_mode.id)
-        end
-    end
-
-    if not fzf then
-        -- Fallback to vim.ui.select if fzf-lua is not available
-        vim.ui.select(self._modes, {
-            prompt = "Select Agent Mode:",
-            format_item = format_mode,
-        }, on_select)
-        return true
-    end
-
-    -- Build entries for fzf-lua
-    local entries = {}
-    for _, mode in ipairs(self._modes) do
-        table.insert(entries, format_mode(mode))
-    end
-
-    fzf.fzf_exec(entries, {
-        prompt = "Select Agent Mode> ",
-        winopts = {
-            height = 0.4,
-            width = 0.6,
-            row = 0.5,
-            col = 0.5,
-        },
-        actions = {
-            ["default"] = function(selected)
-                if not selected or #selected == 0 then
-                    on_select(nil)
-                    return
-                end
-
-                -- Find the mode that matches the selected display string
-                for _, mode in ipairs(self._modes) do
-                    if format_mode(mode) == selected[1] then
-                        on_select(mode)
-                        return
-                    end
-                end
-                on_select(nil)
-            end,
-        },
-    })
-    return true
 end
 
 --- @param mode_id string|nil

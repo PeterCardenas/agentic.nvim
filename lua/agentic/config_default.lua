@@ -274,12 +274,6 @@ local ConfigDefault = {
         --- Keys bindings for ALL buffers in the widget
         widget = {
             close = "q",
-            change_mode = {
-                {
-                    "<S-Tab>",
-                    mode = { "i", "n", "v" },
-                },
-            },
             switch_provider = "<localLeader>s",
             switch_model = "<localLeader>m",
             switch_config_option = "<localLeader>o",

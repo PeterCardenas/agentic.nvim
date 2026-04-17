@@ -220,9 +220,6 @@ function SessionManager:new(tab_page_id)
 
     self.config_options = AgentConfigOptions:new(
         self.widget.buf_nrs,
-        function(mode_id, is_legacy)
-            self:_handle_mode_change(mode_id, is_legacy)
-        end,
         function(model_id, is_legacy)
             self:_handle_model_change(model_id, is_legacy)
         end,

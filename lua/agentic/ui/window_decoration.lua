@@ -34,7 +34,6 @@ local WindowDecoration = {}
 local WINDOW_HEADERS = {
     chat = {
         title = "󰻞 Agentic Chat",
-        suffix = "<S-Tab>: change mode",
     },
     input = { title = "󰦨 Prompt", suffix = "<C-s>: submit" },
     code = {

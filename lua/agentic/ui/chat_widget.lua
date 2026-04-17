@@ -809,7 +809,7 @@ local function find_keymap(keymaps, mode)
     end
 end
 
---- Binds events to change the suffix header texts based on current mode keymaps
+--- Binds events to update header hints based on the current editor mode
 --- For the Chat and Input buffers only
 function ChatWidget:_bind_events_to_change_headers()
     local tab_page_id = self.tab_page_id
@@ -830,16 +830,6 @@ function ChatWidget:_bind_events_to_change_headers()
                         WindowDecoration.get_headers_state(tab_page_id)
 
                     local mode = vim.fn.mode()
-                    local change_mode_key =
-                        find_keymap(Config.keymaps.widget.change_mode, mode)
-
-                    if change_mode_key ~= nil then
-                        headers.chat.suffix =
-                            string.format("%s: change mode", change_mode_key)
-                    else
-                        headers.chat.suffix = nil
-                    end
-
                     local submit_key =
                         find_keymap(Config.keymaps.prompt.submit, mode)
 
@@ -853,7 +843,6 @@ function ChatWidget:_bind_events_to_change_headers()
                     -- Reassign to persist changes
                     WindowDecoration.set_headers_state(tab_page_id, headers)
 
-                    self:render_header("chat")
                     self:render_header("input")
                 end)
             end,

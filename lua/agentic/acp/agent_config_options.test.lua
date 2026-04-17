@@ -83,22 +83,22 @@ describe("agentic.acp.AgentConfigOptions", function()
     end)
 
     describe("constructor", function()
-        it("registers keymaps for mode and model on all buffers", function()
-            -- multi_keymap_set is stubbed in before_each; constructor called there
-            -- Each buffer gets 3 keymaps
-            -- (change_mode + switch_model + switch_config_option)
-            -- we pass 1 buffer so expect 3 calls
-            assert.stub(multi_keymap_stub).was.called(3)
+        it(
+            "registers keymaps for model and config options on all buffers",
+            function()
+                -- multi_keymap_set is stubbed in before_each; constructor called there
+                -- Each buffer gets 2 keymaps
+                -- (switch_model + switch_config_option)
+                -- we pass 1 buffer so expect 2 calls
+                assert.stub(multi_keymap_stub).was.called(2)
 
-            local mode_call = assert.not_nil(multi_keymap_stub.calls[1])
-            assert.equal("function", type(mode_call[3]))
+                local model_call = assert.not_nil(multi_keymap_stub.calls[1])
+                assert.equal("function", type(model_call[3]))
 
-            local model_call = assert.not_nil(multi_keymap_stub.calls[2])
-            assert.equal("function", type(model_call[3]))
-
-            local config_call = assert.not_nil(multi_keymap_stub.calls[3])
-            assert.equal("function", type(config_call[3]))
-        end)
+                local config_call = assert.not_nil(multi_keymap_stub.calls[2])
+                assert.equal("function", type(config_call[3]))
+            end
+        )
     end)
 
     describe("set_options", function()
@@ -335,127 +335,6 @@ describe("agentic.acp.AgentConfigOptions", function()
                 assert.is_true(string.find(first_call[1], "unknown") ~= nil)
             end
         )
-    end)
-
-    describe("show_mode_selector", function()
-        --- @type TestStub
-        local select_stub
-
-        before_each(function()
-            config_options:set_options({ mode_option })
-            select_stub = spy.stub(vim.ui, "select")
-        end)
-
-        after_each(function()
-            select_stub:revert()
-        end)
-
-        it(
-            "returns true and opens vim.ui.select when config modes exist",
-            function()
-                local shown = config_options:show_mode_selector(function() end)
-
-                assert.is_true(shown)
-                assert.stub(select_stub).was.called(1)
-            end
-        )
-
-        it(
-            "calls handler with value and is_legacy=false on config-option selection",
-            function()
-                local handler = spy.new(function() end)
-                select_stub:invokes(function(items, _opts, on_choice)
-                    on_choice(items[2])
-                end)
-
-                config_options:show_mode_selector(
-                    handler --[[@as fun(mode: string, is_legacy: boolean): nil]]
-                )
-
-                assert.spy(handler).was.called_with("plan", false)
-            end
-        )
-
-        it("does not call handler on current value or cancel", function()
-            local handler = spy.new(function() end)
-
-            select_stub:invokes(function(items, _opts, on_choice)
-                on_choice(items[1])
-            end)
-            config_options:show_mode_selector(
-                handler --[[@as fun(mode: string, is_config_option: boolean): nil]]
-            )
-
-            select_stub:invokes(function(_items, _opts, on_choice)
-                on_choice(nil)
-            end)
-            config_options:show_mode_selector(
-                handler --[[@as fun(mode: string, is_config_option: boolean): nil]]
-            )
-
-            assert.spy(handler).was.called(0)
-        end)
-
-        it(
-            "falls back to legacy modes and wraps callback with is_legacy=true",
-            function()
-                local fresh = AgentConfigOptions:new(
-                    { chat = test_bufnr },
-                    function() end,
-                    function() end
-                )
-                fresh.legacy_agent_modes:set_modes({
-                    availableModes = {
-                        {
-                            id = "legacy",
-                            name = "Legacy",
-                            description = "Legacy mode",
-                        },
-                        {
-                            id = "legacy-2",
-                            name = "Legacy 2",
-                            description = "Another",
-                        },
-                    },
-                    currentModeId = "legacy",
-                })
-
-                local handler = spy.new(function() end)
-                select_stub:invokes(function(items, _opts, on_choice)
-                    on_choice(items[2])
-                end)
-
-                local shown = fresh:show_mode_selector(
-                    handler --[[@as fun(mode: string, is_config_option: boolean): nil]]
-                )
-
-                assert.is_true(shown)
-                assert.stub(select_stub).was.called(1)
-                assert.spy(handler).was.called_with("legacy-2", true)
-            end
-        )
-
-        it("returns false and notifies when no modes exist at all", function()
-            local Logger = require("agentic.utils.logger")
-            local notify_stub = spy.stub(Logger, "notify")
-
-            local fresh = AgentConfigOptions:new(
-                { chat = test_bufnr },
-                function() end,
-                function() end
-            )
-            local handler = function() end
-
-            assert.is_false(fresh:show_mode_selector(handler))
-            assert.stub(select_stub).was.called(0)
-            assert.stub(notify_stub).was.called(1)
-            assert.truthy(
-                string.find(notify_stub.calls[1][1], "mode switching")
-            )
-            assert.equal(vim.log.levels.WARN, notify_stub.calls[1][2])
-
-            notify_stub:revert()
-        end)
     end)
 
     describe("show_model_selector", function()

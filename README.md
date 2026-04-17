@@ -384,7 +384,7 @@ a table configuration or a custom render function.
     headers = {
       chat = {
         title = "󰻞 My Custom Chat Title",
-        suffix = "<S-Tab>: change mode",
+        suffix = "My custom suffix",
       },
       -- ...
     },
@@ -472,14 +472,13 @@ These keybindings are automatically set in Agentic buffers:
 
 | Keybinding       | Mode  | Description                                                     |
 | ---------------- | ----- | --------------------------------------------------------------- |
-| `<S-Tab>`        | n/v/i | Switch agent mode (only available if provider supports modes)   |
 | `<CR>`           | n     | Submit prompt                                                   |
 | `<C-s>`          | n/v/i | Submit prompt                                                   |
 | `<localLeader>p` | n     | Paste image from clipboard in the Prompt buffer                 |
 | `<C-v>`          | i     | Paste image from clipboard (same as Claude-code)                |
 | `<localLeader>s` | n     | Switch ACP provider (preserves chat history)                    |
 | `<localLeader>m` | n     | Switch model without (preserves chat history)                   |
-| `<localLeader>o` | n     | Two-step config picker (select option, then value)              |
+| `<localLeader>o` | n     | Two-step config picker (including mode when provider exposes it) |
 | `<leader>ao`     | n     | Global two-step config picker (option, then value)              |
 | `q`              | n     | Close chat widget                                               |
 | `d`              | n     | Remove file, code selection, or diagnostic at cursor            |
@@ -501,12 +500,6 @@ your setup:
       -- Keybindings for ALL buffers in the widget (chat, prompt, code, files)
       widget = {
         close = "q",  -- String for a single keybinding
-        change_mode = {
-          {
-            "<S-Tab>",
-            mode = { "i", "n", "v" },  -- Specify modes for this keybinding
-          },
-        },
         switch_provider = "<localLeader>s",  -- Switch ACP provider
         switch_model = "<localLeader>m",     -- Switch model
         switch_config_option = "<localLeader>o", -- Two-step config picker

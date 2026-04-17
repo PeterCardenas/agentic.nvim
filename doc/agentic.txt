@@ -471,7 +471,6 @@ KEYMAPS                                                *agentic-keymaps*
 These keybindings are automatically set in Agentic buffers:
 
   Key                    Mode    Description ~
-  <S-Tab>                n/v/i   Switch agent mode (if supported)
   <CR>                   n       Submit prompt
   <C-s>                  n/v/i   Submit prompt
   <Tab>                  i       Accept file completion
@@ -479,7 +478,8 @@ These keybindings are automatically set in Agentic buffers:
   <C-v>                  i       Paste image from clipboard
   <localLeader>s         n       Switch ACP provider (keeps history)
   <localLeader>m         n       Switch model (keeps history)
-  <localLeader>o         n       Two-step config picker
+  <localLeader>o         n       Two-step config picker (includes mode if
+                                 provider exposes it)
   <leader>ao             n       Global two-step config picker
   q                      n       Close chat widget
   d                      n/v     Remove file/selection/diagnostic
@@ -496,9 +496,6 @@ Override default keybindings via the `keymaps` config option:
     keymaps = {
       widget = {
         close = "q",
-        change_mode = {
-          { "<S-Tab>", mode = { "i", "n", "v" } },
-        },
         switch_provider = "<localLeader>s",
         switch_model = "<localLeader>m",
         switch_config_option = "<localLeader>o",
