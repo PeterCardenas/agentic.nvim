@@ -304,6 +304,8 @@ function SessionManager:_on_session_update(update)
     elseif update.sessionUpdate == "config_option_update" then
         --- @diagnostic disable-next-line: param-type-mismatch
         self:_handle_new_config_options(update.configOptions)
+    elseif update.sessionUpdate == "session_info_update" then
+        -- Cursor may emit session metadata updates (e.g. title); ignore for now.
     elseif update.sessionUpdate == "usage_update" then
         -- Usage updates contain token/cost information - currently informational only
         -- Fields: used (tokens), size (context window), cost (optional: amount, currency)
