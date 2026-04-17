@@ -1,4 +1,3 @@
---- @diagnostic disable: param-type-mismatch
 local BufHelpers = require("agentic.utils.buf_helpers")
 local WindowDecoration = require("agentic.ui.window_decoration")
 
@@ -85,6 +84,7 @@ function TodoList:_scroll_to_non_completed(entries)
         return
     end
 
+    --- @type integer
     local winid = wins[1]
     local win_height = vim.api.nvim_win_get_height(winid)
 
@@ -108,7 +108,10 @@ function TodoList:_scroll_to_non_completed(entries)
         return
     end
 
-    local visible_lines = math.min(win_height, total)
+    local visible_lines = win_height
+    if total < visible_lines then
+        visible_lines = total
+    end
     -- clamp to 0 to avoid ultra short windows, either by the user resize or window size.
     local target = first_non_completed - math.max(0, visible_lines - 2)
     local max_top = total - visible_lines + 1

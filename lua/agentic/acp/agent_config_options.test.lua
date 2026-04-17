@@ -1,4 +1,3 @@
---- @diagnostic disable: need-check-nil
 local assert = require("tests.helpers.assert")
 local spy = require("tests.helpers.spy")
 
@@ -91,13 +90,13 @@ describe("agentic.acp.AgentConfigOptions", function()
             -- we pass 1 buffer so expect 3 calls
             assert.stub(multi_keymap_stub).was.called(3)
 
-            local mode_call = multi_keymap_stub.calls[1]
+            local mode_call = assert.not_nil(multi_keymap_stub.calls[1])
             assert.equal("function", type(mode_call[3]))
 
-            local model_call = multi_keymap_stub.calls[2]
+            local model_call = assert.not_nil(multi_keymap_stub.calls[2])
             assert.equal("function", type(model_call[3]))
 
-            local config_call = multi_keymap_stub.calls[3]
+            local config_call = assert.not_nil(multi_keymap_stub.calls[3])
             assert.equal("function", type(config_call[3]))
         end)
     end)
@@ -110,9 +109,12 @@ describe("agentic.acp.AgentConfigOptions", function()
                 thought_option,
             })
 
-            assert.equal("mode-1", config_options.mode.id)
-            assert.equal("model-1", config_options.model.id)
-            assert.equal("thought-1", config_options.thought_level.id)
+            local mode = assert.not_nil(config_options.mode)
+            local model = assert.not_nil(config_options.model)
+            local thought_level = assert.not_nil(config_options.thought_level)
+            assert.equal("mode-1", mode.id)
+            assert.equal("model-1", model.id)
+            assert.equal("thought-1", thought_level.id)
         end)
 
         it("does nothing when configOptions is nil", function()
@@ -290,9 +292,8 @@ describe("agentic.acp.AgentConfigOptions", function()
 
             assert.spy(handler).was.called(0)
             assert.stub(notify_stub).was.called(1)
-            assert.is_true(
-                string.find(notify_stub.calls[1][1], "nonexistent") ~= nil
-            )
+            local first_call = assert.not_nil(notify_stub.calls[1])
+            assert.is_true(string.find(first_call[1], "nonexistent") ~= nil)
         end)
 
         it("does nothing when target is nil or empty", function()
@@ -330,9 +331,8 @@ describe("agentic.acp.AgentConfigOptions", function()
 
                 assert.spy(handler).was.called(0)
                 assert.stub(notify_stub).was.called(1)
-                assert.is_true(
-                    string.find(notify_stub.calls[1][1], "unknown") ~= nil
-                )
+                local first_call = assert.not_nil(notify_stub.calls[1])
+                assert.is_true(string.find(first_call[1], "unknown") ~= nil)
             end
         )
     end)

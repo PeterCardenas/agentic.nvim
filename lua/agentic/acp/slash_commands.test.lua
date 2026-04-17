@@ -1,4 +1,3 @@
---- @diagnostic disable: need-check-nil
 local assert = require("tests.helpers.assert")
 local spy = require("tests.helpers.spy")
 
@@ -39,19 +38,22 @@ describe("agentic.acp.SlashCommands", function()
 
                 -- Verify total count includes /new
                 assert.equal(3, #commands)
+                local first_command = assert.not_nil(commands[1])
+                local second_command = assert.not_nil(commands[2])
+                local third_command = assert.not_nil(commands[3])
 
                 -- Verify provided commands are set correctly
-                assert.equal("plan", commands[1].word)
-                assert.equal("Create a plan", commands[1].menu)
-                assert.equal("Create a plan", commands[1].info)
-                assert.equal("review", commands[2].word)
-                assert.equal("Review code", commands[2].menu)
-                assert.equal("Review code", commands[2].info)
+                assert.equal("plan", first_command.word)
+                assert.equal("Create a plan", first_command.menu)
+                assert.equal("Create a plan", first_command.info)
+                assert.equal("review", second_command.word)
+                assert.equal("Review code", second_command.menu)
+                assert.equal("Review code", second_command.info)
 
                 -- Verify /new was automatically added at the end
-                assert.equal("new", commands[3].word)
-                assert.equal("Start a new session", commands[3].menu)
-                assert.equal("Start a new session", commands[3].info)
+                assert.equal("new", third_command.word)
+                assert.equal("Start a new session", third_command.menu)
+                assert.equal("Start a new session", third_command.info)
             end
         )
 
@@ -311,8 +313,10 @@ describe("agentic.acp.SlashCommands", function()
 
             assert.equal(2, #commands_buf1) -- plan + /new
             assert.equal(2, #commands_buf2) -- plan + /new
-            assert.equal("plan", commands_buf1[1].word)
-            assert.equal("plan", commands_buf2[1].word)
+            local first_command = assert.not_nil(commands_buf1[1])
+            local second_command = assert.not_nil(commands_buf2[1])
+            assert.equal("plan", first_command.word)
+            assert.equal("plan", second_command.word)
 
             if vim.api.nvim_buf_is_valid(bufnr2) then
                 vim.api.nvim_buf_delete(bufnr2, { force = true })

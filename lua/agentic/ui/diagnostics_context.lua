@@ -3,6 +3,9 @@ local FileSystem = require("agentic.utils.file_system")
 --- @class agentic.ui.DiagnosticsContext
 local DiagnosticsContext = {}
 
+--- @class agentic.ui.DiagnosticsContext.Diagnostic : vim.Diagnostic
+--- @field file_path string|nil
+
 --- @class agentic.ui.DiagnosticsContext.FormatResult
 --- @field prompt_entries agentic.acp.TextContent[]
 --- @field summary_lines string[]
@@ -72,7 +75,7 @@ local function severity_to_label(severity)
     return label or "ERROR"
 end
 
---- @param diagnostics agentic.ui.DiagnosticsList.Diagnostic[]
+--- @param diagnostics agentic.ui.DiagnosticsList.Diagnostic[]|agentic.ui.DiagnosticsContext.Diagnostic[]
 --- @param chat_width integer
 --- @return agentic.ui.DiagnosticsContext.FormatResult format_result
 function DiagnosticsContext.format_diagnostics(diagnostics, chat_width)

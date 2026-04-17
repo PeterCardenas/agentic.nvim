@@ -1,4 +1,3 @@
---- @diagnostic disable: unnecessary-if, param-type-mismatch
 local Config = require("agentic.config")
 local DefaultConfig = require("agentic.config_default")
 local BufHelpers = require("agentic.utils.buf_helpers")
@@ -230,36 +229,40 @@ local function show_layout(params, position)
         winfixheight = not is_bottom,
     })
 
+    local code_max_height = Config.windows.code.max_height --[[@as integer]]
     open_or_resize_dynamic_window(buf_nrs, win_nrs, "code", {
         win = is_bottom and win_nrs.input or win_nrs.chat,
         split = "below",
-    }, Config.windows.code.max_height, position)
+    }, code_max_height, position)
 
     local ref_win = is_bottom and (win_nrs.code or win_nrs.input)
         or win_nrs.input
 
+    local files_max_height = Config.windows.files.max_height --[[@as integer]]
     open_or_resize_dynamic_window(buf_nrs, win_nrs, "files", {
         win = ref_win,
         split = is_bottom and "below" or "above",
-    }, Config.windows.files.max_height, position)
+    }, files_max_height, position)
 
     ref_win = is_bottom and (win_nrs.files or win_nrs.code or win_nrs.input)
         or win_nrs.input
 
+    local diagnostics_max_height = Config.windows.diagnostics.max_height --[[@as integer]]
     open_or_resize_dynamic_window(buf_nrs, win_nrs, "diagnostics", {
         win = ref_win,
         split = is_bottom and "below" or "above",
-    }, Config.windows.diagnostics.max_height, position)
+    }, diagnostics_max_height, position)
 
     if Config.windows.todos.display then
         ref_win = is_bottom
                 and (win_nrs.diagnostics or win_nrs.files or win_nrs.code or win_nrs.input)
             or win_nrs.chat
 
+        local todos_max_height = Config.windows.todos.max_height --[[@as integer]]
         open_or_resize_dynamic_window(buf_nrs, win_nrs, "todos", {
             win = ref_win,
             split = "below",
-        }, Config.windows.todos.max_height, position)
+        }, todos_max_height, position)
     end
 
     if should_focus then
@@ -287,17 +290,25 @@ function WidgetLayout.open(params)
         return
     end
 
-    local position = params.position
+    local raw_position = params.position --[[@as string]]
+    --- @type agentic.UserConfig.Windows.Position
+    local position
 
-    if position ~= "right" and position ~= "left" and position ~= "bottom" then
+    if
+        raw_position ~= "right"
+        and raw_position ~= "left"
+        and raw_position ~= "bottom"
+    then
         Logger.notify(
             "Invalid windows.position config: "
-                .. tostring(position)
+                .. tostring(raw_position)
                 .. ', falling back to "right"',
             vim.log.levels.ERROR
         )
 
         position = "right"
+    else
+        position = raw_position
     end
 
     local ok, err = pcall(show_layout, params, position)

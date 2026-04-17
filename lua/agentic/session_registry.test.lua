@@ -1,6 +1,18 @@
----@diagnostic disable: assign-type-mismatch, need-check-nil, undefined-field, duplicate-set-field, unnecessary-if
 local assert = require("tests.helpers.assert")
 local spy = require("tests.helpers.spy")
+
+--- @class agentic.tests.SessionRegistry.MockSession
+--- @field tab_page_id integer
+--- @field is_mock boolean
+--- @field destroy fun(self: agentic.tests.SessionRegistry.MockSession)
+
+--- @class agentic.tests.SessionRegistry.ProviderStatus
+--- @field name string
+--- @field installed boolean
+
+--- @class agentic.tests.SessionRegistry.SelectOpts
+--- @field prompt string
+--- @field format_item fun(item: agentic.tests.SessionRegistry.ProviderStatus): string
 
 describe("agentic.SessionRegistry", function()
     --- @type agentic.SessionRegistry
@@ -21,18 +33,20 @@ describe("agentic.SessionRegistry", function()
     local ui_select_stub
 
     --- @param tab_page_id integer
-    --- @return table mock_session
+    --- @return agentic.tests.SessionRegistry.MockSession mock_session
     local function create_mock_session(tab_page_id)
-        return {
+        --- @type agentic.tests.SessionRegistry.MockSession
+        local mock_session = {
             tab_page_id = tab_page_id,
             destroy = function() end,
             is_mock = true,
         }
+        return mock_session
     end
 
     session_manager_mock = {
         new = function(_, tab_page_id)
-            return create_mock_session(tab_page_id)
+            return create_mock_session(tab_page_id) --[[@as agentic.SessionManager]]
         end,
     }
 
@@ -108,15 +122,13 @@ describe("agentic.SessionRegistry", function()
         default_config_mock.provider = "claude-acp"
 
         session_manager_mock.new = function(_, tab_page_id)
-            return create_mock_session(tab_page_id)
+            return create_mock_session(tab_page_id) --[[@as agentic.SessionManager]]
         end
     end)
 
     after_each(function()
-        if SessionRegistry and SessionRegistry.sessions then
-            for k in pairs(SessionRegistry.sessions) do
-                SessionRegistry.sessions[k] = nil
-            end
+        for k in pairs(SessionRegistry.sessions) do
+            SessionRegistry.sessions[k] = nil
         end
 
         package.loaded["agentic.session_manager"] =
@@ -138,9 +150,10 @@ describe("agentic.SessionRegistry", function()
     describe("get_session_for_tab_page", function()
         it("creates new session when none exists for tabpage", function()
             local tab_id = 1
-            local session = SessionRegistry.get_session_for_tab_page(tab_id)
+            local session =
+                assert.not_nil(SessionRegistry.get_session_for_tab_page(tab_id))
+            --[[@as agentic.tests.SessionRegistry.MockSession]]
 
-            assert.is_not_nil(session)
             assert.is_true(session.is_mock)
             assert.equal(tab_id, session.tab_page_id)
         end)
@@ -159,19 +172,19 @@ describe("agentic.SessionRegistry", function()
 
             local session1 = SessionRegistry.get_session_for_tab_page(tab1_id)
             local session2 = SessionRegistry.get_session_for_tab_page(tab2_id)
+            local typed_session1 = assert.not_nil(session1)
+            local typed_session2 = assert.not_nil(session2)
 
-            assert.is_not_nil(session1)
-            assert.is_not_nil(session2)
             assert.are_not.equal(session1, session2)
-            assert.equal(tab1_id, session1.tab_page_id)
-            assert.equal(tab2_id, session2.tab_page_id)
+            assert.equal(tab1_id, typed_session1.tab_page_id)
+            assert.equal(tab2_id, typed_session2.tab_page_id)
         end)
 
         it("uses current tabpage when tab_page_id is nil", function()
             local current_tab_id = vim.api.nvim_get_current_tabpage()
-            local session = SessionRegistry.get_session_for_tab_page(nil)
+            local session =
+                assert.not_nil(SessionRegistry.get_session_for_tab_page(nil))
 
-            assert.is_not_nil(session)
             assert.equal(current_tab_id, session.tab_page_id)
         end)
 
@@ -187,10 +200,7 @@ describe("agentic.SessionRegistry", function()
             end)
 
             assert.is_true(callback_called)
-            assert.is_not_nil(callback_session)
-            if callback_session then
-                assert.equal(tab_id, callback_session.tab_page_id)
-            end
+            assert.equal(tab_id, assert.not_nil(callback_session).tab_page_id)
         end)
 
         it(
@@ -255,9 +265,8 @@ describe("agentic.SessionRegistry", function()
     describe("new_session", function()
         it("creates new session when none exists", function()
             local tab_id = 1
-            local session = SessionRegistry.new_session(tab_id)
+            local session = assert.not_nil(SessionRegistry.new_session(tab_id))
 
-            assert.is_not_nil(session)
             assert.equal(tab_id, session.tab_page_id)
         end)
 
@@ -266,10 +275,11 @@ describe("agentic.SessionRegistry", function()
 
             local first_session = create_mock_session(tab_id)
             local destroy_spy = spy.new(function() end)
-            first_session.destroy = destroy_spy
-            SessionRegistry.sessions[tab_id] = first_session
+            first_session.destroy = destroy_spy --[[@as fun(self: agentic.tests.SessionRegistry.MockSession)]]
+            SessionRegistry.sessions[tab_id] = first_session --[[@as agentic.SessionManager]]
 
-            local new_session = SessionRegistry.new_session(tab_id)
+            local new_session =
+                assert.not_nil(SessionRegistry.new_session(tab_id))
 
             assert.spy(destroy_spy).was.called(1)
 
@@ -285,19 +295,18 @@ describe("agentic.SessionRegistry", function()
             error_session.destroy = function()
                 error("destroy failed")
             end
-            SessionRegistry.sessions[tab_id] = error_session
+            SessionRegistry.sessions[tab_id] = error_session --[[@as agentic.SessionManager]]
 
-            local new_session = SessionRegistry.new_session(tab_id)
+            local new_session =
+                assert.not_nil(SessionRegistry.new_session(tab_id))
 
-            assert.is_not_nil(new_session)
             assert.equal(tab_id, new_session.tab_page_id)
         end)
 
         it("uses current tabpage when tab_page_id is nil", function()
             local current_tab_id = vim.api.nvim_get_current_tabpage()
-            local session = SessionRegistry.new_session(nil)
+            local session = assert.not_nil(SessionRegistry.new_session(nil))
 
-            assert.is_not_nil(session)
             assert.equal(current_tab_id, session.tab_page_id)
         end)
 
@@ -335,8 +344,8 @@ describe("agentic.SessionRegistry", function()
 
             local session = create_mock_session(tab_id)
             local destroy_spy = spy.new(function() end)
-            session.destroy = destroy_spy
-            SessionRegistry.sessions[tab_id] = session
+            session.destroy = destroy_spy --[[@as fun(self: agentic.tests.SessionRegistry.MockSession)]]
+            SessionRegistry.sessions[tab_id] = session --[[@as agentic.SessionManager]]
 
             SessionRegistry.destroy_session(tab_id)
 
@@ -357,8 +366,8 @@ describe("agentic.SessionRegistry", function()
 
             local session = create_mock_session(current_tab_id)
             local destroy_spy = spy.new(function() end)
-            session.destroy = destroy_spy
-            SessionRegistry.sessions[current_tab_id] = session
+            session.destroy = destroy_spy --[[@as fun(self: agentic.tests.SessionRegistry.MockSession)]]
+            SessionRegistry.sessions[current_tab_id] = session --[[@as agentic.SessionManager]]
 
             SessionRegistry.destroy_session(nil)
 
@@ -373,7 +382,7 @@ describe("agentic.SessionRegistry", function()
             error_session.destroy = function()
                 error("destroy failed")
             end
-            SessionRegistry.sessions[tab_id] = error_session
+            SessionRegistry.sessions[tab_id] = error_session --[[@as agentic.SessionManager]]
 
             SessionRegistry.destroy_session(tab_id)
 
@@ -384,8 +393,8 @@ describe("agentic.SessionRegistry", function()
             local tab1_id = 1
             local tab2_id = 2
 
-            SessionRegistry.sessions[tab1_id] = create_mock_session(tab1_id)
-            SessionRegistry.sessions[tab2_id] = create_mock_session(tab2_id)
+            SessionRegistry.sessions[tab1_id] = create_mock_session(tab1_id) --[[@as agentic.SessionManager]]
+            SessionRegistry.sessions[tab2_id] = create_mock_session(tab2_id) --[[@as agentic.SessionManager]]
 
             SessionRegistry.destroy_session(tab1_id)
 
@@ -411,11 +420,11 @@ describe("agentic.SessionRegistry", function()
     end)
 
     describe("select_provider", function()
-        --- @type table[]|nil
+        --- @type agentic.tests.SessionRegistry.ProviderStatus[]|nil
         local captured_items
-        --- @type table|nil
+        --- @type agentic.tests.SessionRegistry.SelectOpts|nil
         local captured_opts
-        --- @type function|nil
+        --- @type fun(choice: agentic.tests.SessionRegistry.ProviderStatus|nil)|nil
         local captured_on_choice
 
         before_each(function()
@@ -443,12 +452,14 @@ describe("agentic.SessionRegistry", function()
 
             SessionRegistry.select_provider(function() end)
 
-            assert.is_not_nil(captured_items)
-            assert.equal(2, #captured_items)
-            assert.equal("gemini-acp", captured_items[1].name)
-            assert.is_true(captured_items[1].installed)
-            assert.equal("claude-acp", captured_items[2].name)
-            assert.is_false(captured_items[2].installed)
+            local items = assert.not_nil(captured_items)
+            local first_item = assert.not_nil(items[1])
+            local second_item = assert.not_nil(items[2])
+            assert.equal(2, #items)
+            assert.equal("gemini-acp", first_item.name)
+            assert.is_true(first_item.installed)
+            assert.equal("claude-acp", second_item.name)
+            assert.is_false(second_item.installed)
         end)
 
         it("marks provider without config as not-installed", function()
@@ -458,9 +469,11 @@ describe("agentic.SessionRegistry", function()
 
             SessionRegistry.select_provider(function() end)
 
-            assert.equal(1, #captured_items)
-            assert.equal("unknown-acp", captured_items[1].name)
-            assert.is_false(captured_items[1].installed)
+            local items = assert.not_nil(captured_items)
+            local item = assert.not_nil(items[1])
+            assert.equal(1, #items)
+            assert.equal("unknown-acp", item.name)
+            assert.is_false(item.installed)
         end)
 
         it("calls on_selected with provider name on selection", function()
@@ -473,7 +486,10 @@ describe("agentic.SessionRegistry", function()
                 result = name
             end)
 
-            captured_on_choice({ name = "claude-acp", installed = true })
+            assert.not_nil(captured_on_choice)({
+                name = "claude-acp",
+                installed = true,
+            })
 
             assert.equal("claude-acp", result)
         end)
@@ -490,7 +506,7 @@ describe("agentic.SessionRegistry", function()
                 result = name
             end)
 
-            captured_on_choice(nil)
+            assert.not_nil(captured_on_choice)(nil)
 
             assert.is_true(called)
             assert.is_nil(result)
@@ -512,7 +528,7 @@ describe("agentic.SessionRegistry", function()
 
                 SessionRegistry.select_provider(function() end)
 
-                local label = captured_opts.format_item({
+                local label = assert.not_nil(captured_opts).format_item({
                     name = "claude-acp",
                     installed = true,
                 })
@@ -527,7 +543,7 @@ describe("agentic.SessionRegistry", function()
 
                     SessionRegistry.select_provider(function() end)
 
-                    local label = captured_opts.format_item({
+                    local label = assert.not_nil(captured_opts).format_item({
                         name = "claude-acp",
                         installed = true,
                     })
@@ -541,14 +557,16 @@ describe("agentic.SessionRegistry", function()
 
                 SessionRegistry.select_provider(function() end)
 
-                local installed_label = captured_opts.format_item({
-                    name = "claude-acp",
-                    installed = true,
-                })
-                local missing_label = captured_opts.format_item({
-                    name = "gemini-acp",
-                    installed = false,
-                })
+                local installed_label =
+                    assert.not_nil(captured_opts).format_item({
+                        name = "claude-acp",
+                        installed = true,
+                    })
+                local missing_label =
+                    assert.not_nil(captured_opts).format_item({
+                        name = "gemini-acp",
+                        installed = false,
+                    })
 
                 assert.equal("claude-acp ✓ available", installed_label)
                 assert.equal("gemini-acp ✗ not installed", missing_label)
@@ -562,7 +580,7 @@ describe("agentic.SessionRegistry", function()
 
                     SessionRegistry.select_provider(function() end)
 
-                    local label = captured_opts.format_item({
+                    local label = assert.not_nil(captured_opts).format_item({
                         name = "claude-acp",
                         installed = true,
                     })

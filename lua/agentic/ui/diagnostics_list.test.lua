@@ -1,4 +1,3 @@
---- @diagnostic disable: need-check-nil, return-type-mismatch, unnecessary-if
 local assert = require("tests.helpers.assert")
 local spy = require("tests.helpers.spy")
 local Config = require("agentic.config")
@@ -46,9 +45,7 @@ describe("agentic.ui.DiagnosticsList", function()
     end)
 
     after_each(function()
-        if on_change_spy and on_change_spy.revert then
-            on_change_spy:revert()
-        end
+        on_change_spy:revert()
 
         if winid and vim.api.nvim_win_is_valid(winid) then
             vim.api.nvim_win_close(winid, true)
@@ -69,7 +66,8 @@ describe("agentic.ui.DiagnosticsList", function()
 
             local diagnostics = diagnostics_list:get_diagnostics()
             assert.equal(1, #diagnostics)
-            assert.equal(diagnostic.message, diagnostics[1].message)
+            local first_diagnostic = assert.not_nil(diagnostics[1])
+            assert.equal(diagnostic.message, first_diagnostic.message)
             assert.spy(on_change_spy).was.called(1)
         end)
 
@@ -135,9 +133,11 @@ describe("agentic.ui.DiagnosticsList", function()
             local diagnostics1 = diagnostics_list:get_diagnostics()
             local diagnostics2 = diagnostics_list:get_diagnostics()
 
-            diagnostics1[1].message = "modified"
+            local first_diagnostics1 = assert.not_nil(diagnostics1[1])
+            local first_diagnostics2 = assert.not_nil(diagnostics2[1])
+            first_diagnostics1.message = "modified"
 
-            assert.equal(diagnostic.message, diagnostics2[1].message)
+            assert.equal(diagnostic.message, first_diagnostics2.message)
         end)
     end)
 
@@ -232,7 +232,8 @@ describe("agentic.ui.DiagnosticsList", function()
 
             local diagnostics = diagnostics_list:get_diagnostics()
             assert.equal(1, #diagnostics)
-            assert.equal(diagnostic2.message, diagnostics[1].message)
+            local first_diagnostic = assert.not_nil(diagnostics[1])
+            assert.equal(diagnostic2.message, first_diagnostic.message)
             assert.spy(on_change_spy).was.called(3)
         end)
 
@@ -413,13 +414,17 @@ describe("agentic.ui.DiagnosticsList", function()
                 DiagnosticsList.get_buffer_diagnostics(test_bufnr)
 
             assert.equal(1, #diagnostics)
-            assert.equal(5, diagnostics[1].lnum)
-            assert.equal(10, diagnostics[1].col)
-            assert.equal(vim.diagnostic.severity.ERROR, diagnostics[1].severity)
-            assert.equal("Test error", diagnostics[1].message)
-            assert.equal("test_source", diagnostics[1].source)
-            assert.equal("E123", diagnostics[1].code)
-            assert.equal("/test/file.lua", diagnostics[1].file_path)
+            local first_diagnostic = assert.not_nil(diagnostics[1])
+            assert.equal(5, first_diagnostic.lnum)
+            assert.equal(10, first_diagnostic.col)
+            assert.equal(
+                vim.diagnostic.severity.ERROR,
+                first_diagnostic.severity
+            )
+            assert.equal("Test error", first_diagnostic.message)
+            assert.equal("test_source", first_diagnostic.source)
+            assert.equal("E123", first_diagnostic.code)
+            assert.equal("/test/file.lua", first_diagnostic.file_path)
         end)
 
         it("defaults to ERROR severity when not specified", function()
@@ -434,7 +439,11 @@ describe("agentic.ui.DiagnosticsList", function()
             local diagnostics =
                 DiagnosticsList.get_buffer_diagnostics(test_bufnr)
 
-            assert.equal(vim.diagnostic.severity.ERROR, diagnostics[1].severity)
+            local first_diagnostic = assert.not_nil(diagnostics[1])
+            assert.equal(
+                vim.diagnostic.severity.ERROR,
+                first_diagnostic.severity
+            )
         end)
     end)
 
@@ -487,7 +496,8 @@ describe("agentic.ui.DiagnosticsList", function()
                 DiagnosticsList.get_diagnostics_at_cursor(test_bufnr)
 
             assert.equal(1, #diagnostics)
-            assert.equal("Error on line 2", diagnostics[1].message)
+            local first_diagnostic = assert.not_nil(diagnostics[1])
+            assert.equal("Error on line 2", first_diagnostic.message)
         end)
 
         it("returns empty array when no diagnostics at cursor", function()

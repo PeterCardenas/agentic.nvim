@@ -1,4 +1,3 @@
---- @diagnostic disable: missing-fields, need-check-nil
 local assert = require("tests.helpers.assert")
 
 -- These tests exist to force LuaLS type checking and Selene linting on
@@ -30,8 +29,9 @@ describe("config_default", function()
                 windows = windows,
             }
 
-            assert.equal("50%", cfg.windows.width)
-            assert.equal("left", cfg.windows.position)
+            local resolved_windows = assert.not_nil(cfg.windows)
+            assert.equal("50%", resolved_windows.width)
+            assert.equal("left", resolved_windows.position)
         end)
 
         it("accepts partial nested sub-window config", function()
@@ -46,8 +46,11 @@ describe("config_default", function()
                 windows = windows,
             }
 
-            assert.equal(20, cfg.windows.input.height)
-            assert.equal(false, cfg.windows.todos.display)
+            local resolved_windows = assert.not_nil(cfg.windows)
+            local input = assert.not_nil(resolved_windows.input)
+            local todos = assert.not_nil(resolved_windows.todos)
+            assert.equal(20, input.height)
+            assert.equal(false, todos.display)
         end)
 
         it("accepts partial icon overrides", function()
@@ -57,8 +60,10 @@ describe("config_default", function()
                 chat_icons = { user = "U" },
             }
 
-            assert.equal("?", cfg.status_icons.pending)
-            assert.equal("U", cfg.chat_icons.user)
+            local status_icons = assert.not_nil(cfg.status_icons)
+            local chat_icons = assert.not_nil(cfg.chat_icons)
+            assert.equal("?", status_icons.pending)
+            assert.equal("U", chat_icons.user)
         end)
 
         it("accepts partial keymaps", function()
@@ -69,7 +74,9 @@ describe("config_default", function()
                 },
             }
 
-            assert.equal("x", cfg.keymaps.widget.close)
+            local keymaps = assert.not_nil(cfg.keymaps)
+            local widget = assert.not_nil(keymaps.widget)
+            assert.equal("x", widget.close)
         end)
 
         it("accepts partial diff_preview", function()
@@ -78,7 +85,8 @@ describe("config_default", function()
                 diff_preview = { enabled = false },
             }
 
-            assert.equal(false, cfg.diff_preview.enabled)
+            local diff_preview = assert.not_nil(cfg.diff_preview)
+            assert.equal(false, diff_preview.enabled)
         end)
 
         it("accepts partial settings", function()
@@ -87,7 +95,8 @@ describe("config_default", function()
                 settings = { move_cursor_to_chat_on_submit = false },
             }
 
-            assert.equal(false, cfg.settings.move_cursor_to_chat_on_submit)
+            local settings = assert.not_nil(cfg.settings)
+            assert.equal(false, settings.move_cursor_to_chat_on_submit)
         end)
 
         it("accepts an empty config", function()

@@ -1,4 +1,3 @@
---- @diagnostic disable: need-check-nil
 local TextMatcher = require("agentic.utils.text_matcher")
 local assert = require("tests.helpers.assert")
 
@@ -27,11 +26,12 @@ describe("TextMatcher", function()
                 )
 
                 assert.equal(1, #matches)
-                assert.equal(1, matches[1].start_line)
-                assert.equal(4, matches[1].end_line)
+                local first_match = assert.not_nil(matches[1])
+                assert.equal(1, first_match.start_line)
+                assert.equal(4, first_match.end_line)
                 assert.equal(
                     " = await executeWithPool(pool, { input: 'test' }, 'system');",
-                    matches[1].suffix
+                    first_match.suffix
                 )
             end
         )
@@ -90,10 +90,12 @@ describe("TextMatcher", function()
             )
 
             assert.equal(2, #matches)
-            assert.equal(1, matches[1].start_line)
-            assert.equal(" + extra", matches[1].suffix)
-            assert.equal(4, matches[2].start_line)
-            assert.equal(" + extra", matches[2].suffix)
+            local first_match = assert.not_nil(matches[1])
+            local second_match = assert.not_nil(matches[2])
+            assert.equal(1, first_match.start_line)
+            assert.equal(" + extra", first_match.suffix)
+            assert.equal(4, second_match.start_line)
+            assert.equal(" + extra", second_match.suffix)
         end)
 
         it(
@@ -115,7 +117,8 @@ describe("TextMatcher", function()
                 )
 
                 assert.equal(1, #matches)
-                assert.equal(" = full content;", matches[1].suffix)
+                local first_match = assert.not_nil(matches[1])
+                assert.equal(" = full content;", first_match.suffix)
             end
         )
 

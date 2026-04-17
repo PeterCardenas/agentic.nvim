@@ -1,13 +1,7 @@
---- @diagnostic disable: need-check-nil, call-non-callable
 local assert = require("tests.helpers.assert")
+local CursorACPAdapter = require("agentic.acp.adapters.cursor_acp_adapter")
 
 describe("agentic.acp.adapters.CursorACPAdapter", function()
-    local CursorACPAdapter
-
-    before_each(function()
-        CursorACPAdapter = require("agentic.acp.adapters.cursor_acp_adapter")
-    end)
-
     it("formats read arguments with line ranges", function()
         local argument = CursorACPAdapter:_format_read_argument({
             file_path = "/tmp/example.lua",
@@ -51,7 +45,8 @@ describe("agentic.acp.adapters.CursorACPAdapter", function()
         })
 
         assert.is_not_nil(diff)
-        assert.same({ "new content" }, diff.new)
-        assert.same({ "old content" }, diff.old)
+        local resolved_diff = assert.not_nil(diff)
+        assert.same({ "new content" }, resolved_diff.new)
+        assert.same({ "old content" }, resolved_diff.old)
     end)
 end)

@@ -66,26 +66,55 @@
 
 --- Nested partial types for user config overrides
 --- @class (partial) agentic.PartialUserConfig.Windows.Chat: agentic.UserConfig.Windows.Chat
+--- @field win_opts? agentic.UserConfig.WinOpts
 --- @class (partial) agentic.PartialUserConfig.Windows.Input: agentic.UserConfig.Windows.Input
+--- @field height? number
+--- @field win_opts? agentic.UserConfig.WinOpts
 --- @class (partial) agentic.PartialUserConfig.Windows.Code: agentic.UserConfig.Windows.Code
+--- @field max_height? number
+--- @field win_opts? agentic.UserConfig.WinOpts
 --- @class (partial) agentic.PartialUserConfig.Windows.Files: agentic.UserConfig.Windows.Files
+--- @field max_height? number
+--- @field win_opts? agentic.UserConfig.WinOpts
 --- @class (partial) agentic.PartialUserConfig.Windows.Diagnostics: agentic.UserConfig.Windows.Diagnostics
+--- @field max_height? number
+--- @field win_opts? agentic.UserConfig.WinOpts
 --- @class (partial) agentic.PartialUserConfig.Windows.Todos: agentic.UserConfig.Windows.Todos
+--- @field display? boolean
+--- @field max_height? number
+--- @field win_opts? agentic.UserConfig.WinOpts
 --- @class (partial) agentic.PartialUserConfig.Keymaps: agentic.UserConfig.Keymaps
+--- @field widget? table<string, agentic.UserConfig.KeymapValue>
+--- @field prompt? table<string, agentic.UserConfig.KeymapValue>
+--- @field diff_preview? table<string, string>
+--- @field chat_navigation? table<string, string>
 --- @class (partial) agentic.PartialUserConfig.SpinnerChars: agentic.UserConfig.SpinnerChars
 --- @class (partial) agentic.PartialUserConfig.StatusIcons: agentic.UserConfig.StatusIcons
+--- @field pending? string
+--- @field completed? string
+--- @field failed? string
 --- @class (partial) agentic.PartialUserConfig.DiagnosticIcons: agentic.UserConfig.DiagnosticIcons
 --- @class (partial) agentic.PartialUserConfig.PermissionIcons: agentic.UserConfig.PermissionIcons
 --- @class (partial) agentic.PartialUserConfig.ChatIcons: agentic.UserConfig.ChatIcons
+--- @field user? string
+--- @field agent? string
 --- @class (partial) agentic.PartialUserConfig.MessageIcons: agentic.UserConfig.MessageIcons
 --- @class (partial) agentic.PartialUserConfig.FilePicker: agentic.UserConfig.FilePicker
 --- @class (partial) agentic.PartialUserConfig.ImagePaste: agentic.UserConfig.ImagePaste
 --- @class (partial) agentic.PartialUserConfig.AutoScroll: agentic.UserConfig.AutoScroll
 --- @class (partial) agentic.PartialUserConfig.DiffPreview: agentic.UserConfig.DiffPreview
+--- @field enabled? boolean
+--- @field layout? "inline" | "split"
+--- @field center_on_navigate_hunks? boolean
 --- @class (partial) agentic.PartialUserConfig.Settings: agentic.UserConfig.Settings
+--- @field move_cursor_to_chat_on_submit? boolean
 
 --- Windows partial with nested type overrides
 --- @class (partial) agentic.PartialUserConfig.Windows: agentic.UserConfig.Windows
+--- @field position? agentic.UserConfig.Windows.Position
+--- @field width? string|number
+--- @field height? string|number
+--- @field stack_width_ratio? number
 --- @field chat? agentic.PartialUserConfig.Windows.Chat
 --- @field input? agentic.PartialUserConfig.Windows.Input
 --- @field code? agentic.PartialUserConfig.Windows.Code
@@ -96,6 +125,13 @@
 --- Top-level partial config -- all UserConfig fields become optional
 --- Nested fields override to use partial variants
 --- @class (partial) agentic.PartialUserConfig: agentic.UserConfig
+--- @field debug? boolean
+--- @field provider? agentic.UserConfig.ProviderName
+--- @field acp_providers? table<string, agentic.acp.ACPProviderConfig>
+--- @field hooks? agentic.UserConfig.Hooks
+--- @field headers? agentic.UserConfig.Headers
+--- @field folding? agentic.UserConfig.Folding
+--- @field session_restore? agentic.UserConfig.SessionRestore
 --- @field windows? agentic.PartialUserConfig.Windows
 --- @field keymaps? agentic.PartialUserConfig.Keymaps
 --- @field spinner_chars? agentic.PartialUserConfig.SpinnerChars

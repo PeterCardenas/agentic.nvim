@@ -1,4 +1,3 @@
---- @diagnostic disable: need-check-nil
 local assert = require("tests.helpers.assert")
 local spy = require("tests.helpers.spy")
 
@@ -132,7 +131,8 @@ describe("agentic.acp.AgentModels", function()
             assert.is_true(success)
             assert.equal("opus", agent_models.current_model_id)
             assert.stub(notify_stub).was.called(1)
-            assert.is_true(string.find(notify_stub.calls[1][1], "opus") ~= nil)
+            local first_call = assert.not_nil(notify_stub.calls[1])
+            assert.is_true(string.find(first_call[1], "opus") ~= nil)
         end)
 
         it("returns false and warns for nil or invalid model_id", function()
@@ -143,8 +143,10 @@ describe("agentic.acp.AgentModels", function()
 
             assert.equal("default", agent_models.current_model_id)
             assert.stub(notify_stub).was.called(2)
-            assert.equal(vim.log.levels.WARN, notify_stub.calls[1][2])
-            assert.equal(vim.log.levels.WARN, notify_stub.calls[2][2])
+            local first_call = assert.not_nil(notify_stub.calls[1])
+            local second_call = assert.not_nil(notify_stub.calls[2])
+            assert.equal(vim.log.levels.WARN, first_call[2])
+            assert.equal(vim.log.levels.WARN, second_call[2])
         end)
 
         it("returns false when models list is empty", function()

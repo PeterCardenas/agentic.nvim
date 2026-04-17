@@ -1,4 +1,3 @@
---- @diagnostic disable: need-check-nil
 local assert = require("tests.helpers.assert")
 local spy = require("tests.helpers.spy")
 
@@ -53,11 +52,12 @@ describe("agentic.ui.CodeSelection", function()
             local selections = code_selection:get_selections()
 
             assert.equal(1, #selections)
-            assert.same(selection.lines, selections[1].lines)
-            assert.equal(10, selections[1].start_line)
-            assert.equal(12, selections[1].end_line)
-            assert.equal("test.lua", selections[1].file_path)
-            assert.equal("lua", selections[1].file_type)
+            local first_selection = assert.not_nil(selections[1])
+            assert.same(selection.lines, first_selection.lines)
+            assert.equal(10, first_selection.start_line)
+            assert.equal(12, first_selection.end_line)
+            assert.equal("test.lua", first_selection.file_path)
+            assert.equal("lua", first_selection.file_type)
             assert.spy(on_change_spy).was.called(1)
         end)
 
@@ -86,8 +86,10 @@ describe("agentic.ui.CodeSelection", function()
             local selections = code_selection:get_selections()
 
             assert.equal(2, #selections)
-            assert.same(selection1.lines, selections[1].lines)
-            assert.same(selection2.lines, selections[2].lines)
+            local first_selection = assert.not_nil(selections[1])
+            local second_selection = assert.not_nil(selections[2])
+            assert.same(selection1.lines, first_selection.lines)
+            assert.same(selection2.lines, second_selection.lines)
             assert.spy(on_change_spy).was.called(2)
         end)
 
@@ -117,9 +119,11 @@ describe("agentic.ui.CodeSelection", function()
             local selections1 = code_selection:get_selections()
             local selections2 = code_selection:get_selections()
 
-            selections1[1].lines[1] = "modified"
+            local first_selections1 = assert.not_nil(selections1[1])
+            local first_selections2 = assert.not_nil(selections2[1])
+            first_selections1.lines[1] = "modified"
 
-            assert.equal("test", selections2[1].lines[1])
+            assert.equal("test", first_selections2.lines[1])
         end)
     end)
 
@@ -204,8 +208,10 @@ describe("agentic.ui.CodeSelection", function()
                 -- Verify both selections exist with correct file paths
                 local selections = code_selection:get_selections()
                 assert.equal(2, #selections)
-                assert.equal("src/alpha.lua", selections[1].file_path)
-                assert.equal("src/beta.lua", selections[2].file_path)
+                local first_selection = assert.not_nil(selections[1])
+                local second_selection = assert.not_nil(selections[2])
+                assert.equal("src/alpha.lua", first_selection.file_path)
+                assert.equal("src/beta.lua", second_selection.file_path)
 
                 -- Calculate last line of second selection's fence block
                 -- Selection 1: lines 1-4 (opener + 2 content + closer)
@@ -219,10 +225,11 @@ describe("agentic.ui.CodeSelection", function()
                 -- Verify only first selection remains in memory
                 selections = code_selection:get_selections()
                 assert.equal(1, #selections)
-                assert.same(selection1.lines, selections[1].lines)
-                assert.equal("src/alpha.lua", selections[1].file_path)
-                assert.equal(5, selections[1].start_line)
-                assert.equal(6, selections[1].end_line)
+                first_selection = assert.not_nil(selections[1])
+                assert.same(selection1.lines, first_selection.lines)
+                assert.equal("src/alpha.lua", first_selection.file_path)
+                assert.equal(5, first_selection.start_line)
+                assert.equal(6, first_selection.end_line)
 
                 -- Verify buffer only contains first selection's fence block
                 local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
@@ -253,10 +260,11 @@ describe("agentic.ui.CodeSelection", function()
                 -- Verify only second selection remains in memory
                 selections = code_selection:get_selections()
                 assert.equal(1, #selections)
-                assert.same(selection2.lines, selections[1].lines)
-                assert.equal("src/beta.lua", selections[1].file_path)
-                assert.equal(15, selections[1].start_line)
-                assert.equal(16, selections[1].end_line)
+                local first_selection = assert.not_nil(selections[1])
+                assert.same(selection2.lines, first_selection.lines)
+                assert.equal("src/beta.lua", first_selection.file_path)
+                assert.equal(15, first_selection.start_line)
+                assert.equal(16, first_selection.end_line)
 
                 -- Verify buffer only contains second selection's fence block
                 local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
@@ -287,8 +295,9 @@ describe("agentic.ui.CodeSelection", function()
             -- Verify only second selection remains
             selections = code_selection:get_selections()
             assert.equal(1, #selections)
-            assert.same(selection2.lines, selections[1].lines)
-            assert.equal("src/beta.lua", selections[1].file_path)
+            local first_selection = assert.not_nil(selections[1])
+            assert.same(selection2.lines, first_selection.lines)
+            assert.equal("src/beta.lua", first_selection.file_path)
 
             -- Verify buffer only contains second selection
             local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
@@ -316,8 +325,9 @@ describe("agentic.ui.CodeSelection", function()
                 -- Verify only first selection remains
                 selections = code_selection:get_selections()
                 assert.equal(1, #selections)
-                assert.same(selection1.lines, selections[1].lines)
-                assert.equal("src/alpha.lua", selections[1].file_path)
+                local first_selection = assert.not_nil(selections[1])
+                assert.same(selection1.lines, first_selection.lines)
+                assert.equal("src/alpha.lua", first_selection.file_path)
 
                 -- Verify buffer only contains first selection
                 local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)

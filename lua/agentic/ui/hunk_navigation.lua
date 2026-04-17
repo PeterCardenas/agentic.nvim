@@ -1,4 +1,3 @@
---- @diagnostic disable: unnecessary-if, param-type-mismatch
 local BufHelpers = require("agentic.utils.buf_helpers")
 local Config = require("agentic.config")
 local Logger = require("agentic.utils.logger")
@@ -16,15 +15,25 @@ local NS_DIFF = M.NS_DIFF
 --- Per-buffer state for hunk navigation
 --- needed because `vim.b` doesn't support saving callbacks, as it will serialize, to comply with vimscript
 --- @class agentic.ui.HunkNavigation.State
---- @field saved_keymaps { next?: table, prev?: table } Saved keymaps for restoration
+--- @field saved_keymaps { next?: agentic.ui.HunkNavigation.SavedKeymap, prev?: agentic.ui.HunkNavigation.SavedKeymap } Saved keymaps for restoration
 --- @field anchors_cache integer[]|nil Cached hunk anchor positions (0-indexed line numbers)
+
+--- @class agentic.ui.HunkNavigation.SavedKeymap
+--- @field lhs string
+--- @field rhs? string
+--- @field callback? fun(): any
+--- @field buffer? integer
+--- @field noremap? integer
+--- @field silent? integer
+--- @field expr? integer
+--- @field nowait? integer
 
 --- Module-level state storage (per-buffer)
 --- @type table<number, agentic.ui.HunkNavigation.State>
 local buffer_state = {}
 
 --- Get or initialize state for buffer
---- @param bufnr number
+--- @param bufnr integer
 --- @return agentic.ui.HunkNavigation.State
 local function get_state(bufnr)
     if not buffer_state[bufnr] then
@@ -39,7 +48,7 @@ end
 --- Get all hunk positions (first deleted line per hunk)
 --- Falls back to virtual line anchor for pure insertions.
 --- Groups consecutive deleted lines (only returns first line of each group).
---- @param bufnr number
+--- @param bufnr integer
 --- @return integer[] positions 0-indexed line numbers where hunks begin
 function M._get_hunk_anchors(bufnr)
     local state = get_state(bufnr)
@@ -105,7 +114,7 @@ function M._get_hunk_anchors(bufnr)
 end
 
 --- Find next/previous hunk position relative to buffer's cursor position
---- @param bufnr number
+--- @param bufnr integer
 --- @param direction "next"|"prev"
 --- @return number|nil target_line 1-indexed line number
 local function find_hunk(bufnr, direction)
@@ -153,9 +162,9 @@ local function find_hunk(bufnr, direction)
 end
 
 --- Calculate scroll command based on hunk size and window height
---- @param bufnr number
---- @param winid number
---- @param anchor_line number 0-indexed anchor line
+--- @param bufnr integer
+--- @param winid integer
+--- @param anchor_line integer 0-indexed anchor line
 --- @return string scroll_cmd "zt", "zz", or empty string if centering disabled or no extmarks
 function M.get_scroll_cmd(bufnr, winid, anchor_line)
     if not Config.diff_preview.center_on_navigate_hunks then
@@ -184,7 +193,7 @@ function M.get_scroll_cmd(bufnr, winid, anchor_line)
 end
 
 --- Navigate to hunk in specified direction
---- @param bufnr number
+--- @param bufnr integer
 --- @param direction "next"|"prev"
 local function navigate_hunk(bufnr, direction)
     local target_winid = vim.fn.bufwinid(bufnr)
@@ -228,7 +237,7 @@ local function navigate_hunk(bufnr, direction)
         return
     end
 
-    local anchor_line = target_line - 1
+    local anchor_line = math.floor(target_line - 1)
     local scroll_cmd = M.get_scroll_cmd(bufnr, target_winid, anchor_line)
 
     pcall(vim.api.nvim_win_call, target_winid, function()
@@ -237,19 +246,23 @@ local function navigate_hunk(bufnr, direction)
 end
 
 --- Save existing keymap for restoration
---- @param bufnr number
+--- @param bufnr integer
 --- @param key string
---- @return table|nil map_info
+--- @return agentic.ui.HunkNavigation.SavedKeymap|nil map_info
 local function save_keymap(bufnr, key)
+    --- @type agentic.ui.HunkNavigation.SavedKeymap
     local map_info
     vim.api.nvim_buf_call(bufnr, function()
         map_info = vim.fn.maparg(key, "n", false, true)
     end)
 
-    if map_info and map_info.lhs then
+    local lhs = rawget(map_info, "lhs")
+    if type(lhs) == "string" and lhs ~= "" then
         -- vim.fn.maparg() returns buffer=1 as a flag indicating buffer-local mapping
         -- (not the actual buffer number). We only save buffer-local keymaps.
-        if map_info.buffer == 1 then
+        local map_buffer = rawget(map_info, "buffer") --[[@as integer|nil]]
+        --- @diagnostic disable-next-line: unnecessary-if
+        if map_buffer == 1 then
             return map_info
         end
     end
@@ -257,19 +270,19 @@ local function save_keymap(bufnr, key)
 end
 
 --- Navigate to next hunk
---- @param bufnr number
+--- @param bufnr integer
 function M.navigate_next(bufnr)
     navigate_hunk(bufnr, "next")
 end
 
 --- Navigate to previous hunk
---- @param bufnr number
+--- @param bufnr integer
 function M.navigate_prev(bufnr)
     navigate_hunk(bufnr, "prev")
 end
 
 --- Setup hunk navigation keymaps for buffer
---- @param bufnr number
+--- @param bufnr integer
 function M.setup_keymaps(bufnr)
     local keymaps = Config.keymaps.diff_preview
     local state = get_state(bufnr)
@@ -286,16 +299,17 @@ function M.setup_keymaps(bufnr)
 end
 
 --- Restore saved keymaps for buffer
---- @param bufnr number
+--- @param bufnr integer
 function M.restore_keymaps(bufnr)
     local keymaps = Config.keymaps.diff_preview
     pcall(vim.api.nvim_buf_del_keymap, bufnr, "n", keymaps.next_hunk)
     pcall(vim.api.nvim_buf_del_keymap, bufnr, "n", keymaps.prev_hunk)
 
-    local state = buffer_state[bufnr]
-    if state and state.saved_keymaps then
+    local state = rawget(buffer_state, bufnr)
+    if state then
         for _, saved_map in pairs(state.saved_keymaps) do
-            if saved_map and saved_map.lhs then
+            if saved_map.lhs then
+                --- @type agentic.utils.BufHelpers.KeymapOpts
                 local opts = { buffer = bufnr }
                 if saved_map.noremap == 1 then
                     opts.noremap = true
@@ -310,14 +324,21 @@ function M.restore_keymaps(bufnr)
                     opts.nowait = true
                 end
 
-                pcall(
-                    BufHelpers.keymap_set,
-                    bufnr,
-                    "n",
-                    saved_map.lhs,
-                    saved_map.callback or saved_map.rhs,
-                    opts
-                )
+                local rhs = saved_map.callback
+                if rhs == nil then
+                    rhs = saved_map.rhs
+                end
+
+                if rhs ~= nil then
+                    pcall(
+                        BufHelpers.keymap_set,
+                        bufnr,
+                        "n",
+                        saved_map.lhs,
+                        rhs,
+                        opts
+                    )
+                end
             end
         end
     end
@@ -326,7 +347,7 @@ function M.restore_keymaps(bufnr)
 end
 
 --- Clear all module state for buffer
---- @param bufnr number
+--- @param bufnr integer
 function M.clear_state(bufnr)
     buffer_state[bufnr] = nil
 end

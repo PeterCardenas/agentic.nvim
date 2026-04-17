@@ -61,7 +61,9 @@ function MistralVibeACPAdapter:__build_tool_call_message(update)
                     old = self:safe_split(content.oldText),
                     all = false,
                 }
-                message.argument = FileSystem.to_smart_path(content.path)
+                if content.path then
+                    message.argument = FileSystem.to_smart_path(content.path)
+                end
             end
         end
     else

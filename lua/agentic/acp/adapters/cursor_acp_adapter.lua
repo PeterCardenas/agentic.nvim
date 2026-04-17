@@ -1,4 +1,3 @@
---- @diagnostic disable: unnecessary-if, return-type-mismatch
 local ACPClient = require("agentic.acp.acp_client")
 local FileSystem = require("agentic.utils.file_system")
 local Logger = require("agentic.utils.logger")
@@ -10,6 +9,7 @@ local Logger = require("agentic.utils.logger")
 --- @field end_line? number
 --- @field offset? number
 --- @field limit? number
+--- @field file_path? string
 --- @field path? string
 --- @field directory? string
 --- @field glob? string
@@ -198,7 +198,7 @@ function CursorACPAdapter:create_session(handlers, callback)
 
         if not err and result then
             local stored_update =
-                self._available_commands_updates[result.sessionId]
+                rawget(self._available_commands_updates, result.sessionId)
             if stored_update then
                 Logger.debug(
                     "CursorACPAdapter",
@@ -260,7 +260,7 @@ function CursorACPAdapter:__handle_session_update(params)
         end
         by_session[update_type] = true
         self._chunk_stream_started[session_id] = by_session
-    elseif session_id and self._chunk_stream_started[session_id] then
+    elseif session_id and rawget(self._chunk_stream_started, session_id) then
         -- A non-chunk update means the previous stream ended; reset.
         self._chunk_stream_started[session_id] = nil
     end
@@ -447,7 +447,7 @@ end
 --- @class agentic.acp.CursorTaskParams
 --- @field agentId string
 --- @field description string
---- @field durationMs number
+--- @field durationMs? number
 --- @field model string
 --- @field prompt string
 --- @field subagentType table

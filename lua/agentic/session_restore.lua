@@ -1,4 +1,3 @@
---- @diagnostic disable: param-type-mismatch
 local ACPPayloads = require("agentic.acp.acp_payloads")
 local ChatHistory = require("agentic.ui.chat_history")
 local Logger = require("agentic.utils.logger")
@@ -164,6 +163,7 @@ local function create_session_previewer(fixed_session_id)
             return
         end
 
+        --- @cast session_id string
         local parsed = load_session_from_disk_sync(session_id)
         local lines, title =
             build_preview_lines(parsed, "Session " .. session_id)
@@ -217,8 +217,12 @@ local function show_fzf_picker(build_items, on_choice, on_delete)
             return nil
         end
 
-        --- @diagnostic disable-next-line: need-check-nil
-        local session_id = selected[1]:match("^([^\t]+)\t")
+        local first_selected = selected[1]
+        if not first_selected then
+            return nil
+        end
+
+        local session_id = first_selected:match("^([^\t]+)\t")
         if not session_id then
             return nil
         end

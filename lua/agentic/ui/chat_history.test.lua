@@ -1,4 +1,3 @@
---- @diagnostic disable: need-check-nil
 local assert = require("tests.helpers.assert")
 local spy = require("tests.helpers.spy")
 
@@ -144,8 +143,10 @@ describe("ChatHistory", function()
             })
 
             assert.equal(2, #history.messages)
-            assert.equal("user", history.messages[1].type)
-            assert.equal("agent", history.messages[2].type)
+            local first_message = assert.not_nil(history.messages[1])
+            local second_message = assert.not_nil(history.messages[2])
+            assert.equal("user", first_message.type)
+            assert.equal("agent", second_message.type)
         end)
 
         describe("append_agent_text", function()
@@ -158,7 +159,8 @@ describe("ChatHistory", function()
                     provider_name = "test-provider",
                 })
                 assert.equal(1, #history.messages)
-                assert.equal("Hello", history.messages[1].text)
+                local first_message = assert.not_nil(history.messages[1])
+                assert.equal("Hello", first_message.text)
 
                 history:append_agent_text({
                     type = "agent",
@@ -166,7 +168,8 @@ describe("ChatHistory", function()
                     provider_name = "test-provider",
                 })
                 assert.equal(1, #history.messages)
-                assert.equal("Hello World", history.messages[1].text)
+                first_message = assert.not_nil(history.messages[1])
+                assert.equal("Hello World", first_message.text)
 
                 history:add_message({
                     type = "user",
@@ -180,7 +183,8 @@ describe("ChatHistory", function()
                     provider_name = "test-provider",
                 })
                 assert.equal(3, #history.messages)
-                assert.equal("agent", history.messages[3].type)
+                local third_message = assert.not_nil(history.messages[3])
+                assert.equal("agent", third_message.type)
             end)
 
             it("treats agent and thought as separate types", function()
@@ -198,8 +202,10 @@ describe("ChatHistory", function()
                 })
 
                 assert.equal(2, #history.messages)
-                assert.equal("agent", history.messages[1].type)
-                assert.equal("thought", history.messages[2].type)
+                local first_message = assert.not_nil(history.messages[1])
+                local second_message = assert.not_nil(history.messages[2])
+                assert.equal("agent", first_message.type)
+                assert.equal("thought", second_message.type)
             end)
         end)
 
@@ -221,8 +227,9 @@ describe("ChatHistory", function()
                     type = "tool_call",
                 })
 
-                assert.equal("completed", history.messages[1].status)
-                assert.is_not_nil(history.messages[1].body)
+                local first_message = assert.not_nil(history.messages[1])
+                assert.equal("completed", first_message.status)
+                assert.is_not_nil(first_message.body)
             end)
 
             it("does nothing if tool_call not found", function()
@@ -240,7 +247,8 @@ describe("ChatHistory", function()
                 )
 
                 assert.equal(1, #history.messages)
-                assert.equal("user", history.messages[1].type)
+                local first_message = assert.not_nil(history.messages[1])
+                assert.equal("user", first_message.type)
             end)
         end)
     end)
@@ -303,7 +311,8 @@ describe("ChatHistory", function()
             assert.equal(original.session_id, loaded.session_id)
             assert.equal(original.timestamp, loaded.timestamp)
             assert.equal(1, #loaded.messages)
-            assert.equal("Test message", loaded.messages[1].text)
+            local first_message = assert.not_nil(loaded.messages[1])
+            assert.equal("Test message", first_message.text)
         end)
 
         it("returns error for missing or corrupted files", function()
@@ -443,7 +452,8 @@ describe("ChatHistory", function()
             assert.is_not_nil(sessions)
             --- @cast sessions agentic.ui.ChatHistory.SessionMeta[]
             assert.equal(1, #sessions)
-            assert.equal("session-b", sessions[1].session_id)
+            local first_session = assert.not_nil(sessions[1])
+            assert.equal("session-b", first_session.session_id)
         end)
 
         it("returns error on double deletion", function()

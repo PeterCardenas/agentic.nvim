@@ -1,4 +1,3 @@
---- @diagnostic disable: need-check-nil, param-type-mismatch
 --- @class agentic.utils.DiffHighlighter
 local M = {}
 
@@ -6,7 +5,9 @@ local M = {}
 --- @param str string
 --- @return agentic.utils.DiffHighlighter.Utf8CharPos[] chars
 local function utf8_chars(str)
+    --- @type agentic.utils.DiffHighlighter.Utf8CharPos[]
     local chars = {}
+    --- @type integer[]
     local byte_positions = vim.str_utf_pos(str)
 
     -- vim.str_utf_pos returns 1-indexed byte positions
@@ -17,6 +18,8 @@ local function utf8_chars(str)
     for i = 1, #byte_positions - 1 do
         local start_byte = byte_positions[i]
         local end_byte = byte_positions[i + 1]
+        --- @cast start_byte integer
+        --- @cast end_byte integer
 
         --- @class agentic.utils.DiffHighlighter.Utf8CharPos
         local pos = {
@@ -49,7 +52,13 @@ function M.find_inline_change(old_line, new_line)
     local prefix_chars = 0
     local min_len = math.min(#old_chars, #new_chars)
     for i = 1, min_len do
-        if old_chars[i].text == new_chars[i].text then
+        local old_char = old_chars[i]
+        local new_char = new_chars[i]
+        if not old_char or not new_char then
+            break
+        end
+
+        if old_char.text == new_char.text then
             prefix_chars = i
         else
             break
@@ -61,6 +70,10 @@ function M.find_inline_change(old_line, new_line)
     for i = 1, min_len - prefix_chars do
         local old_char = old_chars[#old_chars - i + 1]
         local new_char = new_chars[#new_chars - i + 1]
+        if not old_char or not new_char then
+            break
+        end
+
         if old_char.text == new_char.text then
             suffix_chars = i
         else
@@ -80,11 +93,11 @@ function M.find_inline_change(old_line, new_line)
 
     if prefix_chars > 0 then
         local prefix_char = old_chars[prefix_chars]
-        --- @diagnostic disable-next-line: need-check-nil
-        old_start = prefix_char.byte_pos + #prefix_char.text
-        --- @diagnostic disable-next-line: need-check-nil
-        new_start = new_chars[prefix_chars].byte_pos
-            + #new_chars[prefix_chars].text
+        local new_prefix_char = new_chars[prefix_chars]
+        if prefix_char and new_prefix_char then
+            old_start = prefix_char.byte_pos + #prefix_char.text
+            new_start = new_prefix_char.byte_pos + #new_prefix_char.text
+        end
     end
 
     local old_suffix_idx = #old_chars - suffix_chars

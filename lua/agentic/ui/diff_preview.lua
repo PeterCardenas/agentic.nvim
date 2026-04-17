@@ -1,4 +1,3 @@
---- @diagnostic disable: param-type-mismatch
 local BufHelpers = require("agentic.utils.buf_helpers")
 local Config = require("agentic.config")
 local DiffHighlighter = require("agentic.utils.diff_highlighter")
@@ -33,6 +32,7 @@ end
 --- @return number|nil bufnr Buffer number with active diff, or nil if none
 function M.get_active_diff_buffer(tabpage)
     local tab = tabpage or vim.api.nvim_get_current_tabpage()
+    --- @cast tab integer
 
     local split_state = DiffSplitView.get_split_state(tab)
     if split_state then
@@ -371,6 +371,7 @@ end
 --- @param is_rejection boolean|nil If true and file doesn't exist, cleanup buffer
 function M.clear_diff(buf, is_rejection)
     local bufnr = type(buf) == "string" and vim.fn.bufnr(buf) or buf --[[@as integer]]
+    --- @cast bufnr integer
 
     if bufnr == -1 then
         return
@@ -486,12 +487,14 @@ function M.setup_diff_navigation_keymaps(buf_nrs)
     local diff_keymaps = Config.keymaps.diff_preview
 
     for _, bufnr in pairs(buf_nrs) do
+        --- @cast bufnr integer
         BufHelpers.keymap_set(bufnr, "n", diff_keymaps.next_hunk, function()
             local diff_bufnr = M.get_active_diff_buffer()
             if not diff_bufnr then
                 Logger.notify("No active diff preview", vim.log.levels.INFO)
                 return
             end
+            --- @cast diff_bufnr integer
             HunkNavigation.navigate_next(diff_bufnr)
         end, {
             desc = "Go to next hunk - Agentic DiffPreview",
@@ -503,6 +506,7 @@ function M.setup_diff_navigation_keymaps(buf_nrs)
                 Logger.notify("No active diff preview", vim.log.levels.INFO)
                 return
             end
+            --- @cast diff_bufnr integer
             HunkNavigation.navigate_prev(diff_bufnr)
         end, {
             desc = "Go to previous hunk - Agentic DiffPreview",

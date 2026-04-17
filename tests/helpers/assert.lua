@@ -34,6 +34,15 @@ function M.is_not_nil(value)
     expect.no_equality(value, nil)
 end
 
+--- Assert value is not nil and return it for type narrowing
+--- @generic T
+--- @param value T|nil
+--- @return T
+function M.not_nil(value)
+    expect.no_equality(value, nil)
+    return value
+end
+
 --- Assert value is true
 --- @param value any Value to check
 function M.is_true(value)

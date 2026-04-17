@@ -1,4 +1,3 @@
---- @diagnostic disable: unnecessary-if
 local Config = require("agentic.config")
 local BufHelpers = require("agentic.utils.buf_helpers")
 local DiffPreview = require("agentic.ui.diff_preview")
@@ -11,6 +10,7 @@ local WidgetLayout = require("agentic.ui.widget_layout")
 --- Filetypes used by widget buffers. Used to detect cross-tabpage widget
 --- buffers that don't belong to the current widget instance (since
 --- `_is_widget_buffer` only knows about its own `buf_nrs`).
+--- @type table<string, boolean|nil>
 local AGENTIC_FILETYPES = {
     AgenticChat = true,
     AgenticInput = true,
@@ -319,9 +319,14 @@ end
 --- @param callback fun()|nil
 function ChatWidget:move_cursor_to(winid, callback)
     local _ = self
+    if not winid then
+        return
+    end
+
     vim.schedule(function()
-        if winid and vim.api.nvim_win_is_valid(winid) then
-            if Config.settings.move_cursor_to_chat_on_submit then
+        if vim.api.nvim_win_is_valid(winid) then
+            local move_cursor = Config.settings.move_cursor_to_chat_on_submit --[[@as boolean]]
+            if move_cursor then
                 vim.api.nvim_set_current_win(winid)
             end
 
@@ -531,9 +536,7 @@ function ChatWidget:_toggle_full_width()
 
         local widget_buf_ids = {}
         for _, bufnr in pairs(self.buf_nrs) do
-            if bufnr then
-                widget_buf_ids[bufnr] = true
-            end
+            widget_buf_ids[bufnr] = true
         end
 
         --- @type { bufnr: integer|nil, width: integer, bufhidden: string|nil }[]
@@ -879,6 +882,7 @@ function ChatWidget:close_optional_window(panel_name)
 end
 
 --- Filetypes that should be excluded when finding fallback windows
+--- @type table<string, boolean|nil>
 local EXCLUDED_FILETYPES = {
     -- File explorers
     ["neo-tree"] = true,
@@ -919,9 +923,7 @@ function ChatWidget:find_first_non_widget_window()
     -- Build a set of widget window IDs for fast lookup
     local widget_win_ids = {}
     for _, winid in pairs(self.win_nrs) do
-        if winid then
-            widget_win_ids[winid] = true
-        end
+        widget_win_ids[winid] = true
     end
 
     --- @type number|nil
@@ -934,11 +936,13 @@ function ChatWidget:find_first_non_widget_window()
             if win_config.relative == "" then
                 local bufnr = vim.api.nvim_win_get_buf(winid)
                 local ft = vim.bo[bufnr].filetype
+                local is_agentic_filetype = AGENTIC_FILETYPES[ft] == true
+                local is_excluded_filetype = EXCLUDED_FILETYPES[ft] == true
                 -- Always skip windows showing any Agentic buffer (including
                 -- cross-tabpage widget buffers not in this instance's buf_nrs)
-                if AGENTIC_FILETYPES[ft] then
+                if is_agentic_filetype then
                     -- skip entirely, not even as fallback
-                elseif not EXCLUDED_FILETYPES[ft] then
+                elseif not is_excluded_filetype then
                     -- Preferred: a regular editor window
                     return winid
                 elseif not fallback_winid then
@@ -979,7 +983,9 @@ function ChatWidget:open_left_window(bufnr)
             and not self:_is_widget_buffer(alt_bufnr)
         then
             local ft = vim.bo[alt_bufnr].filetype
-            if not EXCLUDED_FILETYPES[ft] and not AGENTIC_FILETYPES[ft] then
+            local is_excluded_filetype = EXCLUDED_FILETYPES[ft] == true
+            local is_agentic_filetype = AGENTIC_FILETYPES[ft] == true
+            if not is_excluded_filetype and not is_agentic_filetype then
                 bufnr = alt_bufnr
             end
         end

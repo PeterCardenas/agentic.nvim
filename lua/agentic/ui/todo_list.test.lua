@@ -1,4 +1,3 @@
---- @diagnostic disable: need-check-nil
 local assert = require("tests.helpers.assert")
 local spy = require("tests.helpers.spy")
 
@@ -63,7 +62,7 @@ describe("agentic.ui.TodoList", function()
                 assert.equal("- [~] Third task", lines[3])
 
                 assert.stub(render_header_stub).was.called(1)
-                local call_args = render_header_stub.calls[1]
+                local call_args = assert.not_nil(render_header_stub.calls[1])
                 assert.equal(bufnr, call_args[1])
                 assert.equal("todos", call_args[2])
                 assert.equal("1 of 3", call_args[3])
@@ -105,7 +104,8 @@ describe("agentic.ui.TodoList", function()
             assert.equal("- [x] New task", lines[1])
 
             assert.stub(render_header_stub).was.called(2)
-            assert.equal("1 of 1", render_header_stub.calls[2][3])
+            local second_call = assert.not_nil(render_header_stub.calls[2])
+            assert.equal("1 of 1", second_call[3])
         end)
     end)
 

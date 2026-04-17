@@ -1,4 +1,3 @@
---- @diagnostic disable: need-check-nil, param-type-mismatch
 local assert = require("tests.helpers.assert")
 local spy = require("tests.helpers.spy")
 local WidgetLayout = require("agentic.ui.widget_layout")
@@ -21,7 +20,7 @@ describe("WidgetLayout", function()
         --- @type integer
         local cols
         local default_width_pct =
-            tonumber(string.sub(Config.windows.width, 1, -2))
+            assert.not_nil(tonumber(string.sub(Config.windows.width, 1, -2)))
 
         before_each(function()
             cols = vim.o.columns
@@ -58,7 +57,7 @@ describe("WidgetLayout", function()
         --- @type integer
         local lines
         local default_height_pct =
-            tonumber(string.sub(Config.windows.height, 1, -2))
+            assert.not_nil(tonumber(string.sub(Config.windows.height, 1, -2)))
 
         before_each(function()
             lines = vim.o.lines
@@ -105,17 +104,17 @@ describe("WidgetLayout", function()
                 win = -1,
             })
 
-            local win_nrs = { test = winid }
+            local win_nrs = { chat = winid }
             WidgetLayout.close(win_nrs)
 
             assert.is_false(vim.api.nvim_win_is_valid(winid))
-            assert.is_nil(win_nrs.test)
+            assert.is_nil(win_nrs.chat)
         end)
 
         it("should handle invalid windows gracefully", function()
-            local win_nrs = { test = 99999 }
+            local win_nrs = { chat = 99999 }
             WidgetLayout.close(win_nrs)
-            assert.is_nil(win_nrs.test)
+            assert.is_nil(win_nrs.chat)
         end)
 
         it("should clear all entries from win_nrs table", function()
@@ -130,11 +129,11 @@ describe("WidgetLayout", function()
                 win = winid1,
             })
 
-            local win_nrs = { win1 = winid1, win2 = winid2 }
+            local win_nrs = { chat = winid1, input = winid2 }
             WidgetLayout.close(win_nrs)
 
-            assert.is_nil(win_nrs.win1)
-            assert.is_nil(win_nrs.win2)
+            assert.is_nil(win_nrs.chat)
+            assert.is_nil(win_nrs.input)
         end)
     end)
 

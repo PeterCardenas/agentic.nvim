@@ -1,4 +1,3 @@
---- @diagnostic disable: param-type-mismatch
 local Object = require("agentic.utils.object")
 local assert = require("tests.helpers.assert")
 

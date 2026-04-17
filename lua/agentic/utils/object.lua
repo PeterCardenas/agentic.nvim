@@ -14,9 +14,10 @@ function M.deep_merge_into(target, ...)
     return target
 end
 
---- @param config agentic.UserConfig
---- @param user_config agentic.UserConfig
---- @return agentic.UserConfig Config the static Config table with user's config merged into it
+--- @generic T: table
+--- @param config T
+--- @param user_config table|nil
+--- @return T Config the static Config table with user's config merged into it
 function M.merge_config(config, user_config)
     local default_keys = config and config.keymaps or {}
     local user_keys = user_config and user_config.keymaps or {}

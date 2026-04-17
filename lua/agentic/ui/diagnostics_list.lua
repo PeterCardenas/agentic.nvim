@@ -1,4 +1,3 @@
---- @diagnostic disable: param-type-mismatch
 local Config = require("agentic.config")
 local DiagnosticsContext = require("agentic.ui.diagnostics_context")
 local WidgetLayout = require("agentic.ui.widget_layout")
@@ -19,7 +18,7 @@ end
 
 --- @class agentic.ui.DiagnosticsList.Diagnostic : vim.Diagnostic
 --- @field file_path string Full file path
---- @field bufnr integer|nil
+--- @field bufnr integer
 
 --- @class agentic.ui.DiagnosticsList
 --- @field _diagnostics agentic.ui.DiagnosticsList.Diagnostic[]
@@ -155,7 +154,10 @@ function DiagnosticsList.get_buffer_diagnostics(bufnr, opts)
 
     for _, d in ipairs(vim_diagnostics) do
         --- @type agentic.ui.DiagnosticsList.Diagnostic
-        local diagnostic = vim.tbl_extend("force", d, { file_path = file_path }) --[[@as agentic.ui.DiagnosticsList.Diagnostic]]
+        local diagnostic = vim.tbl_extend("force", d, {
+            bufnr = bufnr,
+            file_path = file_path,
+        })
         table.insert(diagnostics, diagnostic)
     end
 
@@ -192,8 +194,10 @@ function DiagnosticsList.get_diagnostics_at_cursor(bufnr, opts)
         local end_lnum = d.end_lnum or d.lnum
         if cursor_line >= d.lnum and cursor_line <= end_lnum then
             --- @type agentic.ui.DiagnosticsList.Diagnostic
-            local diagnostic =
-                vim.tbl_extend("force", d, { file_path = file_path }) --[[@as agentic.ui.DiagnosticsList.Diagnostic]]
+            local diagnostic = vim.tbl_extend("force", d, {
+                bufnr = bufnr,
+                file_path = file_path,
+            })
             table.insert(diagnostics, diagnostic)
         end
     end
@@ -211,6 +215,7 @@ function DiagnosticsList:_render()
     if winid ~= -1 then
         buf_width = vim.api.nvim_win_get_width(winid)
     end
+    --- @cast buf_width integer
 
     for _, diagnostic in ipairs(self._diagnostics) do
         local icon = icons[diagnostic.severity]

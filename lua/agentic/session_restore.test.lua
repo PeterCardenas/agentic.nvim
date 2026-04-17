@@ -1,4 +1,3 @@
---- @diagnostic disable: need-check-nil, param-type-mismatch
 local assert = require("tests.helpers.assert")
 local spy = require("tests.helpers.spy")
 
@@ -73,9 +72,10 @@ describe("SessionRestore", function()
 
     --- Get callback and items from vim.ui.select call at given index
     local function get_ui_select_call(index)
+        local call = assert.not_nil(vim_ui_select_stub.calls[index])
         --- @type fun(choice: table|nil): nil
-        local callback = vim_ui_select_stub.calls[index][3]
-        local items = vim_ui_select_stub.calls[index][1]
+        local callback = call[3]
+        local items = call[1]
         return callback, items
     end
 
@@ -119,11 +119,9 @@ describe("SessionRestore", function()
             SessionRestore.show_picker(1)
 
             assert.spy(logger_notify_stub).was.called(1)
-            assert.equal(
-                "No saved sessions found",
-                logger_notify_stub.calls[1][1]
-            )
-            assert.equal(vim.log.levels.INFO, logger_notify_stub.calls[1][2])
+            local first_call = assert.not_nil(logger_notify_stub.calls[1])
+            assert.equal("No saved sessions found", first_call[1])
+            assert.equal(vim.log.levels.INFO, first_call[2])
             assert.spy(vim_ui_select_stub).was.called(0)
         end)
 
@@ -132,8 +130,9 @@ describe("SessionRestore", function()
 
             SessionRestore.show_picker(1)
 
-            local items = vim_ui_select_stub.calls[1][1]
-            local opts = vim_ui_select_stub.calls[1][2]
+            local first_call = assert.not_nil(vim_ui_select_stub.calls[1])
+            local items = first_call[1]
+            local opts = first_call[2]
 
             assert.equal(2, #items)
             assert.equal("session-1", items[1].session_id)
@@ -147,7 +146,8 @@ describe("SessionRestore", function()
 
             SessionRestore.show_picker(1)
 
-            local items = vim_ui_select_stub.calls[1][1]
+            local first_call = assert.not_nil(vim_ui_select_stub.calls[1])
+            local items = first_call[1]
             assert.truthy(items[1].display:match("%(no title%)"))
         end)
 
@@ -258,10 +258,9 @@ describe("SessionRestore", function()
             select_session({ session_id = "session-1" })
 
             assert.spy(logger_notify_stub).was.called(1)
-            assert.truthy(
-                logger_notify_stub.calls[1][1]:match("File not found")
-            )
-            assert.equal(vim.log.levels.WARN, logger_notify_stub.calls[1][2])
+            local first_call = assert.not_nil(logger_notify_stub.calls[1])
+            assert.truthy(first_call[1]:match("File not found"))
+            assert.equal(vim.log.levels.WARN, first_call[2])
             assert.spy(session_registry_stub).was.called(0)
         end)
 
@@ -274,7 +273,8 @@ describe("SessionRestore", function()
             select_session({ session_id = "session-1" })
 
             assert.spy(logger_notify_stub).was.called(1)
-            assert.truthy(logger_notify_stub.calls[1][1]:match("unknown error"))
+            local first_call = assert.not_nil(logger_notify_stub.calls[1])
+            assert.truthy(first_call[1]:match("unknown error"))
             assert.spy(session_registry_stub).was.called(0)
         end)
     end)
@@ -300,7 +300,8 @@ describe("SessionRestore", function()
         end)
 
         local function get_fzf_opts(call_index)
-            return fzf_exec_spy.calls[call_index or 1][2]
+            local call = assert.not_nil(fzf_exec_spy.calls[call_index or 1])
+            return call[2]
         end
 
         local function get_fzf_actions(call_index)
@@ -309,7 +310,8 @@ describe("SessionRestore", function()
 
         --- Simulate fzf calling the content function to populate items
         local function populate_items(call_index)
-            local contents_fn = fzf_exec_spy.calls[call_index or 1][1]
+            local call = assert.not_nil(fzf_exec_spy.calls[call_index or 1])
+            local contents_fn = call[1]
             local entries = {}
             contents_fn(function(entry)
                 if entry then
@@ -335,7 +337,8 @@ describe("SessionRestore", function()
             setup_list_stub()
             SessionRestore.show_picker(1)
 
-            assert.equal("function", type(fzf_exec_spy.calls[1][1]))
+            local first_call = assert.not_nil(fzf_exec_spy.calls[1])
+            assert.equal("function", type(first_call[1]))
         end)
 
         it(
@@ -378,7 +381,8 @@ describe("SessionRestore", function()
             actions["ctrl-x"].fn({ pick_entry(entries, "session-1") })
 
             assert.spy(chat_history_delete_stub).was.called(1)
-            assert.equal("session-1", chat_history_delete_stub.calls[1][1])
+            local first_call = assert.not_nil(chat_history_delete_stub.calls[1])
+            assert.equal("session-1", first_call[1])
         end)
 
         it("deletes the correct session when second item selected", function()
@@ -393,7 +397,8 @@ describe("SessionRestore", function()
             local actions = get_fzf_actions()
             actions["ctrl-x"].fn({ pick_entry(entries, "session-2") })
 
-            assert.equal("session-2", chat_history_delete_stub.calls[1][1])
+            local first_call = assert.not_nil(chat_history_delete_stub.calls[1])
+            assert.equal("session-2", first_call[1])
         end)
 
         it("reloads in-place instead of re-opening picker", function()
@@ -447,10 +452,9 @@ describe("SessionRestore", function()
             actions["ctrl-x"].fn({ pick_entry(entries, "session-1") })
 
             assert.spy(logger_notify_stub).was.called(1)
-            assert.truthy(
-                logger_notify_stub.calls[1][1]:match("Permission denied")
-            )
-            assert.equal(vim.log.levels.WARN, logger_notify_stub.calls[1][2])
+            local first_call = assert.not_nil(logger_notify_stub.calls[1])
+            assert.truthy(first_call[1]:match("Permission denied"))
+            assert.equal(vim.log.levels.WARN, first_call[2])
         end)
 
         it("does nothing when ctrl-x with empty selection", function()
@@ -521,7 +525,9 @@ describe("SessionRestore", function()
                 session_actions["default"]({ pick_entry(entries, "session-1") })
                 assert.equal(1, fzf_exec_spy.call_count)
                 assert.spy(chat_history_load_stub).was.called(1)
-                assert.equal("session-1", chat_history_load_stub.calls[1][1])
+                local first_call =
+                    assert.not_nil(chat_history_load_stub.calls[1])
+                assert.equal("session-1", first_call[1])
                 assert.spy(mock_session.restore_from_history).was.called(1)
                 local restore_call = mock_session.restore_from_history.calls[1]
                 assert.is_true(restore_call[3].replace_session)
@@ -582,9 +588,9 @@ describe("SessionRestore", function()
                 -- Simulate fzf reload: call content function again
                 local entries2 = populate_items()
                 assert.equal(1, #entries2)
-                assert.truthy(
-                    pick_entry(entries2, "session-2"):match("Second chat")
-                )
+                local second_entry =
+                    assert.not_nil(pick_entry(entries2, "session-2"))
+                assert.truthy(second_entry:match("Second chat"))
             end
         )
 
