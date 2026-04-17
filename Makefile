@@ -59,25 +59,37 @@ check: format-check emmylua selene
 validate:
 	@mkdir -p .local; \
 	total_start=$$(date +%s); \
+	failed_steps=""; \
+	append_failed_step() { \
+		if [ -z "$$failed_steps" ]; then \
+			failed_steps="$$1"; \
+		else \
+			failed_steps="$$failed_steps, $$1"; \
+		fi; \
+	}; \
 	start=$$(date +%s); \
-	make format > .local/agentic_format_output.log 2>&1; \
+	$(MAKE) format > .local/agentic_format_output.log 2>&1; \
 	rc_format=$$?; \
+	if [ $$rc_format -ne 0 ]; then append_failed_step format; fi; \
 	echo "format: $$rc_format (took $$(($$(date +%s) - start))s) - log: .local/agentic_format_output.log"; \
 	start=$$(date +%s); \
-	make emmylua > .local/agentic_emmylua_output.log 2>&1; \
+	$(MAKE) emmylua > .local/agentic_emmylua_output.log 2>&1; \
 	rc_emmylua=$$?; \
+	if [ $$rc_emmylua -ne 0 ]; then append_failed_step emmylua; fi; \
 	echo "emmylua: $$rc_emmylua (took $$(($$(date +%s) - start))s) - log: .local/agentic_emmylua_output.log"; \
 	start=$$(date +%s); \
-	make selene > .local/agentic_selene_output.log 2>&1; \
+	$(MAKE) selene > .local/agentic_selene_output.log 2>&1; \
 	rc_selene=$$?; \
+	if [ $$rc_selene -ne 0 ]; then append_failed_step selene; fi; \
 	echo "selene: $$rc_selene (took $$(($$(date +%s) - start))s) - log: .local/agentic_selene_output.log"; \
 	start=$$(date +%s); \
-	make test > .local/agentic_test_output.log 2>&1; \
+	$(MAKE) test > .local/agentic_test_output.log 2>&1; \
 	rc_test=$$?; \
+	if [ $$rc_test -ne 0 ]; then append_failed_step test; fi; \
 	echo "test: $$rc_test (took $$(($$(date +%s) - start))s) - log: .local/agentic_test_output.log"; \
 	echo "Total: $$(($$(date +%s) - total_start))s"; \
-	if [ $$rc_format -ne 0 ] || [ $$rc_emmylua -ne 0 ] || [ $$rc_selene -ne 0 ] || [ $$rc_test -ne 0 ]; then \
-		echo "Validation failed! Check log files for details."; \
+	if [ -n "$$failed_steps" ]; then \
+		echo "Validation failed: $$failed_steps. Check log files for details."; \
 		exit 1; \
 	fi
 

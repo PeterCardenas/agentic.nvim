@@ -390,6 +390,13 @@ test: 0 (took 1s) - log: .local/agentic_test_output.log
 Total: 4s
 ```
 
+If any step fails, `make validate` prints a final summary line naming the
+failing step or steps. Example:
+
+```bash
+Validation failed: emmylua, test. Check log files for details.
+```
+
 Each line shows: `{task}: {exit_code} (took {seconds}s) - log: {log_path}`
 
 - Exit code `0` = success, non-zero = failure
