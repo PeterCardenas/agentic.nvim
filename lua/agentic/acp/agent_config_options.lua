@@ -13,6 +13,109 @@ local function load_fzf_lua()
     return fzf
 end
 
+--- @param target agentic.acp.ConfigOption|nil
+--- @return string[] lines
+local function build_config_option_preview_lines(target)
+    local lines = {
+        "# Option Preview",
+        "",
+    }
+
+    if not target then
+        table.insert(lines, "_Option preview unavailable_")
+        return lines
+    end
+
+    table.insert(lines, string.format("%s (`%s`)", target.name, target.id))
+
+    if target.description and target.description ~= "" then
+        table.insert(lines, "")
+        table.insert(lines, (target.description:gsub("\n", " ")))
+    end
+
+    table.insert(lines, "")
+
+    if not target.options or #target.options == 0 then
+        table.insert(lines, "_No values_")
+        return lines
+    end
+
+    local current_value = target.currentValue
+    local current_name = current_value
+    for _, option in ipairs(target.options) do
+        if option.value == current_value then
+            current_name = option.name
+            break
+        end
+    end
+
+    table.insert(
+        lines,
+        string.format("current: %s (`%s`)", current_name, current_value)
+    )
+    table.insert(lines, "values:")
+
+    local max_preview_values = 8
+    local shown = math.min(#target.options, max_preview_values)
+    for i = 1, shown do
+        local option = target.options[i]
+        local prefix = option.value == current_value and "*" or "-"
+        table.insert(
+            lines,
+            string.format("%s %s (`%s`)", prefix, option.name, option.value)
+        )
+    end
+
+    if #target.options > shown then
+        table.insert(
+            lines,
+            string.format("... +%d more", #target.options - shown)
+        )
+    end
+
+    return lines
+end
+
+--- @param options_by_id table<string, agentic.acp.ConfigOption>
+--- @return table
+local function create_config_option_previewer(options_by_id)
+    local builtin = require("fzf-lua.previewer.builtin")
+    local previewer = builtin.base:extend()
+
+    function previewer:new(o, opts, fzf_win)
+        self.super.new(self, o, opts, fzf_win)
+        setmetatable(self, previewer)
+        return self
+    end
+
+    function previewer:populate_preview_buf(entry_str)
+        local option_id = entry_str and entry_str:match("^([^\t]+)")
+        local option = option_id and options_by_id[option_id] or nil
+
+        local buf = self:get_tmp_buffer()
+        vim.bo[buf].filetype = "markdown"
+        vim.bo[buf].modifiable = true
+        vim.api.nvim_buf_set_lines(
+            buf,
+            0,
+            -1,
+            false,
+            build_config_option_preview_lines(option)
+        )
+        vim.bo[buf].readonly = true
+        vim.bo[buf].modifiable = false
+        self:set_preview_buf(buf)
+
+        if self.win and self.win.update_preview_title then
+            self.win:update_preview_title(
+                option and option.name or "Session option"
+            )
+        end
+    end
+
+    return previewer
+end
+
 --- @class agentic.acp.AgentConfigOptions
 --- @field mode? agentic.acp.ConfigOption
 --- @field model? agentic.acp.ConfigOption
@@ -341,8 +444,14 @@ function AgentConfigOptions:show_config_option_picker(handle_option_change)
     end
 
     local entries = {}
+    --- @type table<string, agentic.acp.ConfigOption>
+    local options_by_id = {}
     for _, option in ipairs(options) do
-        table.insert(entries, format_option(option))
+        options_by_id[option.id] = option
+        table.insert(
+            entries,
+            string.format("%s\t%s", option.id, format_option(option))
+        )
     end
 
     fzf.fzf_exec(entries, {
@@ -353,6 +462,13 @@ function AgentConfigOptions:show_config_option_picker(handle_option_change)
             row = 0.5,
             col = 0.5,
         },
+        previewer = function()
+            return create_config_option_previewer(options_by_id)
+        end,
+        fzf_opts = {
+            ["--delimiter"] = "\t",
+            ["--with-nth"] = "2..",
+        },
         actions = {
             ["default"] = function(selected)
                 if not selected or #selected == 0 then
@@ -360,12 +476,8 @@ function AgentConfigOptions:show_config_option_picker(handle_option_change)
                     return
                 end
 
-                for _, option in ipairs(options) do
-                    if format_option(option) == selected[1] then
-                        on_select_option(option)
-                        return
-                    end
-                end
+                local option_id = selected[1]:match("^([^\t]+)")
+                on_select_option(option_id and options_by_id[option_id] or nil)
             end,
         },
     })

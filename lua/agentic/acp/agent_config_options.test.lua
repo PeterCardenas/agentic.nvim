@@ -578,10 +578,14 @@ describe("agentic.acp.AgentConfigOptions", function()
 
         before_each(function()
             select_stub = spy.stub(vim.ui, "select")
+            package.loaded["fzf-lua"] = nil
+            package.loaded["fzf-lua.previewer.builtin"] = nil
         end)
 
         after_each(function()
             select_stub:revert()
+            package.loaded["fzf-lua"] = nil
+            package.loaded["fzf-lua.previewer.builtin"] = nil
         end)
 
         it("returns false and notifies when no config options exist", function()
@@ -626,6 +630,51 @@ describe("agentic.acp.AgentConfigOptions", function()
                 assert.equal("plan", args[2])
             end
         )
+
+        it("configures fzf picker with preview for option details", function()
+            config_options:set_options({ mode_option, thought_option })
+
+            local fzf_exec_spy = spy.new(function() end)
+            package.loaded["fzf-lua"] = {
+                fzf_exec = fzf_exec_spy,
+            }
+
+            local shown = config_options:show_config_option_picker(
+                function() end
+            )
+
+            assert.is_true(shown)
+            assert.spy(fzf_exec_spy).was.called(1)
+            assert.stub(select_stub).was.called(0)
+
+            local opts = fzf_exec_spy.calls[1][2]
+            assert.equal("function", type(opts.previewer))
+            assert.equal("\t", opts.fzf_opts["--delimiter"])
+            assert.equal("2..", opts.fzf_opts["--with-nth"])
+        end)
+
+        it("matches selected fzf entry using config option id", function()
+            config_options:set_options({ mode_option, thought_option })
+
+            local fzf_exec_spy = spy.new(function() end)
+            package.loaded["fzf-lua"] = {
+                fzf_exec = fzf_exec_spy,
+            }
+
+            local show_selector_stub =
+                spy.stub(config_options, "_show_selector")
+
+            config_options:show_config_option_picker(function() end)
+
+            local entries = fzf_exec_spy.calls[1][1]
+            local opts = fzf_exec_spy.calls[1][2]
+            opts.actions["default"]({ entries[1] })
+
+            assert.stub(show_selector_stub).was.called(1)
+            assert.equal("mode-1", show_selector_stub.calls[1][2].id)
+
+            show_selector_stub:revert()
+        end)
     end)
 
     describe("set_legacy_models", function()
