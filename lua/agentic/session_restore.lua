@@ -130,6 +130,14 @@ local function create_session_previewer(fixed_session_id)
     local builtin = require("fzf-lua.previewer.builtin")
     local previewer = builtin.base:extend()
 
+    --- @param buf integer
+    --- @param lines string[]
+    local function set_preview_lines(buf, lines)
+        vim.bo[buf].modifiable = true
+        vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+        vim.bo[buf].modifiable = false
+    end
+
     function previewer:new(o, opts, fzf_win)
         self.super.new(self, o, opts, fzf_win)
         setmetatable(self, previewer)
@@ -146,7 +154,7 @@ local function create_session_previewer(fixed_session_id)
         vim.bo[buf].filetype = "markdown"
 
         if not session_id or session_id == "" then
-            vim.api.nvim_buf_set_lines(buf, 0, -1, false, {
+            set_preview_lines(buf, {
                 "# Session Preview",
                 "",
                 "_Unable to determine session id_",
@@ -159,7 +167,7 @@ local function create_session_previewer(fixed_session_id)
         local parsed = load_session_from_disk_sync(session_id)
         local lines, title =
             build_preview_lines(parsed, "Session " .. session_id)
-        vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+        set_preview_lines(buf, lines)
         self:set_preview_buf(buf)
         if self.win and self.win.update_preview_title then
             self.win:update_preview_title(title)
