@@ -7,30 +7,6 @@ local M = {}
 --- @field AGENTIC_FILETYPES table<string, boolean|nil>
 --- @field CYCLE_ORDER agentic.ui.ChatWidget.PanelNames[]
 
---- Window-local editor options to preserve when a widget window is reused
---- as part of the restored editor layout.
---- @type string[]
-local EDITOR_WINDOW_OPTS = {
-    "statuscolumn",
-    "signcolumn",
-    "number",
-    "numberwidth",
-    "relativenumber",
-    "foldcolumn",
-    "wrap",
-    "linebreak",
-    "cursorline",
-    "cursorcolumn",
-    "list",
-    "colorcolumn",
-    "conceallevel",
-    "concealcursor",
-    "spell",
-    "winhl",
-    "winfixheight",
-    "winfixwidth",
-}
-
 --- @param node agentic.ui.ChatWidget.MaximizeNode
 --- @return integer count
 local function count_widget_nodes(node)
@@ -110,35 +86,6 @@ local function compute_container_size(children, kind)
     end
 
     return width, height
-end
-
---- @param winid integer
---- @return table<string, boolean|integer|string> win_opts
-local function capture_window_options(winid)
-    --- @type table<string, boolean|integer|string>
-    local win_opts = {}
-
-    for _, option_name in ipairs(EDITOR_WINDOW_OPTS) do
-        win_opts[option_name] =
-            vim.api.nvim_get_option_value(option_name, { win = winid })
-    end
-
-    return win_opts
-end
-
---- @param winid integer
---- @param win_opts table<string, boolean|integer|string>
-local function restore_window_options(winid, win_opts)
-    vim.wo[winid].winfixbuf = false
-
-    for option_name, value in pairs(win_opts) do
-        pcall(
-            vim.api.nvim_set_option_value,
-            option_name,
-            value,
-            { win = winid }
-        )
-    end
 end
 
 --- @param winid integer
@@ -332,7 +279,6 @@ function M.attach(ChatWidget, opts)
                     width = info.width,
                     height = info.height,
                     view = view,
-                    win_opts = capture_window_options(winid),
                 }
                 leaves[leaf_id] = leaf_node
                 return leaf_node
@@ -512,7 +458,6 @@ function M.attach(ChatWidget, opts)
                 end
 
                 set_window_buffer(winid, leaf.bufnr)
-                restore_window_options(winid, leaf.win_opts)
                 leaf_wins[leaf.leaf_id] = winid
                 return
             end

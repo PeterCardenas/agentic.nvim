@@ -136,28 +136,6 @@ describe("Maximize toggle with multiple tabpages", function()
         ))
     end
 
-    --- @param bufnr integer
-    --- @return table|nil
-    local function snapshot_window_options_for_buf(bufnr)
-        return child.lua(string.format(
-            [[
-            local winid = vim.fn.bufwinid(%d)
-            if winid == -1 then
-                return nil
-            end
-
-            return {
-                statuscolumn = vim.api.nvim_get_option_value("statuscolumn", { win = winid }),
-                signcolumn = vim.api.nvim_get_option_value("signcolumn", { win = winid }),
-                number = vim.api.nvim_get_option_value("number", { win = winid }),
-                relativenumber = vim.api.nvim_get_option_value("relativenumber", { win = winid }),
-                foldcolumn = vim.api.nvim_get_option_value("foldcolumn", { win = winid }),
-            }
-        ]],
-            bufnr
-        ))
-    end
-
     --- @param tabpage number
     --- @param msg string|nil
     local function assert_no_agentic_in_editor_windows(tabpage, msg)
@@ -362,12 +340,14 @@ describe("Maximize toggle with multiple tabpages", function()
         end
     )
 
-    it("restores editor window-local options like statuscolumn", function()
-        local layout = create_mixed_editor_layout()
-        local statuscolumn = "%=%l%s"
+    it(
+        "restores the editor layout even with window-local options set",
+        function()
+            local layout = create_mixed_editor_layout()
+            local statuscolumn = "%=%l%s"
 
-        child.lua(string.format(
-            [[
+            child.lua(string.format(
+                [[
             local winid = vim.fn.bufwinid(%d)
             vim.api.nvim_set_option_value("statuscolumn", %q, { win = winid })
             vim.api.nvim_set_option_value("signcolumn", "yes:2", { win = winid })
@@ -375,22 +355,24 @@ describe("Maximize toggle with multiple tabpages", function()
             vim.api.nvim_set_option_value("relativenumber", true, { win = winid })
             vim.api.nvim_set_option_value("foldcolumn", "2", { win = winid })
         ]],
-            layout.bottom,
-            statuscolumn
-        ))
-        child.flush()
+                layout.bottom,
+                statuscolumn
+            ))
+            child.flush()
 
-        toggle_widget()
+            toggle_widget()
 
-        local tab_id = child.api.nvim_get_current_tabpage()
-        local before = snapshot_window_options_for_buf(layout.bottom)
+            local tab_id = child.api.nvim_get_current_tabpage()
+            local before = snapshot_editor_layout(tab_id)
+            local before_count = count_editor_windows(tab_id)
 
-        toggle_maximize(tab_id)
-        toggle_maximize(tab_id)
+            toggle_maximize(tab_id)
+            toggle_maximize(tab_id)
 
-        local after = snapshot_window_options_for_buf(layout.bottom)
-        assert.same(before, after)
-    end)
+            assert.same(before, snapshot_editor_layout(tab_id))
+            assert.equal(before_count, count_editor_windows(tab_id))
+        end
+    )
 
     it(
         "hide while maximized restores the editor layout and repeated cycles do not duplicate windows",

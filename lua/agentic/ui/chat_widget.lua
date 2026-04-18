@@ -59,7 +59,6 @@ local CYCLE_ORDER = { "chat", "todos", "code", "files", "diagnostics", "input" }
 --- @field width integer
 --- @field height integer
 --- @field view table<string, integer|nil>
---- @field win_opts table<string, boolean|integer|string>
 
 --- @class agentic.ui.ChatWidget.MaximizeWidgetState
 --- @field kind "widget"
