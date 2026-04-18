@@ -98,7 +98,7 @@ local function set_window_buffer(winid, bufnr)
 end
 
 --- @param winid integer
---- @param split "right"|"below"
+--- @param split "left"|"right"|"above"|"below"
 --- @return integer
 local function open_restore_split(winid, split)
     local bufnr = vim.api.nvim_win_get_buf(winid)
@@ -449,45 +449,42 @@ function M.attach(ChatWidget, opts)
         local widget_placeholder_winid = nil
 
         --- @param node agentic.ui.ChatWidget.MaximizeNode
-        --- @param winid integer
-        local function restore_node(node, winid)
-            if node.kind == "leaf" then
-                local leaf = node --[[@as agentic.ui.ChatWidget.MaximizeLeafState]]
-                if not vim.api.nvim_buf_is_valid(leaf.bufnr) then
-                    error("saved buffer was deleted: " .. tostring(leaf.bufnr))
-                end
-
-                set_window_buffer(winid, leaf.bufnr)
-                leaf_wins[leaf.leaf_id] = winid
-                return
-            end
-
+        --- @return boolean
+        local function contains_widget(node)
             if node.kind == "widget" then
-                set_window_buffer(winid, self.buf_nrs.chat)
-                widget_placeholder_winid = winid
-                return
+                return true
             end
 
-            local children = node.children or {}
-            local split = node.kind == "row" and "right" or "below"
-            local child_wins = { winid }
+            if node.kind == "leaf" then
+                return false
+            end
 
-            for index = 2, #children do
-                local previous_winid = child_wins[index - 1]
-                if previous_winid then
-                    child_wins[index] =
-                        open_restore_split(previous_winid, split)
+            for _, child in ipairs(node.children or {}) do
+                if contains_widget(child) then
+                    return true
                 end
             end
 
-            for index, child in ipairs(children) do
-                local child_winid = child_wins[index]
-                if child_winid then
-                    restore_node(child, child_winid)
+            return false
+        end
+
+        --- @param node agentic.ui.ChatWidget.MaximizeContainerState
+        --- @return integer|nil
+        local function find_widget_child_index(node)
+            for index, child in ipairs(node.children or {}) do
+                if contains_widget(child) then
+                    return index
                 end
             end
 
-            if node.kind == "row" then
+            return nil
+        end
+
+        --- @param kind "row"|"col"
+        --- @param children agentic.ui.ChatWidget.MaximizeNode[]
+        --- @param child_wins table<integer, integer|nil>
+        local function restore_container_sizes(kind, children, child_wins)
+            if kind == "row" then
                 for index = 1, #children - 1 do
                     local child_winid = child_wins[index]
                     local child = children[index]
@@ -499,19 +496,100 @@ function M.attach(ChatWidget, opts)
                         )
                     end
                 end
-            else
-                for index = 1, #children - 1 do
-                    local child_winid = child_wins[index]
+                return
+            end
+
+            for index = 1, #children - 1 do
+                local child_winid = child_wins[index]
+                local child = children[index]
+                if child_winid and child then
+                    pcall(
+                        vim.api.nvim_win_set_height,
+                        child_winid,
+                        child.height
+                    )
+                end
+            end
+        end
+
+        --- @param node agentic.ui.ChatWidget.MaximizeNode
+        --- @param winid integer
+        --- @return integer representative_winid
+        local function restore_node(node, winid)
+            if node.kind == "leaf" then
+                local leaf = node --[[@as agentic.ui.ChatWidget.MaximizeLeafState]]
+                if not vim.api.nvim_buf_is_valid(leaf.bufnr) then
+                    error("saved buffer was deleted: " .. tostring(leaf.bufnr))
+                end
+
+                set_window_buffer(winid, leaf.bufnr)
+                leaf_wins[leaf.leaf_id] = winid
+                return winid
+            end
+
+            if node.kind == "widget" then
+                set_window_buffer(winid, self.buf_nrs.chat)
+                widget_placeholder_winid = winid
+                return winid
+            end
+
+            local children = node.children or {}
+            local widget_index = find_widget_child_index(
+                node --[[@as agentic.ui.ChatWidget.MaximizeContainerState]]
+            )
+
+            --- @type table<integer, integer|nil>
+            local child_wins = {}
+            if widget_index then
+                local before_split = node.kind == "row" and "left" or "above"
+                local after_split = node.kind == "row" and "right" or "below"
+                local left_anchor_winid = winid
+                local right_anchor_winid = winid
+
+                local widget_child = children[widget_index]
+                if widget_child then
+                    child_wins[widget_index] = restore_node(widget_child, winid)
+                end
+
+                for index = widget_index - 1, 1, -1 do
                     local child = children[index]
-                    if child_winid and child then
-                        pcall(
-                            vim.api.nvim_win_set_height,
-                            child_winid,
-                            child.height
-                        )
+                    local new_winid =
+                        open_restore_split(left_anchor_winid, before_split)
+                    if child then
+                        child_wins[index] = restore_node(child, new_winid)
+                    end
+                    left_anchor_winid = new_winid
+                end
+
+                for index = widget_index + 1, #children do
+                    local child = children[index]
+                    local new_winid =
+                        open_restore_split(right_anchor_winid, after_split)
+                    if child then
+                        child_wins[index] = restore_node(child, new_winid)
+                    end
+                    right_anchor_winid = new_winid
+                end
+            else
+                local split = node.kind == "row" and "right" or "below"
+                local first_child = children[1]
+                if first_child then
+                    child_wins[1] = restore_node(first_child, winid)
+                end
+
+                for index = 2, #children do
+                    local child = children[index]
+                    local previous_winid = child_wins[index - 1]
+                    if previous_winid and child then
+                        local new_winid =
+                            open_restore_split(previous_winid, split)
+                        child_wins[index] = restore_node(child, new_winid)
                     end
                 end
             end
+
+            restore_container_sizes(node.kind, children, child_wins)
+            return winid
         end
 
         local ok, err = pcall(function()

@@ -375,6 +375,81 @@ describe("Maximize toggle with multiple tabpages", function()
     )
 
     it(
+        "restores a dashboard leaf as a normal editor window before opening a file",
+        function()
+            local statuscolumn = "%=%l%s"
+            local dashboard_bufnr = child.lua(string.format(
+                [[
+            vim.o.statuscolumn = %q
+            vim.o.number = true
+            local dashboard = vim.api.nvim_create_buf(true, false)
+            vim.api.nvim_buf_set_name(
+                dashboard,
+                "/tmp/agentic-dashboard-" .. tostring(vim.uv.hrtime())
+            )
+            vim.api.nvim_buf_set_lines(dashboard, 0, -1, false, { "dashboard" })
+            vim.bo[dashboard].filetype = "dashboard"
+            vim.api.nvim_win_set_buf(0, dashboard)
+            return dashboard
+        ]],
+                statuscolumn
+            ))
+            child.flush()
+
+            toggle_widget()
+            child.lua(string.format(
+                [[
+            local winid = vim.fn.bufwinid(%d)
+            vim.api.nvim_set_current_win(winid)
+        ]],
+                dashboard_bufnr
+            ))
+            child.flush()
+
+            local tab_id = child.api.nvim_get_current_tabpage()
+            toggle_maximize(tab_id)
+            toggle_maximize(tab_id)
+
+            local restored = child.lua(string.format(
+                [[
+            local winid = vim.fn.bufwinid(%d)
+            if winid == -1 then
+                error("dashboard buffer not visible after restore")
+            end
+
+            vim.api.nvim_set_current_win(winid)
+            local before = {
+                style = vim.api.nvim_win_get_config(0).style,
+                statuscolumn = vim.api.nvim_get_option_value(
+                    "statuscolumn",
+                    { win = 0 }
+                ),
+            }
+
+            local path = "/tmp/agentic-dashboard-open-" .. tostring(vim.uv.hrtime()) .. ".lua"
+            vim.cmd("edit " .. vim.fn.fnameescape(path))
+
+            return {
+                before_style = before.style,
+                before_statuscolumn = before.statuscolumn,
+                after_style = vim.api.nvim_win_get_config(0).style,
+                after_statuscolumn = vim.api.nvim_get_option_value(
+                    "statuscolumn",
+                    { win = 0 }
+                ),
+            }
+        ]],
+                dashboard_bufnr
+            ))
+
+            assert.equal("", restored.before_style)
+            assert.equal(statuscolumn, restored.before_statuscolumn)
+            assert.equal("", restored.after_style)
+            assert.equal(statuscolumn, restored.after_statuscolumn)
+        end
+    )
+
+    it(
         "hide while maximized restores the editor layout and repeated cycles do not duplicate windows",
         function()
             create_mixed_editor_layout()
