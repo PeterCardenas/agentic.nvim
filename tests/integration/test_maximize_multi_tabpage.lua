@@ -2,7 +2,7 @@
 local assert = require("tests.helpers.assert")
 local Child = require("tests.helpers.child")
 
---- Agentic widget filetypes that should NEVER appear as editor/code windows
+--- Agentic widget filetypes that should NEVER appear as editor windows
 local AGENTIC_FILETYPES = {
     AgenticChat = true,
     AgenticInput = true,
@@ -15,7 +15,6 @@ local AGENTIC_FILETYPES = {
 describe("Maximize toggle with multiple tabpages", function()
     local child = Child:new()
 
-    --- Gets sorted filetypes for all windows in the given tabpage
     --- @param tabpage number
     --- @return string[]
     local function get_tabpage_filetypes(tabpage)
@@ -31,10 +30,137 @@ describe("Maximize toggle with multiple tabpages", function()
         return filetypes
     end
 
-    --- Assert that no window on the given tabpage displays an Agentic widget buffer
+    --- @param tabpage number
+    --- @return table|nil
+    local function snapshot_editor_layout(tabpage)
+        return child.lua(string.format(
+            [[
+            local tab_id = %d
+            local session = require("agentic.session_registry").sessions[tab_id]
+            local widget_bufs = {}
+            if session and session.widget then
+                for _, bufnr in pairs(session.widget.buf_nrs) do
+                    widget_bufs[bufnr] = true
+                end
+            end
+
+            local agentic_fts = {
+                AgenticChat = true,
+                AgenticInput = true,
+                AgenticTodos = true,
+                AgenticCode = true,
+                AgenticFiles = true,
+                AgenticDiagnostics = true,
+            }
+
+            local function convert(node)
+                local kind = node[1]
+                if kind == "leaf" then
+                    local winid = node[2]
+                    local bufnr = vim.api.nvim_win_get_buf(winid)
+                    local filetype = vim.bo[bufnr].filetype
+                    if widget_bufs[bufnr] or agentic_fts[filetype] then
+                        return nil
+                    end
+
+                    return {
+                        kind = "leaf",
+                        bufnr = bufnr,
+                        name = vim.api.nvim_buf_get_name(bufnr),
+                        filetype = filetype,
+                    }
+                end
+
+                local children = {}
+                for _, child in ipairs(node[2]) do
+                    local converted = convert(child)
+                    if converted then
+                        table.insert(children, converted)
+                    end
+                end
+
+                if #children == 0 then
+                    return nil
+                end
+
+                if #children == 1 then
+                    return children[1]
+                end
+
+                return {
+                    kind = kind,
+                    children = children,
+                }
+            end
+
+            local tabnr = vim.api.nvim_tabpage_get_number(tab_id)
+            return convert(vim.fn.winlayout(tabnr))
+        ]],
+            tabpage
+        ))
+    end
+
+    --- @param tabpage number
+    --- @return integer
+    local function count_editor_windows(tabpage)
+        return child.lua(string.format(
+            [[
+            local tab_id = %d
+            local session = require("agentic.session_registry").sessions[tab_id]
+            local widget_bufs = {}
+            if session and session.widget then
+                for _, bufnr in pairs(session.widget.buf_nrs) do
+                    widget_bufs[bufnr] = true
+                end
+            end
+
+            local count = 0
+            for _, winid in ipairs(vim.api.nvim_tabpage_list_wins(tab_id)) do
+                local bufnr = vim.api.nvim_win_get_buf(winid)
+                local filetype = vim.bo[bufnr].filetype
+                if not widget_bufs[bufnr] and not (%s)[filetype] then
+                    count = count + 1
+                end
+            end
+            return count
+        ]],
+            tabpage,
+            [[{
+                AgenticChat = true,
+                AgenticInput = true,
+                AgenticTodos = true,
+                AgenticCode = true,
+                AgenticFiles = true,
+                AgenticDiagnostics = true,
+            }]]
+        ))
+    end
+
+    --- @param bufnr integer
+    --- @return table|nil
+    local function snapshot_window_options_for_buf(bufnr)
+        return child.lua(string.format(
+            [[
+            local winid = vim.fn.bufwinid(%d)
+            if winid == -1 then
+                return nil
+            end
+
+            return {
+                statuscolumn = vim.api.nvim_get_option_value("statuscolumn", { win = winid }),
+                signcolumn = vim.api.nvim_get_option_value("signcolumn", { win = winid }),
+                number = vim.api.nvim_get_option_value("number", { win = winid }),
+                relativenumber = vim.api.nvim_get_option_value("relativenumber", { win = winid }),
+                foldcolumn = vim.api.nvim_get_option_value("foldcolumn", { win = winid }),
+            }
+        ]],
+            bufnr
+        ))
+    end
+
     --- @param tabpage number
     --- @param msg string|nil
-    local function assert_no_agentic_in_code_windows(tabpage, msg)
+    local function assert_no_agentic_in_editor_windows(tabpage, msg)
         local winids = child.api.nvim_tabpage_list_wins(tabpage)
         for _, winid in ipairs(winids) do
             local bufnr = child.api.nvim_win_get_buf(winid)
@@ -44,7 +170,7 @@ describe("Maximize toggle with multiple tabpages", function()
                 error(
                     string.format(
                         "%s: found Agentic filetype '%s' in window %d (buf %d) on tabpage %s",
-                        msg or "Agentic buffer leaked into code window",
+                        msg or "Agentic buffer leaked into editor window",
                         ft,
                         winid,
                         bufnr,
@@ -55,6 +181,124 @@ describe("Maximize toggle with multiple tabpages", function()
         end
     end
 
+    --- @param tabpage number
+    --- @return table
+    local function snapshot_tab_state(tabpage)
+        return child.lua(string.format(
+            [[
+            local tab_id = %d
+            local session = require("agentic.session_registry").sessions[tab_id]
+            return {
+                winlayout = vim.fn.winlayout(vim.api.nvim_tabpage_get_number(tab_id)),
+                is_maximized = session ~= nil
+                    and session.widget._maximize_state ~= nil
+                    or false,
+            }
+        ]],
+            tabpage
+        ))
+    end
+
+    local function toggle_widget()
+        child.lua([[ require("agentic").toggle() ]])
+        child.flush()
+    end
+
+    --- @param tabpage number
+    local function toggle_maximize(tabpage)
+        child.lua(string.format(
+            [[
+            local session = require("agentic.session_registry").sessions[%d]
+            session.widget:_toggle_full_width()
+        ]],
+            tabpage
+        ))
+        child.flush()
+    end
+
+    --- @param tabpage number
+    local function switch_to_tab(tabpage)
+        child.lua(
+            string.format([[ vim.api.nvim_set_current_tabpage(%d) ]], tabpage)
+        )
+        child.flush()
+    end
+
+    --- @return { left: integer, top: integer, bottom: integer }
+    local function create_mixed_editor_layout()
+        return child.lua([[
+            local suffix = tostring(vim.uv.hrtime())
+            local function make_buffer(name, lines, bufhidden)
+                local bufnr = vim.api.nvim_create_buf(true, false)
+                vim.api.nvim_buf_set_name(bufnr, name)
+                vim.bo[bufnr].bufhidden = bufhidden or "hide"
+                vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
+                return bufnr
+            end
+
+            local left = make_buffer("/tmp/agentic-max-left-" .. suffix .. ".lua", {
+                "left-1",
+                "left-2",
+            })
+            vim.api.nvim_win_set_buf(0, left)
+            vim.api.nvim_win_set_cursor(0, { 2, 0 })
+
+            vim.cmd("vsplit")
+            local top = make_buffer("/tmp/agentic-max-top-" .. suffix .. ".lua", {
+                "top-1",
+                "top-2",
+                "top-3",
+            })
+            vim.api.nvim_win_set_buf(0, top)
+            vim.api.nvim_win_set_cursor(0, { 3, 0 })
+
+            vim.cmd("split")
+            local bottom = make_buffer("/tmp/agentic-max-bottom-" .. suffix .. ".lua", {
+                "bottom-1",
+                "bottom-2",
+                "bottom-3",
+                "bottom-4",
+            })
+            vim.api.nvim_win_set_buf(0, bottom)
+            vim.api.nvim_win_set_cursor(0, { 2, 0 })
+
+            return {
+                left = left,
+                top = top,
+                bottom = bottom,
+            }
+        ]])
+    end
+
+    --- @return { wipe: integer, delete: integer }
+    local function create_bufhidden_editor_layout()
+        return child.lua([[
+            local function make_buffer(name, bufhidden)
+                local bufnr = vim.api.nvim_create_buf(true, false)
+                vim.api.nvim_buf_set_name(bufnr, name)
+                vim.bo[bufnr].bufhidden = bufhidden
+                vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {
+                    name,
+                    "content",
+                })
+                return bufnr
+            end
+
+            local wipe_buf = make_buffer("/tmp/agentic-wipe.lua", "wipe")
+            vim.api.nvim_win_set_buf(0, wipe_buf)
+
+            vim.cmd("vsplit")
+            local delete_buf = make_buffer("/tmp/agentic-delete.lua", "delete")
+            vim.api.nvim_win_set_buf(0, delete_buf)
+            vim.api.nvim_win_set_cursor(0, { 2, 0 })
+
+            return {
+                wipe = wipe_buf,
+                delete = delete_buf,
+            }
+        ]])
+    end
+
     before_each(function()
         child.setup()
     end)
@@ -63,262 +307,307 @@ describe("Maximize toggle with multiple tabpages", function()
         child.stop()
     end)
 
-    it(
-        "maximize then hide does not leak prompt buffer into code window (single tab)",
-        function()
-            -- Open widget on tab 1
-            child.lua([[ require("agentic").toggle() ]])
-            child.flush()
+    it("off-tab direct maximize and unmaximize calls are no-ops", function()
+        create_mixed_editor_layout()
+        toggle_widget()
 
-            -- Verify widget is open: should have empty ft, AgenticChat, AgenticInput
-            local filetypes = get_tabpage_filetypes(0)
-            assert.same({ "", "AgenticChat", "AgenticInput" }, filetypes)
+        local tab1_id = child.api.nvim_get_current_tabpage()
+        local before = snapshot_tab_state(tab1_id)
 
-            -- Maximize via direct method call
-            child.lua([[
-            local tab_id = vim.api.nvim_get_current_tabpage()
-            local session = require("agentic.session_registry").sessions[tab_id]
-            session.widget:_toggle_full_width()
-        ]])
-            child.flush()
+        child.cmd("tabnew")
+        local tab2_id = child.api.nvim_get_current_tabpage()
 
-            -- After maximize: only AgenticChat and AgenticInput should remain
-            -- The empty-filetype (editor) window should be gone
-            filetypes = get_tabpage_filetypes(0)
-            assert.same({ "AgenticChat", "AgenticInput" }, filetypes)
+        toggle_maximize(tab1_id)
 
-            -- Now hide the widget (toggle off) while maximized
-            child.lua([[ require("agentic").toggle() ]])
-            child.flush()
+        local after_off_tab_maximize = snapshot_tab_state(tab1_id)
+        assert.same(before, after_off_tab_maximize)
+        assert.equal(tab2_id, child.api.nvim_get_current_tabpage())
 
-            -- After hide: should have exactly 1 window, and it should NOT be an Agentic buffer
-            local tab1_id = child.api.nvim_get_current_tabpage()
-            local win_count = #child.api.nvim_tabpage_list_wins(tab1_id)
-            assert.equal(1, win_count)
-            assert_no_agentic_in_code_windows(
-                tab1_id,
-                "After maximize+hide on single tab"
-            )
-        end
-    )
+        switch_to_tab(tab1_id)
+        toggle_maximize(tab1_id)
+        local maximized = snapshot_tab_state(tab1_id)
+        assert.is_true(maximized.is_maximized)
+
+        switch_to_tab(tab2_id)
+        toggle_maximize(tab1_id)
+
+        local after_off_tab_restore = snapshot_tab_state(tab1_id)
+        assert.same(maximized, after_off_tab_restore)
+        assert.equal(tab2_id, child.api.nvim_get_current_tabpage())
+    end)
 
     it(
-        "maximize on tab1, hide widget, does not show tab2 prompt in code window",
+        "round-trips a mixed split tree with the same buffers and focus",
         function()
-            -- Tab 1: open widget
-            child.lua([[ require("agentic").toggle() ]])
-            child.flush()
+            local layout = create_mixed_editor_layout()
+            toggle_widget()
 
-            local tab1_id = child.api.nvim_get_current_tabpage()
+            local tab_id = child.api.nvim_get_current_tabpage()
+            local before = snapshot_editor_layout(tab_id)
 
-            -- Tab 1: maximize
-            child.lua([[
-            local tab_id = vim.api.nvim_get_current_tabpage()
-            local session = require("agentic.session_registry").sessions[tab_id]
-            session.widget:_toggle_full_width()
-        ]])
-            child.flush()
+            toggle_maximize(tab_id)
+            toggle_maximize(tab_id)
 
-            -- Tab 1 should be maximized: only AgenticChat, AgenticInput
-            local filetypes = get_tabpage_filetypes(tab1_id)
-            assert.same({ "AgenticChat", "AgenticInput" }, filetypes)
+            local after = snapshot_editor_layout(tab_id)
+            assert.same(before, after)
 
-            -- Create tab 2 and open widget there
-            child.cmd("tabnew")
-            local tab2_id = child.api.nvim_get_current_tabpage()
-            child.lua([[ require("agentic").toggle() ]])
-            child.flush()
-
-            -- Tab 2 should have: empty ft, AgenticChat, AgenticInput
-            filetypes = get_tabpage_filetypes(tab2_id)
-            assert.same({ "", "AgenticChat", "AgenticInput" }, filetypes)
-
-            -- Switch back to tab 1
-            child.lua(
-                string.format(
-                    [[ vim.api.nvim_set_current_tabpage(%d) ]],
-                    tab1_id
-                )
-            )
-            child.flush()
-
-            -- Tab 1: hide widget while maximized
-            child.lua([[ require("agentic").toggle() ]])
-            child.flush()
-
-            -- Tab 1 should have exactly 1 window, no Agentic buffers
-            local win_count = #child.api.nvim_tabpage_list_wins(tab1_id)
-            assert.equal(1, win_count)
-            assert_no_agentic_in_code_windows(
-                tab1_id,
-                "Tab1 after maximize+hide should not show Tab2's widget buffers"
-            )
-        end
-    )
-
-    it(
-        "unmaximize on tab1 does not leak tab2 widget buffers when saved buffers are wiped",
-        function()
-            -- Open a real file buffer so we have something to maximize away
-            child.cmd("edit /tmp/agentic_test_maximize.txt")
-            child.flush()
-
-            -- Tab 1: open widget
-            child.lua([[ require("agentic").toggle() ]])
-            child.flush()
-
-            local tab1_id = child.api.nvim_get_current_tabpage()
-
-            -- Tab 1: maximize
-            child.lua([[
-            local tab_id = vim.api.nvim_get_current_tabpage()
-            local session = require("agentic.session_registry").sessions[tab_id]
-            session.widget:_toggle_full_width()
-        ]])
-            child.flush()
-
-            -- Create tab 2 with widget
-            child.cmd("tabnew")
-            child.lua([[ require("agentic").toggle() ]])
-            child.flush()
-
-            -- Wipe the file buffer that was saved during maximize on tab 1
-            child.lua([[
-            for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
-                local name = vim.api.nvim_buf_get_name(bufnr)
-                if name:match("agentic_test_maximize") then
-                    vim.api.nvim_buf_delete(bufnr, { force = true })
-                end
-            end
-        ]])
-            child.flush()
-
-            -- Switch back to tab 1
-            child.lua(
-                string.format(
-                    [[ vim.api.nvim_set_current_tabpage(%d) ]],
-                    tab1_id
-                )
-            )
-            child.flush()
-
-            -- Tab 1: unmaximize — saved buffer is gone, should use fallback
-            child.lua([[
-            local tab_id = vim.api.nvim_get_current_tabpage()
-            local session = require("agentic.session_registry").sessions[tab_id]
-            session.widget:_toggle_full_width()
-        ]])
-            child.flush()
-
-            -- The restored/fallback window should NOT be an Agentic buffer from tab 2.
-            -- Tab 1 should have: AgenticChat, AgenticInput (its own widget) + at least 1 non-agentic window.
-            -- The non-agentic window should be a scratch buffer or restored file, NOT another tab's widget.
-            local non_widget_fts = child.lua([[
-            local tab_id = vim.api.nvim_get_current_tabpage()
-            local session = require("agentic.session_registry").sessions[tab_id]
-            local widget_bufs = {}
-            for _, bufnr in pairs(session.widget.buf_nrs) do
-                widget_bufs[bufnr] = true
-            end
-            local result = {}
-            for _, winid in ipairs(vim.api.nvim_tabpage_list_wins(tab_id)) do
-                local bufnr = vim.api.nvim_win_get_buf(winid)
-                if not widget_bufs[bufnr] then
-                    table.insert(result, vim.bo[bufnr].filetype)
-                end
-            end
-            return result
-        ]])
-
-            -- There should be at least 1 non-widget window
-            assert.is_true(#non_widget_fts >= 1)
-            -- And none of them should be Agentic filetypes (from any tab)
-            for _, ft in ipairs(non_widget_fts) do
-                assert.is_false(
-                    AGENTIC_FILETYPES[ft] or false,
-                    "Non-widget window on Tab 1 has Agentic filetype: " .. ft
-                )
-            end
-        end
-    )
-
-    it(
-        "find_first_non_widget_window ignores other tab's widget buffers",
-        function()
-            -- Tab 1: open widget
-            child.lua([[ require("agentic").toggle() ]])
-            child.flush()
-
-            local tab1_id = child.api.nvim_get_current_tabpage()
-
-            -- Create tab 2 with widget
-            child.cmd("tabnew")
-            child.lua([[ require("agentic").toggle() ]])
-            child.flush()
-
-            -- Switch back to tab 1
-            child.lua(
-                string.format(
-                    [[ vim.api.nvim_set_current_tabpage(%d) ]],
-                    tab1_id
-                )
-            )
-            child.flush()
-
-            -- Force a non-widget window on tab 1 to display tab 2's input buffer
-            -- (simulating the bug where a cross-tab buffer leaks in)
-            local result = child.lua([[
-            local tab_id = vim.api.nvim_get_current_tabpage()
-            local session = require("agentic.session_registry").sessions[tab_id]
-
-            -- Find the non-widget window on tab 1
-            local fallback_winid = session.widget:find_first_non_widget_window()
-            if not fallback_winid then
-                return { error = "no non-widget window found" }
-            end
-
-            -- Get tab 2's input buffer
-            local all_tabs = vim.api.nvim_list_tabpages()
-            local other_tab = nil
-            for _, t in ipairs(all_tabs) do
-                if t ~= tab_id then
-                    other_tab = t
-                    break
-                end
-            end
-
-            if not other_tab then
-                return { error = "no other tab found" }
-            end
-
-            local other_session = require("agentic.session_registry").sessions[other_tab]
-            if not other_session then
-                return { error = "no session on other tab" }
-            end
-
-            local other_input_buf = other_session.widget.buf_nrs.input
-
-            -- Set the non-widget window to show tab 2's input buffer
-            vim.wo[fallback_winid].winfixbuf = false
-            vim.api.nvim_win_set_buf(fallback_winid, other_input_buf)
-
-            -- Now try to find non-widget window again
-            local found = session.widget:find_first_non_widget_window()
-
+            local current = child.lua([[
             return {
-                found_winid = found,
-                injected_winid = fallback_winid,
-                other_input_buf = other_input_buf,
+                bufnr = vim.api.nvim_get_current_buf(),
+                cursor = vim.api.nvim_win_get_cursor(0),
             }
         ]])
-
-            -- find_first_non_widget_window should NOT return the window showing tab 2's input buffer
-            -- If it does, that's the bug: it doesn't recognize cross-tab widget buffers
-            if result and result.found_winid then
-                -- If it found a window, it should NOT be the one we injected with the other tab's buffer
-                assert.are_not.equal(result.found_winid, result.injected_winid)
-            end
-            -- If it returns nil, that's correct behavior (no valid non-widget window)
+            assert.equal(layout.bottom, current.bufnr)
+            assert.equal(2, current.cursor[1])
         end
     )
+
+    it("restores editor window-local options like statuscolumn", function()
+        local layout = create_mixed_editor_layout()
+        local statuscolumn = "%=%l%s"
+
+        child.lua(string.format(
+            [[
+            local winid = vim.fn.bufwinid(%d)
+            vim.api.nvim_set_option_value("statuscolumn", %q, { win = winid })
+            vim.api.nvim_set_option_value("signcolumn", "yes:2", { win = winid })
+            vim.api.nvim_set_option_value("number", true, { win = winid })
+            vim.api.nvim_set_option_value("relativenumber", true, { win = winid })
+            vim.api.nvim_set_option_value("foldcolumn", "2", { win = winid })
+        ]],
+            layout.bottom,
+            statuscolumn
+        ))
+        child.flush()
+
+        toggle_widget()
+
+        local tab_id = child.api.nvim_get_current_tabpage()
+        local before = snapshot_window_options_for_buf(layout.bottom)
+
+        toggle_maximize(tab_id)
+        toggle_maximize(tab_id)
+
+        local after = snapshot_window_options_for_buf(layout.bottom)
+        assert.same(before, after)
+    end)
+
+    it(
+        "hide while maximized restores the editor layout and repeated cycles do not duplicate windows",
+        function()
+            create_mixed_editor_layout()
+            toggle_widget()
+
+            local tab_id = child.api.nvim_get_current_tabpage()
+            local before = snapshot_editor_layout(tab_id)
+            local before_count = count_editor_windows(tab_id)
+
+            toggle_maximize(tab_id)
+            toggle_widget()
+
+            assert.same(before, snapshot_editor_layout(tab_id))
+            assert.equal(before_count, count_editor_windows(tab_id))
+            assert_no_agentic_in_editor_windows(tab_id, "After maximize + hide")
+
+            toggle_widget()
+            toggle_maximize(tab_id)
+            toggle_widget()
+
+            assert.same(before, snapshot_editor_layout(tab_id))
+            assert.equal(before_count, count_editor_windows(tab_id))
+            assert_no_agentic_in_editor_windows(
+                tab_id,
+                "After maximize + hide + show + maximize + hide"
+            )
+        end
+    )
+
+    it(
+        "restores bufhidden=wipe and bufhidden=delete after maximize + hide",
+        function()
+            local buffers = create_bufhidden_editor_layout()
+            toggle_widget()
+
+            local tab_id = child.api.nvim_get_current_tabpage()
+            local before = snapshot_editor_layout(tab_id)
+
+            toggle_maximize(tab_id)
+            toggle_widget()
+
+            local state = child.lua(
+                string.format(
+                    [[
+            return {
+                wipe_valid = vim.api.nvim_buf_is_valid(%d),
+                delete_valid = vim.api.nvim_buf_is_valid(%d),
+                wipe_bufhidden = vim.bo[%d].bufhidden,
+                delete_bufhidden = vim.bo[%d].bufhidden,
+            }
+        ]],
+                    buffers.wipe,
+                    buffers.delete,
+                    buffers.wipe,
+                    buffers.delete
+                )
+            )
+
+            assert.same(before, snapshot_editor_layout(tab_id))
+            assert.is_true(state.wipe_valid)
+            assert.is_true(state.delete_valid)
+            assert.equal("wipe", state.wipe_bufhidden)
+            assert.equal("delete", state.delete_bufhidden)
+        end
+    )
+
+    it(
+        "new_session clears maximize state and restores bufhidden overrides",
+        function()
+            local buffers = create_bufhidden_editor_layout()
+            toggle_widget()
+
+            local tab_id = child.api.nvim_get_current_tabpage()
+            local before = snapshot_editor_layout(tab_id)
+
+            toggle_maximize(tab_id)
+
+            child.lua([[ require("agentic").new_session() ]])
+            child.flush()
+
+            local state = child.lua(
+                string.format(
+                    [[
+            local session = require("agentic.session_registry").sessions[%d]
+            return {
+                is_maximized = session.widget._maximize_state ~= nil,
+                wipe_valid = vim.api.nvim_buf_is_valid(%d),
+                delete_valid = vim.api.nvim_buf_is_valid(%d),
+                wipe_bufhidden = vim.bo[%d].bufhidden,
+                delete_bufhidden = vim.bo[%d].bufhidden,
+            }
+        ]],
+                    tab_id,
+                    buffers.wipe,
+                    buffers.delete,
+                    buffers.wipe,
+                    buffers.delete
+                )
+            )
+
+            assert.same(before, snapshot_editor_layout(tab_id))
+            assert.is_false(state.is_maximized)
+            assert.is_true(state.wipe_valid)
+            assert.is_true(state.delete_valid)
+            assert.equal("wipe", state.wipe_bufhidden)
+            assert.equal("delete", state.delete_bufhidden)
+        end
+    )
+
+    it(
+        "destroy_session clears maximize state and restores bufhidden overrides",
+        function()
+            local buffers = create_bufhidden_editor_layout()
+            toggle_widget()
+
+            local tab_id = child.api.nvim_get_current_tabpage()
+            local before = snapshot_editor_layout(tab_id)
+
+            toggle_maximize(tab_id)
+
+            child.lua(
+                string.format(
+                    [[ require("agentic.session_registry").destroy_session(%d) ]],
+                    tab_id
+                )
+            )
+            child.flush()
+
+            local state = child.lua(
+                string.format(
+                    [[
+            return {
+                session_exists = require("agentic.session_registry").sessions[%d] ~= nil,
+                wipe_valid = vim.api.nvim_buf_is_valid(%d),
+                delete_valid = vim.api.nvim_buf_is_valid(%d),
+                wipe_bufhidden = vim.bo[%d].bufhidden,
+                delete_bufhidden = vim.bo[%d].bufhidden,
+            }
+        ]],
+                    tab_id,
+                    buffers.wipe,
+                    buffers.delete,
+                    buffers.wipe,
+                    buffers.delete
+                )
+            )
+
+            assert.same(before, snapshot_editor_layout(tab_id))
+            assert.is_false(state.session_exists)
+            assert.is_true(state.wipe_valid)
+            assert.is_true(state.delete_valid)
+            assert.equal("wipe", state.wipe_bufhidden)
+            assert.equal("delete", state.delete_bufhidden)
+            assert_no_agentic_in_editor_windows(
+                tab_id,
+                "After destroy_session on a maximized widget"
+            )
+        end
+    )
+
+    it(
+        "never restores another tab's Agentic buffers into editor windows",
+        function()
+            create_mixed_editor_layout()
+            toggle_widget()
+
+            local tab1_id = child.api.nvim_get_current_tabpage()
+            toggle_maximize(tab1_id)
+
+            child.cmd("tabnew")
+            create_mixed_editor_layout()
+            toggle_widget()
+            local tab2_id = child.api.nvim_get_current_tabpage()
+
+            local tab2_filetypes = get_tabpage_filetypes(tab2_id)
+            assert.is_true(#tab2_filetypes >= 2)
+
+            switch_to_tab(tab1_id)
+            toggle_widget()
+
+            assert_no_agentic_in_editor_windows(
+                tab1_id,
+                "Tab1 after hiding a maximized widget while Tab2 also has Agentic open"
+            )
+        end
+    )
+
+    it("aborts maximize cleanly when a quickfix window is open", function()
+        create_mixed_editor_layout()
+        child.lua([[
+            vim.fn.setqflist({
+                {
+                    bufnr = vim.api.nvim_get_current_buf(),
+                    lnum = 1,
+                    col = 1,
+                    text = "quickfix entry",
+                },
+            })
+            vim.cmd("copen")
+        ]])
+        child.flush()
+
+        toggle_widget()
+
+        local tab_id = child.api.nvim_get_current_tabpage()
+        local before = snapshot_tab_state(tab_id)
+
+        toggle_maximize(tab_id)
+
+        local after = snapshot_tab_state(tab_id)
+        assert.same(before, after)
+        assert.is_false(after.is_maximized)
+
+        local filetypes = get_tabpage_filetypes(tab_id)
+        assert.is_true(vim.tbl_contains(filetypes, "qf"))
+        assert.is_true(vim.tbl_contains(filetypes, "AgenticChat"))
+    end)
 end)
