@@ -318,7 +318,10 @@ function SessionManager:_on_session_update(update)
         end
     elseif update.sessionUpdate == "available_commands_update" then
         --- @cast update agentic.acp.AvailableCommandsUpdate
-        SlashCommands.setCommands(update.availableCommands)
+        SlashCommands.setCommands(
+            self.widget.buf_nrs.input,
+            update.availableCommands
+        )
     elseif update.sessionUpdate == "current_mode_update" then
         --- @cast update agentic.acp.CurrentModeUpdate
         -- only for legacy modes, not for config_options
@@ -1591,7 +1594,7 @@ function SessionManager:_cancel_session()
 
     self.session_id = nil
     self.permission_manager:clear()
-    SlashCommands.setCommands({})
+    SlashCommands.setCommands(self.widget.buf_nrs.input, {})
 
     self.chat_history = ChatHistory:new()
     self._history_to_send = nil

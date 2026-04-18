@@ -16,14 +16,30 @@ local SlashCommands = {}
 --- Validates each command has required fields, skips invalid commands and commands with spaces
 --- Filters out `clear` command (handled by specific agents internally)
 --- Automatically adds `/new` command if not provided by agent
---- @param available_commands agentic.acp.AvailableCommand[]
-function SlashCommands.setCommands(available_commands)
+--- @param bufnr integer|agentic.acp.AvailableCommand[]|nil
+--- @param available_commands agentic.acp.AvailableCommand[]|nil
+function SlashCommands.setCommands(bufnr, available_commands)
+    --- @type integer|nil
+    local resolved_bufnr
+    --- @type agentic.acp.AvailableCommand[]
+    local resolved_available_commands
+
+    if available_commands == nil then
+        --- @cast bufnr agentic.acp.AvailableCommand[]
+        resolved_available_commands = bufnr
+        resolved_bufnr = vim.api.nvim_get_current_buf()
+    else
+        --- @cast bufnr integer|nil
+        resolved_bufnr = bufnr
+        resolved_available_commands = available_commands
+    end
+
     --- @type agentic.acp.CompletionItem[]
     local commands = {}
 
     local has_new_command = false
 
-    for _, cmd in ipairs(available_commands) do
+    for _, cmd in ipairs(resolved_available_commands) do
         if
             cmd.name
             and cmd.description
@@ -59,7 +75,7 @@ function SlashCommands.setCommands(available_commands)
         table.insert(commands, new_command)
     end
 
-    States.setSlashCommands(commands)
+    States.setSlashCommands(resolved_bufnr, commands)
 end
 
 --- Setup native Neovim completion for slash commands in the input buffer
@@ -80,7 +96,7 @@ function SlashCommands.setup_completion(bufnr)
     vim.api.nvim_create_autocmd("TextChangedI", {
         buffer = bufnr,
         callback = function()
-            local commands = States.getSlashCommands()
+            local commands = States.getSlashCommands(bufnr)
             if #commands == 0 then
                 return
             end
@@ -119,7 +135,7 @@ function SlashCommands.complete_func(findstart, _base)
         return 1
     end
 
-    return States.getSlashCommands()
+    return States.getSlashCommands(vim.api.nvim_get_current_buf())
 end
 
 return SlashCommands
