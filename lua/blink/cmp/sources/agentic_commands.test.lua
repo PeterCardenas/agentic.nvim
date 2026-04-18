@@ -2,6 +2,20 @@ local assert = require("tests.helpers.assert")
 
 local States = require("agentic.states")
 
+local function wait_for_insert_mode()
+    local entered_insert = vim.wait(100, function()
+        return vim.api.nvim_get_mode().mode:sub(1, 1) == "i"
+    end, 10)
+    assert.is_true(entered_insert)
+end
+
+local function wait_for_normal_mode()
+    local entered_normal = vim.wait(100, function()
+        return vim.api.nvim_get_mode().mode == "n"
+    end, 10)
+    assert.is_true(entered_normal)
+end
+
 describe("blink.cmp.sources.agentic_commands", function()
     --- @type blink.cmp.AgenticCommandsSource
     local source
@@ -48,6 +62,12 @@ describe("blink.cmp.sources.agentic_commands", function()
         it(
             "streams buffer-local slash command updates without duplicates",
             function()
+                vim.api.nvim_set_current_buf(bufnr)
+                vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, { "/" })
+                vim.api.nvim_win_set_cursor(0, { 1, 1 })
+                vim.cmd("startinsert")
+                wait_for_insert_mode()
+
                 --- @type blink.cmp.AgenticCommands.Context
                 local context = {
                     bufnr = bufnr,
@@ -174,5 +194,115 @@ describe("blink.cmp.sources.agentic_commands", function()
                 assert.equal(3, #responses)
             end
         )
+
+        it("uses the current prompt context for streamed updates", function()
+            vim.api.nvim_set_current_buf(bufnr)
+            vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, { "/" })
+            vim.api.nvim_win_set_cursor(0, { 1, 1 })
+            vim.cmd("startinsert")
+            wait_for_insert_mode()
+
+            --- @type blink.cmp.AgenticCommands.Context
+            local context = {
+                bufnr = bufnr,
+                cursor = { 1, 1 },
+                line = "/",
+            }
+
+            --- @type blink.cmp.AgenticCommands.CompletionResponse[]
+            local responses = {}
+            local cancel = source:get_completions(context, function(response)
+                table.insert(responses, response)
+            end)
+
+            vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, { "/re" })
+            vim.api.nvim_win_set_cursor(0, { 1, 3 })
+
+            States.setSlashCommands(bufnr, {
+                {
+                    word = "review",
+                    menu = "Review code",
+                    info = "Review code",
+                    kind = "/",
+                    icase = 1,
+                },
+            })
+
+            assert.equal(2, #responses)
+            local update_response = assert.not_nil(responses[2])
+            local update_item = assert.not_nil(update_response.items[1])
+            local text_edit = assert.not_nil(update_item.textEdit)
+            assert.equal(3, text_edit.range["end"].character)
+
+            local cancel_fn = assert.not_nil(cancel)
+            cancel_fn()
+            vim.cmd("stopinsert")
+            wait_for_normal_mode()
+        end)
+
+        it("stops streaming updates after leaving insert mode", function()
+            vim.api.nvim_set_current_buf(bufnr)
+            vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, { "/" })
+            vim.api.nvim_win_set_cursor(0, { 1, 1 })
+            vim.cmd("startinsert")
+            wait_for_insert_mode()
+
+            --- @type blink.cmp.AgenticCommands.Context
+            local context = {
+                bufnr = bufnr,
+                cursor = { 1, 1 },
+                line = "/",
+            }
+
+            --- @type blink.cmp.AgenticCommands.CompletionResponse[]
+            local responses = {}
+            local cancel = source:get_completions(context, function(response)
+                table.insert(responses, response)
+            end)
+
+            vim.cmd("stopinsert")
+            wait_for_normal_mode()
+
+            States.setSlashCommands(bufnr, {
+                {
+                    word = "review",
+                    menu = "Review code",
+                    info = "Review code",
+                    kind = "/",
+                    icase = 1,
+                },
+            })
+
+            assert.equal(1, #responses)
+
+            vim.cmd("startinsert")
+            wait_for_insert_mode()
+            vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, { "/" })
+            vim.api.nvim_win_set_cursor(0, { 1, 1 })
+
+            States.setSlashCommands(bufnr, {
+                {
+                    word = "review",
+                    menu = "Review code",
+                    info = "Review code",
+                    kind = "/",
+                    icase = 1,
+                },
+                {
+                    word = "focus",
+                    menu = "Focus prompt",
+                    info = "Focus prompt",
+                    kind = "/",
+                    icase = 1,
+                },
+            })
+
+            assert.equal(1, #responses)
+
+            local cancel_fn = assert.not_nil(cancel)
+            cancel_fn()
+            vim.cmd("stopinsert")
+            wait_for_normal_mode()
+        end)
     end)
 end)

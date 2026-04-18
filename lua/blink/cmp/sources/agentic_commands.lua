@@ -106,17 +106,57 @@ function Source:get_trigger_characters()
     return { "/" }
 end
 
+--- @param context blink.cmp.AgenticCommands.Context
+--- @return boolean
+local function is_slash_context(context)
+    --- @diagnostic disable-next-line: need-check-nil
+    local cursor_col = context.cursor[2]
+    local text_to_cursor = context.line:sub(1, cursor_col)
+    local current_word = text_to_cursor:match("%S*$") or ""
+    return current_word:match("^/") ~= nil
+end
+
+--- @param bufnr integer
+--- @return blink.cmp.AgenticCommands.Context|nil
+local function get_live_context(bufnr)
+    if not vim.api.nvim_buf_is_valid(bufnr) then
+        return nil
+    end
+
+    local mode = vim.api.nvim_get_mode().mode
+    if mode ~= "i" and mode ~= "ic" then
+        return nil
+    end
+
+    if vim.api.nvim_get_current_buf() ~= bufnr then
+        return nil
+    end
+
+    if vim.bo[bufnr].filetype ~= "AgenticInput" then
+        return nil
+    end
+
+    --- @type blink.cmp.AgenticCommands.Context
+    local context = {
+        bufnr = bufnr,
+        cursor = vim.api.nvim_win_get_cursor(0),
+        line = vim.api.nvim_get_current_line(),
+    }
+
+    if not is_slash_context(context) then
+        return nil
+    end
+
+    return context
+end
+
 --- Only show items when the cursor is within a slash command (at start or after whitespace)
 --- @param context blink.cmp.AgenticCommands.Context
 --- @param _items table[]
 --- @return boolean
 function Source:should_show_items(context, _items)
     local _ = self
-    --- @diagnostic disable-next-line: need-check-nil
-    local cursor_col = context.cursor[2]
-    local text_to_cursor = context.line:sub(1, cursor_col)
-    local current_word = text_to_cursor:match("%S*$") or ""
-    return current_word:match("^/") ~= nil
+    return is_slash_context(context)
 end
 
 --- Return slash command completions from shared state
@@ -132,6 +172,7 @@ function Source:get_completions(context, callback)
     --- @type table<string, boolean>
     local seen_words = {}
     local initial_response = build_response(context, commands, seen_words)
+    local cancel_updates = function() end
 
     if #commands == 0 then
         initial_response.is_incomplete_forward = true
@@ -140,13 +181,28 @@ function Source:get_completions(context, callback)
 
     callback(initial_response)
 
-    return States.onSlashCommandsUpdate(bufnr, function(updated_commands)
-        local update_response =
-            build_response(context, updated_commands, seen_words)
-        if #update_response.items > 0 then
-            callback(update_response)
+    cancel_updates = States.onSlashCommandsUpdate(
+        bufnr,
+        function(updated_commands)
+            local live_context = get_live_context(bufnr)
+            if not live_context then
+                cancel_updates()
+                cancel_updates = function() end
+                return
+            end
+
+            local update_response =
+                build_response(live_context, updated_commands, seen_words)
+            if #update_response.items > 0 then
+                callback(update_response)
+            end
         end
-    end)
+    )
+
+    return function()
+        cancel_updates()
+        cancel_updates = function() end
+    end
 end
 
 return Source
