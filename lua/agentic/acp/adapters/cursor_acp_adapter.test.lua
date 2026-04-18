@@ -87,6 +87,21 @@ describe("agentic.acp.adapters.CursorACPAdapter", function()
         assert.equal("/tmp/example.lua:10-14", argument)
     end)
 
+    it("formats read offsets as 1-indexed line ranges", function()
+        local adapter = new_adapter()
+        local argument
+
+        run_in_fast_event(function()
+            argument = adapter:_format_read_argument({
+                file_path = "/tmp/example.lua",
+                offset = 35,
+                limit = 20,
+            }, nil)
+        end)
+
+        assert.equal("/tmp/example.lua:36-55", argument)
+    end)
+
     it("formats search arguments from query and path metadata", function()
         local adapter = new_adapter()
         local argument
@@ -102,6 +117,24 @@ describe("agentic.acp.adapters.CursorACPAdapter", function()
         assert.equal("MessageWriter path=/tmp/project glob=*.lua", argument)
     end)
 
+    it("formats search cwd paths as dot", function()
+        local adapter = new_adapter()
+        local argument
+        local cwd_stub = spy.stub(vim.uv, "cwd")
+        cwd_stub:returns("/tmp/project")
+
+        run_in_fast_event(function()
+            argument = adapter:_format_search_argument({
+                query = "MessageWriter",
+                path = "/tmp/project",
+                glob = "*.lua",
+            }, nil)
+        end)
+
+        assert.equal("MessageWriter path=. glob=*.lua", argument)
+        cwd_stub:revert()
+    end)
+
     it("strips duplicated kind from fallback read title", function()
         local adapter = new_adapter()
         local argument
@@ -112,6 +145,41 @@ describe("agentic.acp.adapters.CursorACPAdapter", function()
 
         assert.equal("lua/init.lua", argument)
     end)
+
+    it(
+        "strips duplicated kind and backticks from fallback edit title",
+        function()
+            local adapter = new_adapter()
+            local handlers, on_tool_call = new_handlers()
+            adapter.subscribers["session-1"] = handlers
+
+            run_in_fast_event(function()
+                adapter:_handle_message({
+                    jsonrpc = "2.0",
+                    method = "session/update",
+                    params = {
+                        sessionId = "session-1",
+                        update = {
+                            sessionUpdate = "tool_call",
+                            toolCallId = "tool-1",
+                            kind = "edit",
+                            status = "pending",
+                            title = "Edit `lua/init.lua:1-2`",
+                        },
+                    },
+                })
+            end)
+
+            local notified = vim.wait(1000, function()
+                return on_tool_call.call_count == 1
+            end, 10)
+            assert.is_true(notified)
+
+            local call_args = assert.not_nil(on_tool_call.calls[1])
+            local message = assert.not_nil(call_args[1])
+            assert.equal("lua/init.lua:1-2", message.argument)
+        end
+    )
 
     it("does not build edit diff when raw input has no diff payload", function()
         local adapter = new_adapter()
@@ -180,6 +248,46 @@ describe("agentic.acp.adapters.CursorACPAdapter", function()
         local message = assert.not_nil(call_args[1])
         assert.equal("tool-1", message.tool_call_id)
         assert.equal("/tmp/example.lua:10-14", message.argument)
+    end)
+
+    it("formats edit tool calls with line ranges", function()
+        local adapter = new_adapter()
+        local handlers, on_tool_call = new_handlers()
+        adapter.subscribers["session-1"] = handlers
+
+        run_in_fast_event(function()
+            adapter:_handle_message({
+                jsonrpc = "2.0",
+                method = "session/update",
+                params = {
+                    sessionId = "session-1",
+                    update = {
+                        sessionUpdate = "tool_call",
+                        toolCallId = "tool-1",
+                        kind = "edit",
+                        status = "pending",
+                        title = "Edit /tmp/example.lua",
+                        rawInput = {
+                            file_path = "/tmp/example.lua",
+                            start_line = 3,
+                            end_line = 4,
+                            old_string = "old content",
+                            new_string = "new content",
+                        },
+                    },
+                },
+            })
+        end)
+
+        local notified = vim.wait(1000, function()
+            return on_tool_call.call_count == 1
+        end, 10)
+        assert.is_true(notified)
+
+        local call_args = assert.not_nil(on_tool_call.calls[1])
+        local message = assert.not_nil(call_args[1])
+        assert.equal("tool-1", message.tool_call_id)
+        assert.equal("/tmp/example.lua:3-4", message.argument)
     end)
 
     it("handles tool_call_update notifications from fast events", function()

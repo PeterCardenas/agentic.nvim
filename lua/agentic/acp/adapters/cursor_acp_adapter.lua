@@ -94,29 +94,31 @@ local function strip_title_prefix(kind, title)
     return trimmed
 end
 
---- @param raw_input agentic.acp.CursorRawInput|nil
---- @param title string|nil
+--- @param value string|nil
 --- @return string
-function CursorACPAdapter:_format_read_argument(raw_input, title)
-    local fallback = strip_title_prefix("read", title)
-    if not raw_input or vim.tbl_isempty(raw_input) then
-        return fallback
-    end
+local function strip_wrapping_backticks(value)
+    local trimmed = vim.trim(value or "")
+    return trimmed:match("^`(.+)`$") or trimmed
+end
 
-    local file_path = raw_input.file_path
-    local base_path = fallback
-    if type(file_path) == "string" and file_path ~= "" then
-        base_path = FileSystem.to_smart_path(file_path)
-    end
-    if base_path == "" then
-        return fallback
+--- @param raw_input agentic.acp.CursorRawInput|nil
+--- @return integer|nil start_line
+--- @return integer|nil end_line
+local function resolve_line_range(raw_input)
+    if not raw_input or vim.tbl_isempty(raw_input) then
+        return nil, nil
     end
 
     local start_line = to_integer(raw_input.line)
         or to_integer(raw_input.start_line)
-        or to_integer(raw_input.offset)
-    local end_line = to_integer(raw_input.end_line)
+    if not start_line then
+        local offset = to_integer(raw_input.offset)
+        if offset and offset >= 0 then
+            start_line = offset + 1
+        end
+    end
 
+    local end_line = to_integer(raw_input.end_line)
     if start_line and not end_line then
         local limit = to_integer(raw_input.limit)
         if limit and limit > 0 then
@@ -124,6 +126,58 @@ function CursorACPAdapter:_format_read_argument(raw_input, title)
         end
     end
 
+    return start_line, end_line
+end
+
+--- @param path string|nil
+--- @return string
+local function to_display_path(path)
+    if type(path) ~= "string" or path == "" then
+        return ""
+    end
+
+    return FileSystem.to_smart_path(path)
+end
+
+--- @param path string|nil
+--- @return string
+local function to_search_display_path(path)
+    if type(path) ~= "string" or path == "" then
+        return ""
+    end
+
+    local smart_path = FileSystem.to_smart_path(path)
+    local cwd = vim.uv.cwd()
+    if type(cwd) == "string" and cwd ~= "" then
+        local absolute_path = vim.fn.fnamemodify(path, ":p")
+        local absolute_cwd = vim.fn.fnamemodify(cwd, ":p")
+        if absolute_path == absolute_cwd then
+            return "."
+        end
+    end
+
+    return smart_path
+end
+
+--- @param kind string
+--- @param raw_input agentic.acp.CursorRawInput|nil
+--- @param title string|nil
+--- @return string
+local function format_file_argument(kind, raw_input, title)
+    local fallback = strip_wrapping_backticks(strip_title_prefix(kind, title))
+    if not raw_input or vim.tbl_isempty(raw_input) then
+        return fallback
+    end
+
+    local base_path = to_display_path(raw_input.file_path or raw_input.path)
+    if base_path == "" then
+        base_path = fallback
+    end
+    if base_path == "" then
+        return fallback
+    end
+
+    local start_line, end_line = resolve_line_range(raw_input)
     if start_line and start_line > 0 then
         if end_line and end_line >= start_line then
             return string.format("%s:%d-%d", base_path, start_line, end_line)
@@ -137,8 +191,16 @@ end
 --- @param raw_input agentic.acp.CursorRawInput|nil
 --- @param title string|nil
 --- @return string
+function CursorACPAdapter:_format_read_argument(raw_input, title)
+    return format_file_argument("read", raw_input, title)
+end
+
+--- @param raw_input agentic.acp.CursorRawInput|nil
+--- @param title string|nil
+--- @return string
 function CursorACPAdapter:_format_search_argument(raw_input, title)
-    local fallback = strip_title_prefix("search", title)
+    local fallback =
+        strip_wrapping_backticks(strip_title_prefix("search", title))
     if not raw_input or vim.tbl_isempty(raw_input) then
         return fallback
     end
@@ -155,8 +217,9 @@ function CursorACPAdapter:_format_search_argument(raw_input, title)
     if type(query) == "string" and query ~= "" then
         table.insert(parts, query)
     end
-    if type(path) == "string" and path ~= "" then
-        table.insert(parts, "path=" .. FileSystem.to_smart_path(path))
+    local search_path = to_search_display_path(path)
+    if search_path ~= "" then
+        table.insert(parts, "path=" .. search_path)
     end
     if type(glob) == "string" and glob ~= "" then
         table.insert(parts, "glob=" .. glob)
@@ -292,13 +355,21 @@ end
 --- @param update agentic.acp.CursorToolCallMessage
 function CursorACPAdapter:__handle_tool_call(session_id, update)
     local kind = update.kind
+    local argument = update.title
+    if kind == "read" then
+        argument = self:_format_read_argument(nil, update.title)
+    elseif kind == "edit" then
+        argument = format_file_argument("edit", nil, update.title)
+    elseif kind == "search" then
+        argument = self:_format_search_argument(nil, update.title)
+    end
 
     --- @type agentic.ui.MessageWriter.ToolCallBlock
     local message = {
         tool_call_id = update.toolCallId,
         kind = kind,
         status = update.status,
-        argument = update.title,
+        argument = argument,
     }
 
     if update.rawInput and not vim.tbl_isempty(update.rawInput) then
@@ -307,11 +378,8 @@ function CursorACPAdapter:__handle_tool_call(session_id, update)
             message.argument =
                 self:_format_read_argument(update.rawInput, update.title)
         elseif kind == "edit" then
-            local file_path = update.rawInput.file_path
-            if file_path and file_path ~= "" then
-                message.argument = FileSystem.to_smart_path(file_path)
-            end
-
+            message.argument =
+                format_file_argument("edit", update.rawInput, update.title)
             message.diff = self:_build_edit_diff(update.rawInput)
         elseif kind == "search" then
             message.argument =
