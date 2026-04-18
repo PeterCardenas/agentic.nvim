@@ -73,6 +73,25 @@ local function calculate_dynamic_height(bufnr, max_height, position)
     return math.min(line_count + padding, max_height)
 end
 
+--- @param window_name agentic.ui.ChatWidget.PanelNames
+--- @param winid integer
+--- @param win_opts table<string, any>|nil
+local function apply_window_options(window_name, winid, win_opts)
+    local window_config = Config.windows[window_name] or {}
+    local config_win_opts = window_config.win_opts or {}
+
+    local merged_win_opts = vim.tbl_deep_extend("force", {
+        wrap = true,
+        linebreak = true,
+        winfixbuf = true,
+        winfixheight = true,
+    }, win_opts or {}, config_win_opts)
+
+    for name, value in pairs(merged_win_opts) do
+        vim.api.nvim_set_option_value(name, value, { win = winid })
+    end
+end
+
 --- @param bufnr integer
 --- @param enter boolean
 --- @param opts table<string, any>
@@ -92,19 +111,7 @@ local function open_win(bufnr, enter, opts, window_name, win_opts)
 
     local winid = vim.api.nvim_open_win(bufnr, enter, config)
 
-    local window_config = Config.windows[window_name] or {}
-    local config_win_opts = window_config.win_opts or {}
-
-    local merged_win_opts = vim.tbl_deep_extend("force", {
-        wrap = true,
-        linebreak = true,
-        winfixbuf = true,
-        winfixheight = true,
-    }, win_opts or {}, config_win_opts)
-
-    for name, value in pairs(merged_win_opts) do
-        vim.api.nvim_set_option_value(name, value, { win = winid })
-    end
+    apply_window_options(window_name, winid, win_opts)
 
     return winid
 end
@@ -131,6 +138,7 @@ local function get_or_create_window(
             vim.wo[cached_winid].winfixbuf = true
             WindowDecoration.render_header(bufnr, panel_name)
         end
+        apply_window_options(panel_name, cached_winid, win_opts)
         return cached_winid
     end
 

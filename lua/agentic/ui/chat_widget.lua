@@ -4,6 +4,7 @@ local DiffPreview = require("agentic.ui.diff_preview")
 local Logger = require("agentic.utils.logger")
 local WindowDecoration = require("agentic.ui.window_decoration")
 local WidgetLayout = require("agentic.ui.widget_layout")
+local ChatWidgetMaximize = require("agentic.ui.chat_widget_maximize")
 
 --- @alias agentic.ui.ChatWidget.PanelNames "chat"|"todos"|"code"|"files"|"input"|"diagnostics"
 
@@ -51,6 +52,37 @@ local CYCLE_ORDER = { "chat", "todos", "code", "files", "diagnostics", "input" }
 --- @class agentic.ui.ChatWidget.ShowOpts : agentic.ui.ChatWidget.AddToContextOpts
 --- @field auto_add_to_context? boolean Automatically add current selection or file to context when opening
 
+--- @class agentic.ui.ChatWidget.MaximizeLeafState
+--- @field kind "leaf"
+--- @field leaf_id integer
+--- @field bufnr integer
+--- @field width integer
+--- @field height integer
+--- @field view table<string, integer|nil>
+--- @field win_opts table<string, boolean|integer|string>
+
+--- @class agentic.ui.ChatWidget.MaximizeWidgetState
+--- @field kind "widget"
+--- @field width integer
+--- @field height integer
+
+--- @class agentic.ui.ChatWidget.MaximizeContainerState
+--- @field kind "row"|"col"
+--- @field width integer
+--- @field height integer
+--- @field children agentic.ui.ChatWidget.MaximizeNode[]
+
+--- @alias agentic.ui.ChatWidget.MaximizeNode
+--- | agentic.ui.ChatWidget.MaximizeLeafState
+--- | agentic.ui.ChatWidget.MaximizeWidgetState
+--- | agentic.ui.ChatWidget.MaximizeContainerState
+
+--- @class agentic.ui.ChatWidget.MaximizeState
+--- @field layout agentic.ui.ChatWidget.MaximizeNode
+--- @field leaves table<integer, agentic.ui.ChatWidget.MaximizeLeafState>
+--- @field focused_leaf_id integer|nil
+--- @field bufhidden_overrides table<integer, string>
+
 --- A sidebar-style chat widget with multiple windows stacked vertically
 --- The main chat window is the first, and contains the width, the below ones adapt to its size
 --- @class agentic.ui.ChatWidget
@@ -62,6 +94,15 @@ local CYCLE_ORDER = { "chat", "todos", "code", "files", "diagnostics", "input" }
 --- @field _on_before_hide? fun()
 --- @field _on_after_show? fun(chat_winid: integer|nil)
 --- @field _is_hiding? boolean
+--- @field _maximize_state? agentic.ui.ChatWidget.MaximizeState
+--- @field _is_owner_tab fun(self: agentic.ui.ChatWidget): boolean
+--- @field _is_supported_maximize_window fun(self: agentic.ui.ChatWidget, winid: integer|nil): boolean
+--- @field _get_preferred_editor_focus_winid fun(self: agentic.ui.ChatWidget): integer|nil
+--- @field _capture_maximize_state fun(self: agentic.ui.ChatWidget): agentic.ui.ChatWidget.MaximizeState|nil
+--- @field _prepare_maximize_restore_root fun(self: agentic.ui.ChatWidget): integer|nil
+--- @field _restore_maximize_state fun(self: agentic.ui.ChatWidget, keep_widget: boolean): boolean
+--- @field _clear_maximize_state fun(self: agentic.ui.ChatWidget, reason: string, opts: { restore_layout?: boolean, keep_widget?: boolean }|nil): boolean
+--- @field _toggle_full_width fun(self: agentic.ui.ChatWidget)
 --- @field current_position agentic.UserConfig.Windows.Position
 local ChatWidget = {}
 ChatWidget.__index = ChatWidget
@@ -73,6 +114,7 @@ function ChatWidget:new(tab_page_id, on_submit_input)
 
     self.win_nrs = {}
     self.current_position = Config.windows.position
+    self._maximize_state = nil
 
     self.on_submit_input = on_submit_input
     self.tab_page_id = tab_page_id
@@ -176,7 +218,15 @@ end
 
 --- Closes all windows but keeps buffers in memory
 function ChatWidget:hide()
-    if self._is_hiding or not self:is_open() then
+    if self._is_hiding then
+        return
+    end
+
+    if not self:is_open() then
+        self:_clear_maximize_state("hide", {
+            restore_layout = false,
+            keep_widget = false,
+        })
         return
     end
 
@@ -187,6 +237,14 @@ function ChatWidget:hide()
 
         if self._on_before_hide then
             self._on_before_hide()
+        end
+
+        if self._maximize_state then
+            self:_clear_maximize_state("hide", {
+                restore_layout = self:_is_owner_tab(),
+                keep_widget = false,
+            })
+            return
         end
 
         -- Check if we're on the correct tabpage before trying to find/create fallback window
@@ -241,7 +299,19 @@ end
 --- Deletes all buffers and removes them from memory
 --- This instance is no longer usable after calling this method
 function ChatWidget:destroy()
-    self:hide()
+    if self._maximize_state then
+        self:_clear_maximize_state("destroy", {
+            restore_layout = self:is_open() and self:_is_owner_tab(),
+            keep_widget = false,
+        })
+    else
+        self:hide()
+    end
+
+    self:_clear_maximize_state("destroy", {
+        restore_layout = false,
+        keep_widget = false,
+    })
 
     for name, bufnr in pairs(self.buf_nrs) do
         self.buf_nrs[name] = nil
@@ -494,90 +564,6 @@ end
 --- Navigate to previous user prompt
 function ChatWidget:navigate_prev_prompt()
     self:_navigate_prompt("prev")
-end
-
---- Toggle maximize: close other windows or restore them
-function ChatWidget:_toggle_full_width()
-    local stored = vim.t[self.tab_page_id].agentic_maximized_windows
-
-    if stored and #stored > 0 then
-        -- Restore: re-open or un-minimize the previously saved windows
-        vim.t[self.tab_page_id].agentic_maximized_windows = nil
-
-        local restored_any = false
-        for _, entry in ipairs(stored) do
-            local bufnr = entry.bufnr
-            if bufnr and vim.api.nvim_buf_is_valid(bufnr) then
-                local ok, winid = pcall(vim.api.nvim_open_win, bufnr, false, {
-                    split = "left",
-                    win = -1,
-                })
-                if ok and entry.width then
-                    pcall(vim.api.nvim_win_set_width, winid, entry.width)
-                end
-                if ok then
-                    restored_any = true
-                    -- Restore original bufhidden if it was overridden
-                    if entry.bufhidden then
-                        vim.bo[bufnr].bufhidden = entry.bufhidden
-                    end
-                end
-            end
-        end
-
-        -- If no windows were restored (e.g. all buffers got wiped),
-        -- fall back to opening a usable window
-        if not restored_any then
-            self:open_left_window()
-        end
-    else
-        -- Maximize: close or minimize all non-widget, non-floating windows
-        local all_windows = vim.api.nvim_tabpage_list_wins(self.tab_page_id)
-
-        local widget_buf_ids = {}
-        for _, bufnr in pairs(self.buf_nrs) do
-            widget_buf_ids[bufnr] = true
-        end
-
-        --- @type { bufnr: integer|nil, width: integer, bufhidden: string|nil }[]
-        local to_restore = {}
-        for _, winid in ipairs(all_windows) do
-            local win_buf = vim.api.nvim_win_get_buf(winid)
-            -- Skip this widget's own buffers AND any cross-tabpage widget
-            -- buffers (detected by filetype) so they are never saved/closed.
-            if
-                not widget_buf_ids[win_buf]
-                and not AGENTIC_FILETYPES[vim.bo[win_buf].filetype]
-            then
-                local win_config = vim.api.nvim_win_get_config(winid)
-                -- Only affect non-floating windows (skip notifications, popups, etc.)
-                if win_config.relative == "" then
-                    local bufnr = vim.api.nvim_win_get_buf(winid)
-                    local width = vim.api.nvim_win_get_width(winid)
-                    local bufhidden = vim.bo[bufnr].bufhidden
-
-                    if bufhidden == "wipe" or bufhidden == "delete" then
-                        -- Temporarily set bufhidden to "hide" so closing the
-                        -- window preserves the buffer for later restoration
-                        vim.bo[bufnr].bufhidden = "hide"
-                        table.insert(to_restore, {
-                            bufnr = bufnr,
-                            width = width,
-                            bufhidden = bufhidden,
-                        })
-                    else
-                        table.insert(to_restore, {
-                            bufnr = bufnr,
-                            width = width,
-                        })
-                    end
-                    pcall(vim.api.nvim_win_close, winid, true)
-                end
-            end
-        end
-
-        vim.t[self.tab_page_id].agentic_maximized_windows = to_restore
-    end
 end
 
 function ChatWidget:_bind_keymaps()
@@ -1000,5 +986,10 @@ function ChatWidget:open_left_window(bufnr)
 
     return winid
 end
+
+ChatWidgetMaximize.attach(ChatWidget, {
+    AGENTIC_FILETYPES = AGENTIC_FILETYPES,
+    CYCLE_ORDER = CYCLE_ORDER,
+})
 
 return ChatWidget
