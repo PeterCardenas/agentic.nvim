@@ -418,6 +418,8 @@ agentic.add_buffer_diagnostics({opts})
                                                  *agentic.new_session()*
 agentic.new_session({opts})
   Destroy the current session and start a new one.
+  If the widget is maximized, Agentic restores the editor layout
+  before reusing the widget windows.
 
   Parameters: ~
     {opts}  (table|nil)  Optional fields:

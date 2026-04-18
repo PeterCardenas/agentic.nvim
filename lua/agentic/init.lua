@@ -131,6 +131,15 @@ function Agentic.new_session(opts)
     --- @type agentic.ui.ChatWidget.WinNrs|nil
     local saved_win_nrs
 
+    if old_session then
+        old_session.widget:_clear_maximize_state("new_session", {
+            restore_layout = old_session.widget:is_open()
+                and vim.api.nvim_get_current_tabpage()
+                    == old_session.widget.tab_page_id,
+            keep_widget = true,
+        })
+    end
+
     -- If widget is already open, preserve windows for reuse
     if old_session and old_session.widget:is_open() then
         saved_win_nrs = {}
