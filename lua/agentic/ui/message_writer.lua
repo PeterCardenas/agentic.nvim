@@ -108,8 +108,19 @@ end
 --- @field _record_next_prompt? boolean
 --- @field _pending_newline? boolean
 --- @field _chat_folds? agentic.ui.ChatFolds
+--- @field _cmdline_leave_scroll_pending? boolean
 local MessageWriter = {}
 MessageWriter.__index = MessageWriter
+
+--- @return boolean
+local function is_cmdline_active()
+    local mode = vim.api.nvim_get_mode().mode
+    if mode == "c" then
+        return true
+    end
+
+    return vim.fn.win_gettype() == "command"
+end
 
 --- @param bufnr integer
 --- @return agentic.ui.MessageWriter
@@ -124,6 +135,7 @@ function MessageWriter:new(bufnr)
         _last_message_type = nil,
         _should_auto_scroll = nil,
         _scroll_scheduled = false,
+        _cmdline_leave_scroll_pending = false,
     }, self)
 
     return instance
@@ -416,6 +428,11 @@ function MessageWriter:_fix_scroll_after_fold()
         return
     end
 
+    if is_cmdline_active() then
+        self:_defer_scroll_until_cmdline_leave(self.bufnr)
+        return
+    end
+
     local wins = vim.fn.win_findbuf(self.bufnr)
     if #wins > 0 then
         vim.api.nvim_win_call(wins[1], function()
@@ -431,10 +448,42 @@ function MessageWriter:enable_auto_scroll()
     self._should_auto_scroll = true
 end
 
+--- @param bufnr integer
+function MessageWriter:_defer_scroll_until_cmdline_leave(bufnr)
+    if self._cmdline_leave_scroll_pending then
+        return
+    end
+
+    self._cmdline_leave_scroll_pending = true
+
+    vim.api.nvim_create_autocmd("CmdlineLeave", {
+        once = true,
+        callback = function()
+            self._cmdline_leave_scroll_pending = false
+
+            if not vim.api.nvim_buf_is_valid(bufnr) then
+                self._should_auto_scroll = nil
+                return
+            end
+
+            self:_auto_scroll(bufnr)
+        end,
+    })
+end
+
 --- @param bufnr integer Buffer number to scroll
 function MessageWriter:_auto_scroll(bufnr)
     if self._should_auto_scroll ~= true then
         self._should_auto_scroll = self:_check_auto_scroll(bufnr)
+    end
+
+    if is_cmdline_active() then
+        if self._should_auto_scroll then
+            self:_defer_scroll_until_cmdline_leave(bufnr)
+        else
+            self._should_auto_scroll = nil
+        end
+        return
     end
 
     if self._scroll_scheduled then

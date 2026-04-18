@@ -144,6 +144,83 @@ describe("agentic.ui.MessageWriter", function()
             assert.equal(0, check_spy.call_count)
             check_spy:revert()
         end)
+
+        it("defers scrolling while command line is active", function()
+            local current_mode = "c"
+            local get_mode_stub = spy.stub(vim.api, "nvim_get_mode")
+            get_mode_stub:invokes(function()
+                return { mode = current_mode }
+            end)
+
+            local win_gettype_stub = spy.stub(vim.fn, "win_gettype")
+            win_gettype_stub:returns("")
+
+            local create_autocmd_stub = spy.stub(vim.api, "nvim_create_autocmd")
+            local schedule_spy = spy.on(vim, "schedule")
+            local win_call_spy = spy.on(vim.api, "nvim_win_call")
+
+            setup_buffer(50, 1)
+            writer._should_auto_scroll = true
+
+            writer:_auto_scroll(bufnr)
+
+            assert.equal(1, create_autocmd_stub.call_count)
+            local autocmd_call = assert.not_nil(create_autocmd_stub.calls[1])
+            assert.equal("CmdlineLeave", autocmd_call[1])
+            assert.is_true(autocmd_call[2].once)
+            assert.equal(0, schedule_spy.call_count)
+            assert.equal(0, win_call_spy.call_count)
+            assert.is_true(writer._cmdline_leave_scroll_pending)
+
+            win_call_spy:revert()
+            schedule_spy:revert()
+            create_autocmd_stub:revert()
+            win_gettype_stub:revert()
+            get_mode_stub:revert()
+        end)
+
+        it("flushes deferred scrolling after command line leaves", function()
+            local current_mode = "c"
+            local get_mode_stub = spy.stub(vim.api, "nvim_get_mode")
+            get_mode_stub:invokes(function()
+                return { mode = current_mode }
+            end)
+
+            local win_gettype_stub = spy.stub(vim.fn, "win_gettype")
+            win_gettype_stub:returns("")
+
+            --- @type fun()|nil
+            local leave_callback
+            local create_autocmd_stub = spy.stub(vim.api, "nvim_create_autocmd")
+            create_autocmd_stub:invokes(function(_event, opts)
+                leave_callback = opts.callback
+                return 1
+            end)
+
+            local schedule_stub = spy.stub(vim, "schedule")
+            schedule_stub:invokes(function(fn)
+                fn()
+            end)
+
+            setup_buffer(50, 1)
+            writer._should_auto_scroll = true
+
+            writer:_auto_scroll(bufnr)
+            assert.is_true(writer._cmdline_leave_scroll_pending)
+
+            current_mode = "n"
+            local callback = assert.not_nil(leave_callback)
+            callback()
+
+            assert.is_false(writer._cmdline_leave_scroll_pending)
+            assert.is_nil(writer._should_auto_scroll)
+            assert.equal(50, vim.api.nvim_win_get_cursor(winid)[1])
+
+            schedule_stub:revert()
+            create_autocmd_stub:revert()
+            win_gettype_stub:revert()
+            get_mode_stub:revert()
+        end)
     end)
 
     describe("_should_auto_scroll sticky field", function()
