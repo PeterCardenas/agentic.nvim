@@ -14,6 +14,7 @@
 ---
 
 local Config = require("agentic.config")
+local BufHelpers = require("agentic.utils.buf_helpers")
 local Theme = require("agentic.theme")
 
 local NS_ANIMATION = vim.api.nvim_create_namespace("agentic_animation")
@@ -108,8 +109,10 @@ function StatusAnimation:_render_frame()
 
     local virt_text = { { display_text, hl_group } }
 
-    local winid = vim.fn.bufwinid(self._bufnr)
+    local winid = math.floor(vim.fn.bufwinid(self._bufnr))
+    local was_bottom_visible = false
     if winid ~= -1 and vim.api.nvim_win_is_valid(winid) then
+        was_bottom_visible = BufHelpers.is_window_bottom_visible(winid)
         local win_width = vim.api.nvim_win_get_width(winid)
         local text_width = vim.fn.strdisplaywidth(display_text)
         if win_width > text_width then
@@ -132,6 +135,15 @@ function StatusAnimation:_render_frame()
             virt_lines = virt_lines,
             virt_lines_above = false,
         })
+
+    if
+        winid ~= -1
+        and vim.api.nvim_win_is_valid(winid)
+        and was_bottom_visible
+        and not BufHelpers.is_window_bottom_visible(winid)
+    then
+        BufHelpers.scroll_window_to_bottom(winid)
+    end
 
     self._next_frame_handle = vim.defer_fn(function()
         self:_render_frame()

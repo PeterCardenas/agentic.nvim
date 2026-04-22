@@ -152,4 +152,144 @@ describe("BufHelpers", function()
             vim.api.nvim_buf_delete(bufnr, { force = true })
         end)
     end)
+
+    describe("window bottom helpers", function()
+        --- @type integer
+        local bufnr
+        --- @type integer
+        local winid
+
+        before_each(function()
+            bufnr = vim.api.nvim_create_buf(false, true)
+            winid = vim.api.nvim_open_win(bufnr, true, {
+                relative = "editor",
+                width = 20,
+                height = 5,
+                row = 0,
+                col = 0,
+            })
+
+            vim.wo[winid].wrap = true
+            vim.wo[winid].smoothscroll = true
+            vim.wo[winid].linebreak = false
+            vim.wo[winid].breakindent = false
+        end)
+
+        after_each(function()
+            if winid and vim.api.nvim_win_is_valid(winid) then
+                vim.api.nvim_win_close(winid, true)
+            end
+            if bufnr and vim.api.nvim_buf_is_valid(bufnr) then
+                vim.api.nvim_buf_delete(bufnr, { force = true })
+            end
+        end)
+
+        it("detects when the wrapped bottom is off-screen", function()
+            vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {
+                "header 1",
+                "header 2",
+                "header 3",
+                "header 4",
+                string.rep("x", 110),
+            })
+
+            assert.is_false(BufHelpers.is_window_bottom_visible(winid))
+        end)
+
+        it(
+            "scroll_window_to_bottom keeps oversized wrapped lines on the bottom row",
+            function()
+                vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {
+                    "header 1",
+                    "header 2",
+                    "header 3",
+                    "header 4",
+                    string.rep("x", 110),
+                })
+
+                BufHelpers.scroll_window_to_bottom(winid)
+
+                local view = vim.api.nvim_win_call(winid, function()
+                    return vim.fn.winsaveview()
+                end)
+                local winline = vim.api.nvim_win_call(winid, function()
+                    return vim.fn.winline()
+                end)
+
+                assert.is_true(BufHelpers.is_window_bottom_visible(winid))
+                assert.equal(vim.api.nvim_win_get_height(winid), winline)
+                assert.is_true(view.skipcol > 0)
+            end
+        )
+
+        it(
+            "detects when virtual lines below the bottom are off-screen",
+            function()
+                local ns =
+                    vim.api.nvim_create_namespace("agentic_test_bottom_tail")
+
+                vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {
+                    "header 1",
+                    "header 2",
+                    "header 3",
+                    "header 4",
+                    "agent: " .. string.rep("x", 20),
+                })
+                BufHelpers.scroll_window_to_bottom(winid)
+
+                vim.api.nvim_buf_set_extmark(bufnr, ns, 4, 0, {
+                    virt_lines = {
+                        { { "" } },
+                        { { " spinner ", "Comment" } },
+                        { { "" } },
+                    },
+                    virt_lines_above = false,
+                })
+
+                assert.is_false(BufHelpers.is_window_bottom_visible(winid))
+            end
+        )
+
+        it(
+            "scroll_window_to_bottom keeps virtual footer lines visible",
+            function()
+                local ns =
+                    vim.api.nvim_create_namespace("agentic_test_bottom_tail")
+
+                vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {
+                    "header 1",
+                    "header 2",
+                    "header 3",
+                    "header 4",
+                    "agent: " .. string.rep("x", 20),
+                })
+                BufHelpers.scroll_window_to_bottom(winid)
+
+                local before = vim.api.nvim_win_call(winid, function()
+                    return vim.fn.winsaveview()
+                end)
+
+                vim.api.nvim_buf_set_extmark(bufnr, ns, 4, 0, {
+                    virt_lines = {
+                        { { "" } },
+                        { { " spinner ", "Comment" } },
+                        { { "" } },
+                    },
+                    virt_lines_above = false,
+                })
+
+                BufHelpers.scroll_window_to_bottom(winid)
+
+                local after = vim.api.nvim_win_call(winid, function()
+                    return vim.fn.winsaveview()
+                end)
+
+                assert.is_true(BufHelpers.is_window_bottom_visible(winid))
+                assert.is_true(
+                    after.topline > before.topline
+                        or after.skipcol > before.skipcol
+                )
+            end
+        )
+    end)
 end)

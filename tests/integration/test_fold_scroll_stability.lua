@@ -2,12 +2,16 @@
 local assert = require("tests.helpers.assert")
 --- @diagnostic disable-next-line: unresolved-require
 local Config = require("agentic.config")
+--- @diagnostic disable-next-line: unresolved-require
+local BufHelpers = require("agentic.utils.buf_helpers")
 
 describe("Fold scroll stability", function()
     --- @diagnostic disable-next-line: unresolved-require
     local ChatFolds = require("agentic.ui.chat_folds")
     --- @diagnostic disable-next-line: unresolved-require
     local MessageWriter = require("agentic.ui.message_writer")
+    --- @diagnostic disable-next-line: unresolved-require
+    local StatusAnimation = require("agentic.ui.status_animation")
 
     --- @type agentic.UserConfig.Folding
     local original_folding
@@ -70,9 +74,7 @@ describe("Fold scroll stability", function()
         vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
 
         -- Simulate auto-scroll: cursor at bottom, window scrolled down
-        vim.api.nvim_win_call(winid, function()
-            vim.cmd("normal! G0zb")
-        end)
+        BufHelpers.scroll_window_to_bottom(winid)
     end
 
     --- Get the last visible line in the window (1-indexed)
@@ -154,7 +156,7 @@ describe("Fold scroll stability", function()
 
             -- Re-scroll to bottom (write_tool_call_block added lines)
             vim.api.nvim_win_call(winid, function()
-                vim.cmd("normal! G0zb")
+                vim.cmd("normal! G$zb")
             end)
 
             -- Update to completed — this triggers fold creation
@@ -171,6 +173,73 @@ describe("Fold scroll stability", function()
             local last_visible = get_last_visible_line()
 
             assert.equal(total, last_visible)
+        end
+    )
+
+    it(
+        "active spinner tail stays visible after write_tool_call_block folds",
+        function()
+            local tab = vim.api.nvim_get_current_tabpage()
+            local chat_folds = ChatFolds:new(bufnr, tab)
+            local writer = MessageWriter:new(bufnr)
+            local animation = StatusAnimation:new(bufnr)
+            writer:set_chat_folds(chat_folds)
+
+            fill_and_scroll(50)
+            animation:start("generating")
+
+            --- @type agentic.ui.MessageWriter.ToolCallBlock
+            local block = {
+                tool_call_id = "tc_3",
+                kind = "execute",
+                argument = "ls -la",
+                status = "completed",
+                body = make_body(25),
+            }
+
+            writer:write_tool_call_block(block)
+            animation:_render_frame()
+
+            assert.is_true(BufHelpers.is_window_bottom_visible(winid))
+            animation:stop()
+        end
+    )
+
+    it(
+        "active spinner tail stays visible after update_tool_call_block folds",
+        function()
+            local tab = vim.api.nvim_get_current_tabpage()
+            local chat_folds = ChatFolds:new(bufnr, tab)
+            local writer = MessageWriter:new(bufnr)
+            local animation = StatusAnimation:new(bufnr)
+            writer:set_chat_folds(chat_folds)
+
+            fill_and_scroll(50)
+
+            --- @type agentic.ui.MessageWriter.ToolCallBlock
+            local block = {
+                tool_call_id = "tc_4",
+                kind = "execute",
+                argument = "ls -la",
+                status = "pending",
+                body = make_body(25),
+            }
+
+            writer:write_tool_call_block(block)
+            BufHelpers.scroll_window_to_bottom(winid)
+            animation:start("generating")
+
+            --- @type agentic.ui.MessageWriter.ToolCallBase
+            local update = {
+                tool_call_id = "tc_4",
+                status = "completed",
+            }
+
+            writer:update_tool_call_block(update)
+            animation:_render_frame()
+
+            assert.is_true(BufHelpers.is_window_bottom_visible(winid))
+            animation:stop()
         end
     )
 end)

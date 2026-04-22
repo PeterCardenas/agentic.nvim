@@ -435,9 +435,9 @@ function MessageWriter:_fix_scroll_after_fold()
 
     local wins = vim.fn.win_findbuf(self.bufnr)
     if #wins > 0 then
-        vim.api.nvim_win_call(wins[1], function()
-            vim.cmd("normal! G0zb")
-        end)
+        if not BufHelpers.is_window_bottom_visible(wins[1]) then
+            BufHelpers.scroll_window_to_bottom(wins[1])
+        end
     end
 end
 
@@ -498,9 +498,9 @@ function MessageWriter:_auto_scroll(bufnr)
             if self._should_auto_scroll then
                 local wins = vim.fn.win_findbuf(bufnr)
                 if #wins > 0 then
-                    vim.api.nvim_win_call(wins[1], function()
-                        vim.cmd("normal! G0zb")
-                    end)
+                    if not BufHelpers.is_window_bottom_visible(wins[1]) then
+                        BufHelpers.scroll_window_to_bottom(wins[1])
+                    end
                 end
             end
         end

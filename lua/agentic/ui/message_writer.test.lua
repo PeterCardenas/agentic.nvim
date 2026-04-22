@@ -265,6 +265,41 @@ describe("agentic.ui.MessageWriter", function()
         )
 
         it(
+            "scheduled callback leaves wrapped lines alone when bottom is already visible",
+            function()
+                local schedule_stub = spy.stub(vim, "schedule")
+                schedule_stub:invokes(function(fn)
+                    fn()
+                end)
+
+                vim.api.nvim_win_set_width(winid, 20)
+                vim.api.nvim_win_set_height(winid, 5)
+                vim.wo[winid].wrap = true
+                vim.wo[winid].smoothscroll = true
+
+                local long = string.rep("0123456789", 8)
+                vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {
+                    "top",
+                    long,
+                })
+
+                writer._should_auto_scroll = true
+                writer:_auto_scroll(bufnr)
+
+                local cursor = vim.api.nvim_win_get_cursor(winid)
+                local winline = vim.api.nvim_win_call(winid, function()
+                    return vim.fn.winline()
+                end)
+
+                assert.equal(1, cursor[1])
+                assert.equal(0, cursor[2])
+                assert.is_true(winline < vim.api.nvim_win_get_height(winid))
+
+                schedule_stub:revert()
+            end
+        )
+
+        it(
             "scheduled callback scrolls when user is on a different tabpage",
             function()
                 local schedule_stub = spy.stub(vim, "schedule")
@@ -386,6 +421,116 @@ describe("agentic.ui.MessageWriter", function()
 
             assert.is_false(writer._should_auto_scroll)
         end)
+    end)
+
+    describe("write_message_chunk wrapped auto-scroll", function()
+        --- @type TestStub
+        local schedule_stub
+        local scheduled
+
+        before_each(function()
+            scheduled = {}
+            schedule_stub = spy.stub(vim, "schedule")
+            schedule_stub:invokes(function(fn)
+                table.insert(scheduled, fn)
+            end)
+
+            vim.api.nvim_win_set_width(winid, 20)
+            vim.api.nvim_win_set_height(winid, 5)
+            vim.wo[winid].wrap = true
+            vim.wo[winid].smoothscroll = true
+            vim.wo[winid].linebreak = false
+            vim.wo[winid].breakindent = false
+        end)
+
+        after_each(function()
+            schedule_stub:revert()
+        end)
+
+        local function flush_scheduled()
+            local callbacks = scheduled
+            scheduled = {}
+            for _, callback in ipairs(callbacks) do
+                callback()
+            end
+        end
+
+        it(
+            "does not reposition the cursor while the wrapped tail stays visible",
+            function()
+                local BufHelpers = require("agentic.utils.buf_helpers")
+
+                vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {
+                    "header 1",
+                    "header 2",
+                    "header 3",
+                    "agent: ",
+                })
+                vim.api.nvim_win_call(winid, function()
+                    vim.cmd("normal! G$")
+                end)
+
+                writer:enable_auto_scroll()
+                writer:write_message_chunk(make_message_update("1234567890"))
+                flush_scheduled()
+                local cursor_after_first = vim.api.nvim_win_get_cursor(winid)
+
+                writer:write_message_chunk(make_message_update("abcdefghij"))
+                flush_scheduled()
+                local cursor_after_second = vim.api.nvim_win_get_cursor(winid)
+
+                assert.are.same(cursor_after_first, cursor_after_second)
+                assert.is_true(BufHelpers.is_window_bottom_visible(winid))
+            end
+        )
+
+        it(
+            "keeps the cursor on the bottom row when the wrapped tail exceeds the window height",
+            function()
+                local BufHelpers = require("agentic.utils.buf_helpers")
+
+                vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {
+                    "header 1",
+                    "header 2",
+                    "header 3",
+                    "header 4",
+                    "agent: ",
+                })
+                vim.api.nvim_win_call(winid, function()
+                    vim.cmd("normal! G$")
+                end)
+
+                writer:enable_auto_scroll()
+
+                for _, chunk in ipairs({
+                    "1234567890",
+                    "abcdefghij",
+                    "KLMNOPQRST",
+                    "uvwxyzABCD",
+                    "EFGHIJKLMN",
+                    "opqrstuvwx",
+                    "YZ01234567",
+                    "abcdefghij",
+                    "klmnopqrst",
+                    "uvwxyzABCD",
+                    "EFGHIJKLMN",
+                }) do
+                    writer:write_message_chunk(make_message_update(chunk))
+                    flush_scheduled()
+                end
+
+                local winline = vim.api.nvim_win_call(winid, function()
+                    return vim.fn.winline()
+                end)
+                local view = vim.api.nvim_win_call(winid, function()
+                    return vim.fn.winsaveview()
+                end)
+
+                assert.is_true(BufHelpers.is_window_bottom_visible(winid))
+                assert.equal(vim.api.nvim_win_get_height(winid), winline)
+                assert.is_true(view.skipcol > 0)
+            end
+        )
     end)
 
     describe("on_content_changed callback", function()
