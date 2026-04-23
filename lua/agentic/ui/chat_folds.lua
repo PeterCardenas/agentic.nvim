@@ -30,8 +30,6 @@ local FOLD_TEXT_PREFIXES_VAR = "_agentic_fold_text_prefixes"
 --- @field _bufnr integer
 --- @field _tab_page_id integer
 --- @field _tool_call_folds table<string, agentic.ui.ChatFolds.ToolCallFold>
---- @field _pending_tool_call_ids string[]
---- @field _reopen_restore_tool_call_ids string[]
 local ChatFolds = {}
 ChatFolds.__index = ChatFolds
 
@@ -44,8 +42,6 @@ function ChatFolds:new(bufnr, tab_page_id)
         _bufnr = bufnr,
         _tab_page_id = tab_page_id,
         _tool_call_folds = {},
-        _pending_tool_call_ids = {},
-        _reopen_restore_tool_call_ids = {},
     }, self)
 
     return instance
@@ -54,8 +50,6 @@ end
 --- Reset all tracked fold state (e.g. on session cancel/clear)
 function ChatFolds:reset()
     self._tool_call_folds = {}
-    self._pending_tool_call_ids = {}
-    self._reopen_restore_tool_call_ids = {}
 
     if vim.api.nvim_buf_is_valid(self._bufnr) then
         vim.b[self._bufnr][FOLD_TEXT_PREFIXES_VAR] = nil
@@ -382,12 +376,7 @@ function ChatFolds:sync_tool_call(tool_call_id, tool_call_blocks)
     local winids = self:_get_visible_windows()
 
     if #winids == 0 then
-        -- Widget is hidden; queue for later
-        if fold.last_known_fold_state ~= nil then
-            table.insert(self._reopen_restore_tool_call_ids, tool_call_id)
-        else
-            table.insert(self._pending_tool_call_ids, tool_call_id)
-        end
+        -- Widget is hidden; on_buf_win_enter will reapply all folds on reshow.
         return
     end
 
@@ -589,7 +578,10 @@ function ChatFolds:capture_tool_call_fold_state(tool_call_id, tool_call_blocks)
     end
 end
 
---- Called on BufWinEnter to configure the window and process pending folds
+--- Called after the chat widget is shown to (re)apply folds to the new window.
+--- Manual folds are window-local and lost when the chat window closes, so on
+--- every reshow we must recreate folds for every tool call we track. Also
+--- handles tool calls whose folds were queued while the widget was hidden.
 --- @param winid integer
 --- @param tool_call_blocks table<string, agentic.ui.MessageWriter.ToolCallBlock>
 function ChatFolds:on_buf_win_enter(winid, tool_call_blocks)
@@ -604,52 +596,43 @@ function ChatFolds:on_buf_win_enter(winid, tool_call_blocks)
 
     ChatFolds._configure_window(winid)
 
-    --- @param ids string[]
-    local function process_queue(ids)
-        for _, tool_call_id in ipairs(ids) do
-            local fold = self._tool_call_folds[tool_call_id]
-            if fold and fold.should_render_fold then
-                local body_start, body_end = ChatFolds._resolve_body_range(
-                    self._bufnr,
-                    tool_call_blocks,
-                    tool_call_id
+    for tool_call_id, fold in pairs(self._tool_call_folds) do
+        if fold.should_render_fold then
+            local body_start, body_end = ChatFolds._resolve_body_range(
+                self._bufnr,
+                tool_call_blocks,
+                tool_call_id
+            )
+
+            if body_start and body_end then
+                local outer_closed, inner_closed =
+                    ChatFolds._decide_default_states(fold)
+
+                --- @type integer|nil
+                local inner_start = nil
+                if
+                    fold.min_lines
+                    and body_start + fold.min_lines <= body_end
+                then
+                    inner_start = body_start + fold.min_lines
+                end
+
+                self:_set_fold_text_prefix(
+                    tool_call_id,
+                    fold.fold_text_prefix or ExtmarkBlock.BODY_PREFIX
                 )
 
-                if body_start and body_end then
-                    local outer_closed, inner_closed =
-                        ChatFolds._decide_default_states(fold)
-
-                    --- @type integer|nil
-                    local inner_start = nil
-                    if
-                        fold.min_lines
-                        and body_start + fold.min_lines <= body_end
-                    then
-                        inner_start = body_start + fold.min_lines
-                    end
-
-                    self:_sync_fold_to_window(
-                        winid,
-                        body_start,
-                        body_end,
-                        outer_closed,
-                        inner_start,
-                        inner_closed
-                    )
-                end
+                self:_sync_fold_to_window(
+                    winid,
+                    body_start,
+                    body_end,
+                    outer_closed,
+                    inner_start,
+                    inner_closed
+                )
             end
         end
     end
-
-    -- Process reopen-restore queue (known fold states)
-    local restore_ids = self._reopen_restore_tool_call_ids
-    self._reopen_restore_tool_call_ids = {}
-    process_queue(restore_ids)
-
-    -- Process pending queue (new folds, no prior state)
-    local pending_ids = self._pending_tool_call_ids
-    self._pending_tool_call_ids = {}
-    process_queue(pending_ids)
 end
 
 --- Truncate a string to fit within a target display width.

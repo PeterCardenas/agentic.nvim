@@ -303,4 +303,59 @@ describe("Fold scroll stability", function()
 
         assert.equal(2, max_level)
     end)
+
+    it("reapplies folds after the chat window is reopened", function()
+        --- @diagnostic disable-next-line: inject-field
+        Config.folding.tool_calls.preview = true
+        --- @diagnostic disable-next-line: inject-field
+        Config.folding.tool_calls.closed_by_default = false
+
+        local tab = vim.api.nvim_get_current_tabpage()
+        local chat_folds = ChatFolds:new(bufnr, tab)
+        local writer = MessageWriter:new(bufnr)
+        writer:set_chat_folds(chat_folds)
+
+        for i = 1, 3 do
+            writer:write_tool_call_block({
+                tool_call_id = "tc_show_" .. i,
+                kind = "execute",
+                argument = "cmd " .. i,
+                status = "completed",
+                body = make_body(10),
+            })
+        end
+
+        local function count_outer_folds(w)
+            local count = 0
+            vim.api.nvim_win_call(w, function()
+                local prev = 0
+                for line = 1, vim.api.nvim_buf_line_count(bufnr) do
+                    local lvl = vim.fn.foldlevel(line)
+                    if lvl > 0 and prev == 0 then
+                        count = count + 1
+                    end
+                    prev = lvl
+                end
+            end)
+            return count
+        end
+
+        assert.equal(3, count_outer_folds(winid))
+
+        chat_folds:capture_visible_fold_states(writer.tool_call_blocks)
+
+        -- Wipe folds in the current window to simulate the real-world case
+        -- where closing the chat window loses per-window manual folds. The
+        -- headless harness preserves folds across window close/open, so
+        -- clearing them here is the only way to force the reapply code path.
+        vim.api.nvim_win_call(winid, function()
+            vim.cmd("silent! normal! zE")
+        end)
+
+        assert.equal(0, count_outer_folds(winid))
+
+        chat_folds:on_buf_win_enter(winid, writer.tool_call_blocks)
+
+        assert.equal(3, count_outer_folds(winid))
+    end)
 end)

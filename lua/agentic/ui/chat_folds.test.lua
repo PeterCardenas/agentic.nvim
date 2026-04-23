@@ -208,14 +208,10 @@ describe("agentic.ui.ChatFolds", function()
                 tool_call_id = "tc_1",
                 should_render_fold = true,
             }
-            table.insert(folds._pending_tool_call_ids, "tc_2")
-            table.insert(folds._reopen_restore_tool_call_ids, "tc_3")
 
             folds:reset()
 
             assert.same({}, folds._tool_call_folds)
-            assert.same({}, folds._pending_tool_call_ids)
-            assert.same({}, folds._reopen_restore_tool_call_ids)
 
             vim.api.nvim_buf_delete(bufnr, { force = true })
         end)
@@ -298,23 +294,28 @@ describe("agentic.ui.ChatFolds", function()
             vim.api.nvim_buf_delete(bufnr, { force = true })
         end)
 
-        it("queues pending when no visible windows", function()
-            setup_config({ tool_calls = { min_lines = 5 } })
-            local bufnr, winid, blocks, tc_id = create_tool_call_buffer(10)
-            local tab = vim.api.nvim_get_current_tabpage()
+        it(
+            "records fold without creating any when no visible windows",
+            function()
+                setup_config({ tool_calls = { min_lines = 5 } })
+                local bufnr, winid, blocks, tc_id = create_tool_call_buffer(10)
+                local tab = vim.api.nvim_get_current_tabpage()
 
-            -- Close window so there are no visible windows
-            vim.api.nvim_win_close(winid, true)
+                -- Close window so there are no visible windows
+                vim.api.nvim_win_close(winid, true)
 
-            -- Use a different tab_page_id to ensure _get_visible_windows returns empty
-            local folds = ChatFolds:new(bufnr, tab + 999)
-            folds:sync_tool_call(tc_id, blocks)
+                -- Use a different tab_page_id to ensure _get_visible_windows returns empty
+                local folds = ChatFolds:new(bufnr, tab + 999)
+                folds:sync_tool_call(tc_id, blocks)
 
-            assert.equal(1, #folds._pending_tool_call_ids)
-            assert.equal(tc_id, folds._pending_tool_call_ids[1])
+                -- Fold metadata is tracked even without a window; the actual
+                -- fold is created on reshow by on_buf_win_enter.
+                assert.is_not_nil(folds._tool_call_folds[tc_id])
+                assert.is_true(folds._tool_call_folds[tc_id].should_render_fold)
 
-            vim.api.nvim_buf_delete(bufnr, { force = true })
-        end)
+                vim.api.nvim_buf_delete(bufnr, { force = true })
+            end
+        )
 
         it("creates fold as open by default", function()
             setup_config({
@@ -582,7 +583,7 @@ describe("agentic.ui.ChatFolds", function()
     end)
 
     describe("on_buf_win_enter", function()
-        it("processes pending folds on reshow", function()
+        it("creates folds for tracked tool calls on reshow", function()
             setup_config({ tool_calls = { min_lines = 5 } })
             local bufnr, _, blocks, tc_id = create_tool_call_buffer(10)
             local tab = vim.api.nvim_get_current_tabpage()
@@ -591,7 +592,7 @@ describe("agentic.ui.ChatFolds", function()
             local folds = ChatFolds:new(bufnr, tab + 999)
             folds:sync_tool_call(tc_id, blocks)
 
-            assert.equal(1, #folds._pending_tool_call_ids)
+            assert.is_not_nil(folds._tool_call_folds[tc_id])
 
             -- Now open a window and call on_buf_win_enter
             local winid = vim.api.nvim_open_win(bufnr, true, {
@@ -606,9 +607,6 @@ describe("agentic.ui.ChatFolds", function()
             folds._tab_page_id = vim.api.nvim_get_current_tabpage()
 
             folds:on_buf_win_enter(winid, blocks)
-
-            -- Pending queue should be empty
-            assert.same({}, folds._pending_tool_call_ids)
 
             -- Fold should now exist
             local state = ChatFolds._get_fold_state(winid, 2)
