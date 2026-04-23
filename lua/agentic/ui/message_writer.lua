@@ -435,9 +435,7 @@ function MessageWriter:_fix_scroll_after_fold()
 
     local wins = vim.fn.win_findbuf(self.bufnr)
     if #wins > 0 then
-        if not BufHelpers.is_window_bottom_visible(wins[1]) then
-            BufHelpers.scroll_window_to_bottom(wins[1])
-        end
+        BufHelpers.scroll_window_to_bottom(wins[1])
     end
 end
 
