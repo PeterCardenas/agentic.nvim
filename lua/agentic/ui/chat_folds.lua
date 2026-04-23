@@ -264,6 +264,45 @@ function ChatFolds._get_fold_state(winid, line)
     return state
 end
 
+--- Delete any existing folds for a tool call before the buffer is modified.
+--- Needed because nvim_buf_set_lines shifts manual folds by the net line delta
+--- rather than removing them. Without this cleanup, successive updates stack
+--- stale outer/inner fold pairs on top of each other.
+--- @param tool_call_id string
+--- @param tool_call_blocks table<string, agentic.ui.MessageWriter.ToolCallBlock>
+function ChatFolds:delete_folds_for_tool_call(tool_call_id, tool_call_blocks)
+    local winids = self:_get_visible_windows()
+    if #winids == 0 then
+        return
+    end
+
+    local body_start, body_end = ChatFolds._resolve_body_range(
+        self._bufnr,
+        tool_call_blocks,
+        tool_call_id
+    )
+
+    if not body_start or not body_end then
+        return
+    end
+
+    for _, winid in ipairs(winids) do
+        if vim.api.nvim_win_is_valid(winid) then
+            vim.api.nvim_win_call(winid, function()
+                local line = body_start
+                while line <= body_end do
+                    if vim.fn.foldlevel(line) > 0 then
+                        vim.api.nvim_win_set_cursor(0, { line, 0 })
+                        --- @diagnostic disable-next-line: param-type-mismatch
+                        pcall(vim.cmd, "silent! normal! zD")
+                    end
+                    line = line + 1
+                end
+            end)
+        end
+    end
+end
+
 --- Set fold state at a given line in a window (one level only)
 --- @param winid integer
 --- @param line integer 1-indexed

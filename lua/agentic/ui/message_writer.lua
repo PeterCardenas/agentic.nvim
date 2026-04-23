@@ -678,6 +678,16 @@ function MessageWriter:update_tool_call_block(tool_call_block)
         self:_clear_decoration_extmarks(tracker.decoration_extmark_ids)
         self:_clear_status_namespace(start_row, old_end_row)
 
+        -- Delete existing folds at the OLD body range before replacing lines.
+        -- nvim_buf_set_lines shifts manual folds by the net line delta instead
+        -- of deleting them; without this cleanup stale folds stack on each update.
+        if self._chat_folds then
+            self._chat_folds:delete_folds_for_tool_call(
+                tool_call_block.tool_call_id,
+                self.tool_call_blocks
+            )
+        end
+
         local new_lines, highlight_ranges = self:_prepare_block_lines(tracker)
 
         vim.api.nvim_buf_set_lines(

@@ -242,4 +242,65 @@ describe("Fold scroll stability", function()
             animation:stop()
         end
     )
+
+    it("does not stack stale folds across successive updates", function()
+        -- Mirror the common real-world config where the preview inner fold is on.
+        --- @diagnostic disable-next-line: inject-field
+        Config.folding.tool_calls.preview = true
+        --- @diagnostic disable-next-line: inject-field
+        Config.folding.tool_calls.closed_by_default = false
+
+        local tab = vim.api.nvim_get_current_tabpage()
+        local chat_folds = ChatFolds:new(bufnr, tab)
+        local writer = MessageWriter:new(bufnr)
+        writer:set_chat_folds(chat_folds)
+
+        --- @type agentic.ui.MessageWriter.ToolCallBlock
+        local block = {
+            tool_call_id = "tc_stack",
+            kind = "execute",
+            argument = "stream",
+            status = "completed",
+            body = make_body(10),
+        }
+
+        writer:write_tool_call_block(block)
+
+        -- Two more updates with different bodies — merge path will grow the block
+        writer:update_tool_call_block({
+            tool_call_id = "tc_stack",
+            status = "completed",
+            body = (function()
+                local b = {}
+                for i = 1, 10 do
+                    b[i] = "second " .. i
+                end
+                return b
+            end)(),
+        })
+
+        writer:update_tool_call_block({
+            tool_call_id = "tc_stack",
+            status = "completed",
+            body = (function()
+                local b = {}
+                for i = 1, 10 do
+                    b[i] = "third " .. i
+                end
+                return b
+            end)(),
+        })
+
+        local max_level = 0
+        vim.api.nvim_win_call(winid, function()
+            for i = 1, vim.api.nvim_buf_line_count(bufnr) do
+                local lvl = vim.fn.foldlevel(i)
+                if lvl > max_level then
+                    max_level = lvl
+                end
+            end
+        end)
+
+        assert.equal(2, max_level)
+    end)
 end)
