@@ -47,6 +47,7 @@ local Logger = require("agentic.utils.logger")
 --- @class agentic.acp.CursorACPAdapter : agentic.acp.ACPClient
 --- @field _available_commands_updates table<string, table> Cursor sends available commands before session starts, indexed by session ID, to be processed after session creation
 --- @field _chunk_stream_started table<string, table<string, boolean>> Track whether a chunk stream started per session and chunk type
+--- @field _task_tool_inputs table<string, agentic.acp.CursorTaskRawInput> Track task raw input so completion updates can rebuild a clean task body
 local CursorACPAdapter = setmetatable({}, { __index = ACPClient })
 CursorACPAdapter.__index = CursorACPAdapter
 
@@ -63,6 +64,7 @@ function CursorACPAdapter:new(config, on_ready)
     -- Initialize session-indexed storage for available commands
     self._available_commands_updates = {}
     self._chunk_stream_started = {}
+    self._task_tool_inputs = {}
 
     return self
 end
@@ -259,8 +261,24 @@ function CursorACPAdapter:_build_edit_diff(raw_input)
     return diff
 end
 
+--- @param lines string[]
+--- @param label string
+--- @param section string[]|nil
+local function append_labeled_section(lines, label, section)
+    if not section or #section == 0 then
+        return
+    end
+
+    if #lines > 0 then
+        table.insert(lines, "")
+    end
+
+    table.insert(lines, label)
+    vim.list_extend(lines, section)
+end
+
 --- @param task agentic.acp.CursorTaskRawInput|agentic.acp.CursorTaskParams|nil
---- @param opts? { include_prompt?: boolean, status_line?: string|nil }
+--- @param opts? { final_message?: string|nil, include_prompt?: boolean }
 --- @return string[]|nil
 function CursorACPAdapter:_build_task_body(task, opts)
     if not task or vim.tbl_isempty(task) then
@@ -270,28 +288,23 @@ function CursorACPAdapter:_build_task_body(task, opts)
     opts = opts or {}
 
     local lines = {}
-    local description = vim.trim(task.description or "")
     local prompt = task.prompt
-
-    if opts.status_line and opts.status_line ~= "" then
-        table.insert(lines, opts.status_line)
-    end
-
-    if description ~= "" then
-        table.insert(lines, "Description: " .. description)
-    end
+    local final_message = vim.trim(opts.final_message or "")
 
     if
         type(prompt) == "string"
         and prompt ~= ""
         and opts.include_prompt ~= false
     then
-        if #lines > 0 then
-            table.insert(lines, "")
-        end
+        append_labeled_section(lines, "Prompt:", self:safe_split(prompt))
+    end
 
-        table.insert(lines, "Prompt:")
-        vim.list_extend(lines, self:safe_split(prompt))
+    if final_message ~= "" then
+        append_labeled_section(
+            lines,
+            "Final message:",
+            self:safe_split(final_message)
+        )
     end
 
     if #lines == 0 then
@@ -299,6 +312,21 @@ function CursorACPAdapter:_build_task_body(task, opts)
     end
 
     return lines
+end
+
+--- @param task table|nil
+--- @return string|nil
+local function extract_task_final_message(task)
+    if type(task) ~= "table" then
+        return nil
+    end
+
+    local final_message = task.finalMessage
+    if type(final_message) ~= "string" or vim.trim(final_message) == "" then
+        return nil
+    end
+
+    return final_message
 end
 
 --- @param subagent_type string|table|nil
@@ -527,10 +555,10 @@ function CursorACPAdapter:__handle_tool_call(session_id, update)
         elseif update.rawInput._toolName == "task" then
             local raw_input = update.rawInput
             ---@cast raw_input agentic.acp.CursorTaskRawInput
+            self._task_tool_inputs[update.toolCallId] = raw_input
             message.kind = "SubAgent"
             message.argument =
                 self:_format_task_argument(raw_input, update.title)
-            message.body = self:_build_task_body(raw_input, {})
         else
             local command = update.rawInput.command
             if type(command) == "table" then
@@ -587,7 +615,18 @@ function CursorACPAdapter:__build_tool_call_update(update)
     -- Read, execute, and search results arrive in rawOutput
     local rawOutput = update.rawOutput
     if rawOutput then
-        if rawOutput.content then
+        local task_input = rawget(self._task_tool_inputs, update.toolCallId)
+        if task_input then
+            local final_message = extract_task_final_message(rawOutput)
+            if final_message then
+                message.kind = "SubAgent"
+                message.argument =
+                    self:_format_task_argument(task_input, update.title)
+                message.body = self:_build_task_body(task_input, {
+                    final_message = final_message,
+                })
+            end
+        elseif rawOutput.content then
             -- read kind: rawOutput.content is the file text
             message.body = self:safe_split(rawOutput.content)
         elseif rawOutput.stdout then
@@ -646,6 +685,7 @@ end
 --- @field agentId string
 --- @field description string
 --- @field durationMs? number
+--- @field finalMessage? string
 --- @field model string
 --- @field prompt string
 --- @field subagentType table
@@ -669,17 +709,10 @@ function CursorACPAdapter:_handle_cursor_task(message_id, params)
         return
     end
 
-    local duration_str = ""
-    if params.durationMs then
-        duration_str = string.format(" (%.1fs)", params.durationMs / 1000)
-    end
-
-    local description = params.description or "subagent task"
+    local final_message = extract_task_final_message(params)
     local body = self:_build_task_body(params, {
-        status_line = string.format("⚡ %s%s", description, duration_str),
-    }) or {
-        string.format("⚡ %s%s", description, duration_str),
-    }
+        final_message = final_message,
+    })
 
     --- @type agentic.ui.MessageWriter.ToolCallBase
     local update = {

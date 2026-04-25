@@ -14,6 +14,7 @@ local function new_adapter()
         callbacks = {},
         _available_commands_updates = {},
         _chunk_stream_started = {},
+        _task_tool_inputs = {},
         transport = {
             send = function()
                 return true
@@ -334,5 +335,77 @@ describe("agentic.acp.adapters.CursorACPAdapter", function()
             message.argument
         )
         assert.same({ "Found 3 file(s) (truncated)" }, message.body)
+    end)
+
+    it("builds a rich completion body from cursor/task", function()
+        local adapter = new_adapter()
+        local handlers, on_tool_call, on_tool_call_update = new_handlers()
+        adapter.subscribers["session-1"] = handlers
+
+        run_in_fast_event(function()
+            adapter:_handle_message({
+                jsonrpc = "2.0",
+                method = "session/update",
+                params = {
+                    sessionId = "session-1",
+                    update = {
+                        sessionUpdate = "tool_call",
+                        toolCallId = "tool-task-2b",
+                        kind = "other",
+                        status = "pending",
+                        title = "Task: Subagent task",
+                        rawInput = {
+                            _toolName = "task",
+                            description = "Subagent returns SUBAGENT_OK",
+                            prompt = "Reply with exactly SUBAGENT_OK",
+                        },
+                    },
+                },
+            })
+            adapter:_handle_message({
+                jsonrpc = "2.0",
+                id = 9,
+                method = "cursor/task",
+                params = {
+                    toolCallId = "tool-task-2b",
+                    description = "Subagent returns SUBAGENT_OK",
+                    prompt = "Reply with exactly SUBAGENT_OK",
+                    finalMessage = "SUBAGENT_OK",
+                    durationMs = 850,
+                    model = "composer-2-fast",
+                    subagentType = {
+                        custom = {
+                            unspecified = {},
+                        },
+                    },
+                },
+            })
+        end)
+
+        local tool_call_notified = vim.wait(1000, function()
+            return on_tool_call.call_count == 1
+        end, 10)
+        assert.is_true(tool_call_notified)
+
+        local tool_call_args = assert.not_nil(on_tool_call.calls[1])
+        local tool_call_message = assert.not_nil(tool_call_args[1])
+        assert.is_nil(tool_call_message.body)
+
+        local update_notified = vim.wait(1000, function()
+            return on_tool_call_update.call_count == 1
+        end, 10)
+        assert.is_true(update_notified)
+
+        local call_args = assert.not_nil(on_tool_call_update.calls[1])
+        local message = assert.not_nil(call_args[1])
+        assert.equal("tool-task-2b", message.tool_call_id)
+        assert.equal("SubAgent", message.kind)
+        assert.same({
+            "Prompt:",
+            "Reply with exactly SUBAGENT_OK",
+            "",
+            "Final message:",
+            "SUBAGENT_OK",
+        }, message.body)
     end)
 end)
