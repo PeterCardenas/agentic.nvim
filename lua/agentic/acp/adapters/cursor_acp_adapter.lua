@@ -2,7 +2,7 @@ local ACPClient = require("agentic.acp.acp_client")
 local FileSystem = require("agentic.utils.file_system")
 local Logger = require("agentic.utils.logger")
 
---- @class agentic.acp.CursorRawInput : agentic.acp.RawInput
+--- @class agentic.acp.CursorCommonRawInput : agentic.acp.RawInput
 --- @field content? string For creating new files instead of new_string
 --- @field line? number
 --- @field start_line? number
@@ -15,6 +15,15 @@ local Logger = require("agentic.utils.logger")
 --- @field glob? string
 --- @field pattern? string
 --- @field search_term? string
+---
+--- @class agentic.acp.CursorTaskRawInput : agentic.acp.RawInput
+--- @field _toolName? string
+--- @field prompt? string
+--- @field description? string
+--- @field subagentType? string|table
+--- @field model? string
+---
+--- @alias agentic.acp.CursorRawInput agentic.acp.CursorCommonRawInput|agentic.acp.CursorTaskRawInput
 
 --- @class agentic.acp.CursorToolCallMessage : agentic.acp.ToolCallMessage
 --- @field rawInput? agentic.acp.CursorRawInput
@@ -250,6 +259,119 @@ function CursorACPAdapter:_build_edit_diff(raw_input)
     return diff
 end
 
+--- @param task agentic.acp.CursorTaskRawInput|agentic.acp.CursorTaskParams|nil
+--- @param opts? { include_prompt?: boolean, status_line?: string|nil }
+--- @return string[]|nil
+function CursorACPAdapter:_build_task_body(task, opts)
+    if not task or vim.tbl_isempty(task) then
+        return nil
+    end
+
+    opts = opts or {}
+
+    local lines = {}
+    local description = vim.trim(task.description or "")
+    local prompt = task.prompt
+
+    if opts.status_line and opts.status_line ~= "" then
+        table.insert(lines, opts.status_line)
+    end
+
+    if description ~= "" then
+        table.insert(lines, "Description: " .. description)
+    end
+
+    if
+        type(prompt) == "string"
+        and prompt ~= ""
+        and opts.include_prompt ~= false
+    then
+        if #lines > 0 then
+            table.insert(lines, "")
+        end
+
+        table.insert(lines, "Prompt:")
+        vim.list_extend(lines, self:safe_split(prompt))
+    end
+
+    if #lines == 0 then
+        return nil
+    end
+
+    return lines
+end
+
+--- @param subagent_type string|table|nil
+--- @return string|nil
+local function format_subagent_type(subagent_type)
+    if type(subagent_type) == "string" then
+        local trimmed = vim.trim(subagent_type)
+        if trimmed ~= "" and trimmed ~= "unspecified" then
+            return trimmed
+        end
+        return nil
+    end
+
+    if type(subagent_type) ~= "table" then
+        return nil
+    end
+
+    local custom = subagent_type.custom
+    if type(custom) == "table" then
+        for key, _ in pairs(custom) do
+            if type(key) == "string" and key ~= "" and key ~= "unspecified" then
+                return key
+            end
+        end
+    end
+
+    return nil
+end
+
+--- @param task agentic.acp.CursorTaskRawInput|agentic.acp.CursorTaskParams|nil
+--- @param title string|nil
+--- @return string
+function CursorACPAdapter:_format_task_argument(task, title)
+    local fallback = strip_title_prefix("task", title)
+    if not task or vim.tbl_isempty(task) then
+        return fallback ~= "" and fallback or "subagent task"
+    end
+
+    local description = vim.trim(task.description or "")
+    local model = vim.trim(task.model or "")
+    local subagent_type = format_subagent_type(task.subagentType)
+
+    if model ~= "" and subagent_type and description ~= "" then
+        return string.format("%s, %s: %s", model, subagent_type, description)
+    end
+
+    if model ~= "" and description ~= "" then
+        return string.format("%s: %s", model, description)
+    end
+
+    if subagent_type and description ~= "" then
+        return string.format("%s: %s", subagent_type, description)
+    end
+
+    if description ~= "" then
+        return description
+    end
+
+    if model ~= "" and subagent_type then
+        return string.format("%s, %s", model, subagent_type)
+    end
+
+    if model ~= "" then
+        return model
+    end
+
+    if subagent_type then
+        return subagent_type
+    end
+
+    return fallback ~= "" and fallback or "subagent task"
+end
+
 --- Overloading create_session to handle slash commands, as cursor sends them before session starts
 --- @param handlers agentic.acp.ClientHandlers
 --- @param callback fun(result: agentic.acp.SessionCreationResponse|nil, err: agentic.acp.ACPError|nil)
@@ -401,6 +523,14 @@ function CursorACPAdapter:__handle_tool_call(session_id, update)
             else
                 message.argument = "unknown fetch"
             end
+        ---@diagnostic disable-next-line: invisible
+        elseif update.rawInput._toolName == "task" then
+            local raw_input = update.rawInput
+            ---@cast raw_input agentic.acp.CursorTaskRawInput
+            message.kind = "SubAgent"
+            message.argument =
+                self:_format_task_argument(raw_input, update.title)
+            message.body = self:_build_task_body(raw_input, {})
         else
             local command = update.rawInput.command
             if type(command) == "table" then
@@ -545,15 +675,19 @@ function CursorACPAdapter:_handle_cursor_task(message_id, params)
     end
 
     local description = params.description or "subagent task"
+    local body = self:_build_task_body(params, {
+        status_line = string.format("⚡ %s%s", description, duration_str),
+    }) or {
+        string.format("⚡ %s%s", description, duration_str),
+    }
 
     --- @type agentic.ui.MessageWriter.ToolCallBase
     local update = {
         tool_call_id = params.toolCallId,
+        kind = "SubAgent",
         status = "completed",
-        argument = description,
-        body = {
-            string.format("⚡ %s%s", description, duration_str),
-        },
+        argument = self:_format_task_argument(params, nil),
+        body = body,
     }
 
     -- cursor/task doesn't include sessionId, so find the subscriber that owns this tool call
