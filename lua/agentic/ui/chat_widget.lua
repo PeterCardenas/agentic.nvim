@@ -363,6 +363,7 @@ function ChatWidget:_submit_input()
     end
 
     vim.api.nvim_buf_set_lines(self.buf_nrs.input, 0, -1, false, {})
+    self:_resize_input_window()
 
     for name, bufnr in pairs(self.buf_nrs) do
         if not NON_CONTENT_PANELS[name] then
@@ -411,10 +412,17 @@ function ChatWidget:move_cursor_to(winid, callback)
     end)
 end
 
+function ChatWidget:_resize_input_window()
+    local max_height =
+        math.max(3, Config.windows.input.height --[[@as integer]])
+    WidgetLayout.resize_input(self.win_nrs, self.current_position, max_height)
+end
+
 function ChatWidget:_initialize()
     self.buf_nrs = self:_create_buf_nrs()
 
     self:_bind_keymaps()
+    self:_bind_input_resize_events()
 
     -- I only want to trigger a full close of the chat widget when closing the chat or the input buffers, the others are auxiliary
     for _, bufnr in ipairs({
@@ -425,6 +433,17 @@ function ChatWidget:_initialize()
             buffer = bufnr,
             callback = function()
                 self:hide()
+            end,
+        })
+    end
+end
+
+function ChatWidget:_bind_input_resize_events()
+    for _, event in ipairs({ "TextChanged", "TextChangedI" }) do
+        vim.api.nvim_create_autocmd(event, {
+            buffer = self.buf_nrs.input,
+            callback = function()
+                self:_resize_input_window()
             end,
         })
     end

@@ -61,16 +61,46 @@ function WidgetLayout.calculate_height(size)
     return calculate_dimension(size, vim.o.lines, DefaultConfig.windows.height)
 end
 
---- @param bufnr integer
---- @param max_height integer
 --- @param position agentic.UserConfig.Windows.Position
 --- @return integer
-local function calculate_dynamic_height(bufnr, max_height, position)
-    max_height = math.max(1, max_height)
-    local line_count = vim.api.nvim_buf_line_count(bufnr)
+local function get_dynamic_window_padding(position)
     -- Use 2 in bottom layout to prevent the file list from touching the screen edge
-    local padding = position == "bottom" and 2 or 1
-    return math.min(line_count + padding, max_height)
+    return position == "bottom" and 2 or 1
+end
+
+--- @param winid integer
+--- @param max_height integer
+--- @param position agentic.UserConfig.Windows.Position
+--- @param min_height integer
+--- @return integer
+local function calculate_dynamic_height(winid, max_height, position, min_height)
+    max_height = math.max(min_height, max_height)
+
+    local text_height = vim.api.nvim_win_text_height(winid, {
+        start_row = 0,
+    }).all
+    local padding = get_dynamic_window_padding(position)
+
+    return math.min(math.max(text_height + padding, min_height), max_height)
+end
+
+--- @param winid integer|nil
+--- @param max_height integer
+--- @param position agentic.UserConfig.Windows.Position
+--- @param min_height integer
+local function resize_dynamic_window_height(
+    winid,
+    max_height,
+    position,
+    min_height
+)
+    if not winid or not vim.api.nvim_win_is_valid(winid) then
+        return
+    end
+
+    local height =
+        calculate_dynamic_height(winid, max_height, position, min_height)
+    vim.api.nvim_win_set_config(winid, { height = height })
 end
 
 --- @param window_name agentic.ui.ChatWidget.PanelNames
@@ -174,17 +204,26 @@ local function open_or_resize_dynamic_window(
         return
     end
 
-    local height = calculate_dynamic_height(bufnr, max_height, position)
-
     if not winid or not vim.api.nvim_win_is_valid(winid) then
-        open_win_opts.height = height
+        open_win_opts.height = 1
         win_nrs[window_name] =
             open_win(bufnr, false, open_win_opts, window_name, {})
-    else
-        vim.api.nvim_win_set_config(winid, { height = height })
+        winid = win_nrs[window_name]
     end
 
+    resize_dynamic_window_height(winid, max_height, position, 1)
     WindowDecoration.render_header(bufnr, window_name)
+end
+
+--- @param win_nrs agentic.ui.ChatWidget.WinNrs
+--- @param position agentic.UserConfig.Windows.Position
+--- @param max_height integer
+function WidgetLayout.resize_input(win_nrs, position, max_height)
+    if position == "bottom" then
+        return
+    end
+
+    resize_dynamic_window_height(win_nrs.input, max_height, position, 3)
 end
 
 --- @param params agentic.ui.WidgetLayout.Params
@@ -230,12 +269,16 @@ local function show_layout(params, position)
         input_opts.width = math.max(1, math.min(raw_width, chat_width - 1))
     else
         input_opts.split = "below"
-        input_opts.height = Config.windows.input.height
+        input_opts.height = 2
     end
 
     get_or_create_window(win_nrs, "input", buf_nrs.input, input_opts, {
         winfixheight = not is_bottom,
     })
+
+    local input_max_height =
+        math.max(2, Config.windows.input.height --[[@as integer]])
+    WidgetLayout.resize_input(win_nrs, position, input_max_height)
 
     local code_max_height = Config.windows.code.max_height --[[@as integer]]
     open_or_resize_dynamic_window(buf_nrs, win_nrs, "code", {

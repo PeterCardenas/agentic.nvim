@@ -250,6 +250,25 @@ describe("agentic.ui.ChatWidget", function()
                 end
             )
 
+            it("sizes dynamic windows using wrapped line height", function()
+                fill_buffer(widget, "files", { string.rep("x", 200) })
+
+                widget:show({ focus_prompt = false })
+
+                --- @type integer
+                local files_win = assert.not_nil(widget.win_nrs.files)
+                local text_height = vim.api.nvim_win_text_height(files_win, {
+                    start_row = 0,
+                }).all
+                local expected = math.min(
+                    text_height + padding,
+                    Config.windows.files.max_height
+                )
+
+                assert.is_true(text_height > 1)
+                assert.equal(expected, vim.api.nvim_win_get_height(files_win))
+            end)
+
             it("resizes window when content changes", function()
                 fill_buffer(widget, "code", { "line1", "line2", "line3" })
 
@@ -388,12 +407,45 @@ describe("agentic.ui.ChatWidget", function()
                 assert.equal(chat_pos[2], input_pos[2])
             end)
 
-            it("input has fixed height", function()
+            it("input starts at 3 lines when empty", function()
                 widget:show()
 
                 local input_height =
                     vim.api.nvim_win_get_height(widget.win_nrs.input)
-                assert.equal(Config.windows.input.height, input_height)
+                assert.equal(3, input_height)
+            end)
+
+            it("input resizes to wrapped content on text changes", function()
+                widget:show()
+
+                --- @type integer
+                local input_win = assert.not_nil(widget.win_nrs.input)
+                local width = vim.api.nvim_win_get_width(input_win)
+                local long_line = string.rep("x", math.floor(width * 4))
+                local max_input_height =
+                    math.max(2, Config.windows.input.height --[[@as integer]])
+
+                fill_buffer(widget, "input", { long_line })
+                vim.api.nvim_exec_autocmds("TextChanged", {
+                    buffer = widget.buf_nrs.input,
+                    modeline = false,
+                })
+
+                local text_height = vim.api.nvim_win_text_height(input_win, {
+                    start_row = 0,
+                }).all
+                local expected = math.min(text_height + 1, max_input_height)
+
+                assert.is_true(expected > 2)
+                assert.equal(expected, vim.api.nvim_win_get_height(input_win))
+
+                fill_buffer(widget, "input", { "" })
+                vim.api.nvim_exec_autocmds("TextChanged", {
+                    buffer = widget.buf_nrs.input,
+                    modeline = false,
+                })
+
+                assert.equal(3, vim.api.nvim_win_get_height(input_win))
             end)
         end)
     end
