@@ -54,12 +54,47 @@ function SessionRegistry.get_session_for_tab_page(tab_page_id, callback)
     return instance
 end
 
+---@param tab_page_id integer|nil
+---@param provider_name agentic.UserConfig.ProviderName|nil
+---@return agentic.SessionManager|nil session
+---@return "creating"|"blank"|nil reuse_reason
+function SessionRegistry.get_reusable_session(tab_page_id, provider_name)
+    local resolved_tab_page_id = tab_page_id ~= nil and tab_page_id
+        or vim.api.nvim_get_current_tabpage()
+    --- @cast resolved_tab_page_id integer
+    local session = SessionRegistry.sessions[resolved_tab_page_id]
+    if not session then
+        return nil, nil
+    end
+    if session.get_new_session_reuse_reason == nil then
+        return nil, nil
+    end
+
+    local target_provider = provider_name or Config.provider
+    local reuse_reason = session:get_new_session_reuse_reason(target_provider)
+    if not reuse_reason then
+        return nil, nil
+    end
+
+    return session, reuse_reason
+end
+
 --- Destroys any existing session for the given tab page and creates a new one
 --- @param tab_page_id integer|nil
+--- @param opts {provider?: agentic.UserConfig.ProviderName, skip_reuse_check?: boolean}|nil
 --- @return agentic.SessionManager|nil
-function SessionRegistry.new_session(tab_page_id)
+function SessionRegistry.new_session(tab_page_id, opts)
+    opts = opts or {}
     tab_page_id = tab_page_id ~= nil and tab_page_id
         or vim.api.nvim_get_current_tabpage()
+
+    if opts.skip_reuse_check ~= true then
+        local session =
+            SessionRegistry.get_reusable_session(tab_page_id, opts.provider)
+        if session then
+            return session
+        end
+    end
 
     SessionRegistry.destroy_session(tab_page_id)
 

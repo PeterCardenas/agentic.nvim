@@ -73,11 +73,13 @@ end)()
             child.cmd("tabnew")
         end
 
+        local tab_count = child.lua_get([[#vim.api.nvim_list_tabpages()]])
         local session_count = child.lua_get([[
             vim.tbl_count(require("agentic.session_registry").sessions)
         ]])
 
-        assert.equal(5, session_count)
+        -- Session prewarm eagerly creates a blank session on the final tab too.
+        assert.equal(tab_count, session_count)
     end)
 
     it("each panel has distinct buffer name prefix", function()

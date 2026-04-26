@@ -223,6 +223,38 @@ describe("agentic.SessionManager", function()
             end
         end)
 
+        it(
+            "no-ops when target provider already matches session provider",
+            function()
+                local AgentInstance = require("agentic.acp.agent_instance")
+                get_instance_stub = spy.stub(AgentInstance, "get_instance")
+
+                Config.provider = "claude-acp"
+
+                local session = {
+                    is_generating = false,
+                    session_id = nil,
+                    _is_creating_session = true,
+                    agent = {
+                        provider_config = Config.acp_providers["claude-acp"],
+                        cancel_session = spy.new(function() end),
+                    },
+                    permission_manager = { clear = spy.new(function() end) },
+                    todo_list = { clear = spy.new(function() end) },
+                    new_session = spy.new(function() end),
+                }
+
+                SessionManager.switch_provider(session)
+
+                assert.spy(notify_stub).was.called(0)
+                assert.spy(get_instance_stub).was.called(0)
+                assert.spy(session.agent.cancel_session).was.called(0)
+                assert.spy(session.permission_manager.clear).was.called(0)
+                assert.spy(session.todo_list.clear).was.called(0)
+                assert.spy(session.new_session).was.called(0)
+            end
+        )
+
         it("blocks when is_generating is true", function()
             local session = {
                 is_generating = true,
@@ -402,6 +434,163 @@ describe("agentic.SessionManager", function()
             assert.spy(session.permission_manager.clear).was.called(1)
             assert.spy(session.todo_list.clear).was.called(1)
             assert.spy(session.new_session).was.called(1)
+        end)
+    end)
+
+    describe("get_new_session_reuse_reason", function()
+        it("reuses blank sessions for the same provider", function()
+            local session = {
+                session_id = "session-1",
+                agent = {
+                    provider_config = Config.acp_providers["claude-acp"],
+                },
+                chat_history = { messages = {} },
+                _is_creating_session = false,
+            }
+
+            assert.equal(
+                "blank",
+                SessionManager.get_new_session_reuse_reason(
+                    session,
+                    "claude-acp"
+                )
+            )
+        end)
+
+        it(
+            "reuses sessions still being created for the same provider",
+            function()
+                local session = {
+                    session_id = nil,
+                    agent = {
+                        provider_config = Config.acp_providers["claude-acp"],
+                    },
+                    chat_history = {
+                        messages = { { type = "user", text = "hello" } },
+                    },
+                    _is_creating_session = true,
+                }
+
+                assert.equal(
+                    "creating",
+                    SessionManager.get_new_session_reuse_reason(
+                        session,
+                        "claude-acp"
+                    )
+                )
+            end
+        )
+
+        it(
+            "does not reuse sessions with messages once creation finished",
+            function()
+                local session = {
+                    session_id = "session-1",
+                    agent = {
+                        provider_config = Config.acp_providers["claude-acp"],
+                    },
+                    chat_history = {
+                        messages = { { type = "user", text = "hello" } },
+                    },
+                    _is_creating_session = false,
+                }
+
+                assert.is_nil(
+                    SessionManager.get_new_session_reuse_reason(
+                        session,
+                        "claude-acp"
+                    )
+                )
+            end
+        )
+
+        it("does not reuse sessions for a different provider", function()
+            local session = {
+                session_id = "session-1",
+                agent = {
+                    provider_config = Config.acp_providers["claude-acp"],
+                },
+                chat_history = { messages = {} },
+                _is_creating_session = true,
+            }
+
+            assert.is_nil(
+                SessionManager.get_new_session_reuse_reason(
+                    session,
+                    "gemini-acp"
+                )
+            )
+        end)
+
+        it("does not reuse sessions before initial creation starts", function()
+            local session = {
+                session_id = nil,
+                agent = {
+                    provider_config = Config.acp_providers["claude-acp"],
+                },
+                chat_history = { messages = {} },
+                _is_creating_session = false,
+            }
+
+            assert.is_nil(
+                SessionManager.get_new_session_reuse_reason(
+                    session,
+                    "claude-acp"
+                )
+            )
+        end)
+    end)
+
+    describe("new_session", function()
+        local original_provider
+
+        before_each(function()
+            original_provider = Config.provider
+            Config.provider = "claude-acp"
+        end)
+
+        after_each(function()
+            Config.provider = original_provider
+        end)
+
+        it("reuses when creation is already in progress", function()
+            local session = {
+                agent = {
+                    provider_config = Config.acp_providers["claude-acp"],
+                    create_session = spy.new(function() end),
+                },
+                status_animation = { start = spy.new(function() end) },
+                _is_creating_session = true,
+                session_id = nil,
+                chat_history = { messages = {} },
+                _cancel_session = spy.new(function() end),
+            }
+
+            SessionManager.new_session(session)
+
+            assert.spy(session._cancel_session).was.called(0)
+            assert.spy(session.status_animation.start).was.called(0)
+            assert.spy(session.agent.create_session).was.called(0)
+        end)
+
+        it("reuses blank created sessions", function()
+            local session = {
+                agent = {
+                    provider_config = Config.acp_providers["claude-acp"],
+                    create_session = spy.new(function() end),
+                },
+                status_animation = { start = spy.new(function() end) },
+                _is_creating_session = false,
+                session_id = "session-1",
+                chat_history = { messages = {} },
+                _cancel_session = spy.new(function() end),
+            }
+
+            SessionManager.new_session(session)
+
+            assert.spy(session._cancel_session).was.called(0)
+            assert.spy(session.status_animation.start).was.called(0)
+            assert.spy(session.agent.create_session).was.called(0)
         end)
     end)
 

@@ -5,6 +5,7 @@ local spy = require("tests.helpers.spy")
 --- @field tab_page_id integer
 --- @field is_mock boolean
 --- @field destroy fun(self: agentic.tests.SessionRegistry.MockSession)
+--- @field get_new_session_reuse_reason? fun(self: agentic.tests.SessionRegistry.MockSession, provider_name: string): "creating"|"blank"|nil
 
 --- @class agentic.tests.SessionRegistry.ProviderStatus
 --- @field name string
@@ -335,6 +336,42 @@ describe("agentic.SessionRegistry", function()
 
             assert.are_not.equal(session1_v1, session1_v2)
             assert.equal(session2_v1, SessionRegistry.sessions[tab2_id])
+        end)
+
+        it("reuses creating session for same provider", function()
+            local tab_id = 1
+            local session = create_mock_session(tab_id)
+            session.get_new_session_reuse_reason = function(_, provider_name)
+                if provider_name == "claude-acp" then
+                    return "creating"
+                end
+                return nil
+            end
+            SessionRegistry.sessions[tab_id] = session --[[@as agentic.SessionManager]]
+
+            local reused = assert.not_nil(SessionRegistry.new_session(tab_id, {
+                provider = "claude-acp",
+            }))
+
+            assert.equal(session, reused)
+        end)
+
+        it("reuses blank session for same provider", function()
+            local tab_id = 1
+            local session = create_mock_session(tab_id)
+            session.get_new_session_reuse_reason = function(_, provider_name)
+                if provider_name == "claude-acp" then
+                    return "blank"
+                end
+                return nil
+            end
+            SessionRegistry.sessions[tab_id] = session --[[@as agentic.SessionManager]]
+
+            local reused = assert.not_nil(SessionRegistry.new_session(tab_id, {
+                provider = "claude-acp",
+            }))
+
+            assert.equal(session, reused)
         end)
     end)
 

@@ -101,6 +101,7 @@ end
 --- @field _history_to_send? agentic.ui.ChatHistory.Message[]
 --- @field _restoring boolean
 --- @field _replace_session boolean
+--- @field _is_creating_session boolean
 
 --- @class agentic.SessionManager : agentic.SessionManagerData
 --- @field session_id? string
@@ -125,6 +126,7 @@ end
 --- @field _history_to_send? agentic.ui.ChatHistory.Message[] Messages to prepend on next prompt submit
 --- @field _restoring boolean Flag to prevent auto-new_session during restore
 --- @field _replace_session boolean When true, preserve loaded session identity on next submit (continue mode)
+--- @field _is_creating_session boolean True once session startup is requested, until session/new resolves
 local SessionManager = {}
 SessionManager.__index = SessionManager
 
@@ -165,6 +167,7 @@ function SessionManager:new(tab_page_id)
         _header_refresh_scheduled = false,
         _restoring = false,
         _replace_session = false,
+        _is_creating_session = false,
     }
     self = setmetatable(instance, self)
 
@@ -172,7 +175,9 @@ function SessionManager:new(tab_page_id)
         vim.schedule(function()
             -- Skip auto-new_session if restore_from_history was called
             if not self._restoring then
-                self:new_session()
+                self:new_session({
+                    skip_reuse_check = true,
+                })
             end
         end)
     end)
@@ -183,6 +188,7 @@ function SessionManager:new(tab_page_id)
     end
 
     self.agent = agent
+    self._is_creating_session = true
 
     self.chat_history = ChatHistory:new()
 
@@ -1411,16 +1417,23 @@ function SessionManager:_handle_input_submit(input_text)
 end
 
 --- Create a new session, optionally cancelling any existing one
---- @param opts {restore_mode?: boolean, on_created?: fun()}|nil
+--- @param opts {restore_mode?: boolean, on_created?: fun(), skip_reuse_check?: boolean}|nil
 function SessionManager:new_session(opts)
     opts = opts or {}
     local restore_mode = opts.restore_mode == true
     local on_created = opts.on_created
+    local provider_name = Config.provider
+    if not restore_mode and opts.skip_reuse_check ~= true then
+        if SessionManager.get_new_session_reuse_reason(self, provider_name) then
+            return
+        end
+    end
     if not restore_mode then
         self:_cancel_session()
     end
 
     self.status_animation:start("busy")
+    self._is_creating_session = true
 
     --- @type agentic.acp.ClientHandlers
     local handlers = {
@@ -1493,6 +1506,7 @@ function SessionManager:new_session(opts)
 
     self.agent:create_session(handlers, function(response, err)
         self.status_animation:stop()
+        self._is_creating_session = false
 
         if err or not response then
             -- no log here, already logged in create_session
@@ -1577,6 +1591,7 @@ end
 function SessionManager:_cancel_session()
     self.is_generating = false
     self.status_animation:stop()
+    self._is_creating_session = false
 
     if self.session_id then
         -- only cancel and clear content if there was an session
@@ -1624,6 +1639,10 @@ function SessionManager:switch_provider()
             "Cannot switch provider while generating. Stop generation first.",
             vim.log.levels.WARN
         )
+        return
+    end
+
+    if SessionManager.uses_provider(self, Config.provider) then
         return
     end
 
@@ -1684,6 +1703,40 @@ function SessionManager:add_selection_or_file_to_session()
     if not added_selection then
         self:add_file_to_session()
     end
+end
+
+---@param provider_name agentic.UserConfig.ProviderName
+---@return boolean
+function SessionManager:uses_provider(provider_name)
+    local provider_config = Config.acp_providers[provider_name]
+    return provider_config ~= nil
+        and self.agent ~= nil
+        and self.agent.provider_config == provider_config
+end
+
+---@return boolean
+function SessionManager:has_messages()
+    return self.chat_history ~= nil
+        and self.chat_history.messages ~= nil
+        and #self.chat_history.messages > 0
+end
+
+---@param provider_name agentic.UserConfig.ProviderName
+---@return "creating"|"blank"|nil
+function SessionManager:get_new_session_reuse_reason(provider_name)
+    if not SessionManager.uses_provider(self, provider_name) then
+        return nil
+    end
+
+    if self._is_creating_session then
+        return "creating"
+    end
+
+    if self.session_id ~= nil and not SessionManager.has_messages(self) then
+        return "blank"
+    end
+
+    return nil
 end
 
 function SessionManager:add_selection_to_session()

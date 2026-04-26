@@ -127,6 +127,22 @@ function Agentic.new_session(opts)
 
     local tab_page_id = vim.api.nvim_get_current_tabpage()
     local old_session = SessionRegistry.sessions[tab_page_id]
+    local reusable_session =
+        SessionRegistry.get_reusable_session(tab_page_id, Config.provider)
+
+    if reusable_session then
+        reusable_session.widget:_clear_maximize_state("new_session", {
+            restore_layout = reusable_session.widget:is_open()
+                and vim.api.nvim_get_current_tabpage()
+                    == reusable_session.widget.tab_page_id,
+            keep_widget = true,
+        })
+        if not opts or opts.auto_add_to_context ~= false then
+            reusable_session:add_selection_or_file_to_session()
+        end
+        reusable_session.widget:show(opts)
+        return
+    end
 
     --- @type agentic.ui.ChatWidget.WinNrs|nil
     local saved_win_nrs
@@ -154,7 +170,10 @@ function Agentic.new_session(opts)
         old_session.widget.win_nrs = {}
     end
 
-    local session = SessionRegistry.new_session()
+    local session = SessionRegistry.new_session(tab_page_id, {
+        provider = Config.provider,
+        skip_reuse_check = true,
+    })
     if session then
         -- Transfer preserved windows to new widget
         if saved_win_nrs then
@@ -363,6 +382,8 @@ function Agentic.setup(opts)
         end,
         desc = "Cleanup Agentic processes on tab close",
     })
+
+    require("agentic.session_prewarm").setup()
 
     if Config.image_paste.enabled then
         local function get_current_session()
