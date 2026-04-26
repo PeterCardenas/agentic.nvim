@@ -10,6 +10,8 @@ describe("DiffSplitView", function()
     local test_tabpage
     --- @type TestStub
     local read_stub
+    --- @type boolean
+    local original_hidden
 
     --- @param lines string[]|nil
     local function stub_file_content(lines)
@@ -19,12 +21,14 @@ describe("DiffSplitView", function()
     before_each(function()
         read_stub = spy_module.stub(FileSystem, "read_from_buffer_or_disk")
         stub_file_content({ "local x = 1", "print(x)", "" })
+        original_hidden = vim.o.hidden
         vim.cmd("tabnew")
         test_tabpage = vim.api.nvim_get_current_tabpage()
     end)
 
     after_each(function()
         read_stub:revert()
+        vim.o.hidden = original_hidden
         if test_tabpage and vim.api.nvim_tabpage_is_valid(test_tabpage) then
             pcall(DiffSplitView.clear_split_diff, test_tabpage)
             pcall(vim.api.nvim_tabpage_del, test_tabpage)
@@ -137,9 +141,32 @@ describe("DiffSplitView", function()
                     assert.is_not_nil(state.file_path)
 
                     assert.is_false(vim.bo[state.original_bufnr].modifiable)
-                    assert.is_true(vim.bo[state.original_bufnr].modified)
+                    assert.is_false(vim.bo[state.original_bufnr].modified)
                     assert.is_false(vim.bo[state.new_bufnr].modifiable)
                 end
+            end
+        )
+
+        it(
+            "should allow tabclose with nohidden while split diff is active",
+            function()
+                vim.o.hidden = false
+
+                DiffSplitView.show_split_diff({
+                    file_path = test_file_path,
+                    diff = { old = { "local x = 1" }, new = { "local x = 2" } },
+                    get_winid = function()
+                        return vim.api.nvim_get_current_win()
+                    end,
+                })
+
+                local state =
+                    assert.not_nil(DiffSplitView.get_split_state(test_tabpage))
+                assert.is_false(vim.bo[state.original_bufnr].modified)
+
+                assert.has_no_errors(function()
+                    vim.cmd("tabclose")
+                end)
             end
         )
 

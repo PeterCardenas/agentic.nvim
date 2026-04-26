@@ -130,11 +130,7 @@ local function open_split_view(abs_path, bufnr, target_winid, modified_lines)
     if vim.b[bufnr]._agentic_prev_modifiable == nil then
         vim.b[bufnr]._agentic_prev_modifiable = vim.bo[bufnr].modifiable
     end
-    if vim.b[bufnr]._agentic_prev_modified == nil then
-        vim.b[bufnr]._agentic_prev_modified = vim.bo[bufnr].modified
-    end
     vim.bo[bufnr].modifiable = false
-    vim.bo[bufnr].modified = true
 
     vim.bo[scratch_bufnr].modifiable = false
 
@@ -299,16 +295,10 @@ function M.clear_split_diff(tabpage)
     if vim.api.nvim_buf_is_valid(state.original_bufnr) then
         local prev_modifiable =
             vim.b[state.original_bufnr]._agentic_prev_modifiable
-        local prev_modified = vim.b[state.original_bufnr]._agentic_prev_modified
 
         if prev_modifiable ~= nil then
             vim.bo[state.original_bufnr].modifiable = prev_modifiable
             vim.b[state.original_bufnr]._agentic_prev_modifiable = nil
-        end
-
-        if prev_modified ~= nil then
-            vim.bo[state.original_bufnr].modified = prev_modified
-            vim.b[state.original_bufnr]._agentic_prev_modified = nil
         end
     end
 
