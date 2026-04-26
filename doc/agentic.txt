@@ -485,6 +485,10 @@ These keybindings are automatically set in Agentic buffers:
   <leader>ao             n       Global two-step config picker
   q                      n       Close chat widget
   d                      n/v     Remove file/selection/diagnostic
+  ]p                     n       Next prompt in chat
+  [p                     n       Previous prompt in chat
+  ]a                     n       Jump to latest agent message start
+  [a                     n       Previous agent message start
   ]c                     n       Next diff hunk
   [c                     n       Previous diff hunk
 
@@ -519,6 +523,12 @@ Override default keybindings via the `keymaps` config option:
       diff_preview = {
         next_hunk = "]c",
         prev_hunk = "[c",
+      },
+      chat_navigation = {
+        next_prompt = "]p",
+        prev_prompt = "[p",
+        last_agent_chunk = "]a",
+        prev_agent_chunk = "[a",
       },
     },
   }

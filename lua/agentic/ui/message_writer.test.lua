@@ -599,6 +599,95 @@ describe("agentic.ui.MessageWriter", function()
         end)
     end)
 
+    describe("agent message chunk navigation positions", function()
+        it("records only the start of each streamed agent message", function()
+            writer:write_message_chunk(make_message_update("hello"))
+            writer:write_message_chunk(make_message_update(" world"))
+            writer:write_message_chunk(make_message_update("\nworld"))
+
+            assert.same({ 1 }, writer:get_agent_message_chunk_positions())
+        end)
+
+        it(
+            "records full agent messages with the same boundary rules",
+            function()
+                writer:write_message({
+                    sessionUpdate = "user_message_chunk",
+                    content = { type = "text", text = "user prompt" },
+                })
+                writer:write_message({
+                    sessionUpdate = "agent_message_chunk",
+                    content = {
+                        type = "text",
+                        text = "agent reply\nmore reply",
+                    },
+                })
+
+                local positions = writer:get_agent_message_chunk_positions()
+                assert.equal(1, #positions)
+                local position = assert.not_nil(positions[1])
+                local line = vim.api.nvim_buf_get_lines(
+                    bufnr,
+                    position - 1,
+                    position,
+                    false
+                )[1]
+
+                assert.equal("agent reply", line)
+            end
+        )
+
+        it("records a new position after a non-message update", function()
+            writer:write_message_chunk(make_message_update("hello"))
+            writer:write_message_chunk({
+                sessionUpdate = "agent_thought_chunk",
+                content = { type = "text", text = "thinking" },
+            })
+            writer:write_message_chunk(make_message_update("world"))
+
+            assert.same({ 1, 4 }, writer:get_agent_message_chunk_positions())
+        end)
+
+        it(
+            "does not create a new position for a full agent message continuation",
+            function()
+                writer:write_message_chunk(make_message_update("hello"))
+                writer:write_message({
+                    sessionUpdate = "agent_message_chunk",
+                    content = { type = "text", text = "\n### done" },
+                })
+
+                assert.same({ 1 }, writer:get_agent_message_chunk_positions())
+            end
+        )
+
+        it("clears prompt and agent chunk navigation positions", function()
+            writer:record_prompt_position()
+            writer:write_message({
+                sessionUpdate = "user_message_chunk",
+                content = {
+                    type = "text",
+                    text = table.concat({
+                        "## User",
+                        "",
+                        "hello",
+                        "",
+                        "### Agent",
+                    }, "\n"),
+                },
+            })
+            writer:write_message_chunk(make_message_update("answer"))
+
+            assert.same({ 3 }, writer:get_prompt_positions())
+            assert.same({ 7 }, writer:get_agent_message_chunk_positions())
+
+            writer:clear_navigation_positions()
+
+            assert.same({}, writer:get_prompt_positions())
+            assert.same({}, writer:get_agent_message_chunk_positions())
+        end)
+    end)
+
     describe("write_message_chunk trailing newline deferral", function()
         --- @type TestStub
         local schedule_stub

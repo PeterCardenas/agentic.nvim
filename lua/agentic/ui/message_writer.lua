@@ -22,6 +22,8 @@ local NS_DIFF_HIGHLIGHTS =
 local NS_STATUS = vim.api.nvim_create_namespace("agentic_status_footer")
 local NS_PROMPT_POSITIONS =
     vim.api.nvim_create_namespace("agentic_prompt_positions")
+local NS_AGENT_MESSAGE_CHUNK_POSITIONS =
+    vim.api.nvim_create_namespace("agentic_agent_message_chunk_positions")
 
 --- Decode base64 image data to a temp file and return a markdown image link.
 --- @param data string
@@ -67,6 +69,51 @@ local function extract_content_text(content)
     end
 
     return nil
+end
+
+--- @param start_row integer 0-indexed
+--- @param lines string[]
+--- @return integer row 0-indexed
+local function resolve_first_inserted_row(start_row, lines)
+    local row = start_row
+    local line_index = 1
+
+    while line_index <= #lines and lines[line_index] == "" do
+        row = row + 1
+        line_index = line_index + 1
+    end
+
+    return row
+end
+
+--- @param bufnr integer
+--- @return integer row 0-indexed
+local function get_append_start_row(bufnr)
+    if BufHelpers.is_buffer_empty(bufnr) then
+        return 0
+    end
+
+    return vim.api.nvim_buf_line_count(bufnr)
+end
+
+--- @param session_update string|nil
+--- @return boolean
+local function is_agent_message_update(session_update)
+    return session_update == "agent_message_chunk"
+end
+
+--- @param bufnr integer
+--- @param start_row integer 0-indexed
+--- @param lines string[]
+local function record_agent_message_position(bufnr, start_row, lines)
+    local message_row = resolve_first_inserted_row(start_row, lines)
+    vim.api.nvim_buf_set_extmark(
+        bufnr,
+        NS_AGENT_MESSAGE_CHUNK_POSITIONS,
+        message_row,
+        0,
+        {}
+    )
 end
 
 --- @class agentic.ui.MessageWriter.HighlightRange
@@ -177,6 +224,13 @@ function MessageWriter:_clear_thought_state()
     self._pending_newline = nil
 end
 
+--- @param session_update string|nil
+--- @return boolean
+function MessageWriter:_should_record_agent_message_start(session_update)
+    return is_agent_message_update(session_update)
+        and not is_agent_message_update(self._last_message_type)
+end
+
 --- Writes a full message to the chat buffer and append two blank lines after
 --- @param update agentic.acp.UserMessageChunk|agentic.acp.AgentMessageChunk
 function MessageWriter:write_message(update)
@@ -188,27 +242,25 @@ function MessageWriter:write_message(update)
 
     local lines = vim.split(text, "\n", { plain = true })
     local should_record_prompt = self._record_next_prompt
+    local should_record_agent_message =
+        self:_should_record_agent_message_start(update.sessionUpdate)
     self._record_next_prompt = nil
 
     self:_clear_thought_state()
+    self._last_message_type = update.sessionUpdate
     self:_auto_scroll(self.bufnr)
 
-    self:_with_modifiable_and_notify_change(function()
-        -- Capture the row where new content will start (0-indexed)
-        local prompt_row
-        if should_record_prompt then
-            prompt_row = BufHelpers.is_buffer_empty(self.bufnr) and 0
-                or vim.api.nvim_buf_line_count(self.bufnr)
-        end
+    self:_with_modifiable_and_notify_change(function(bufnr)
+        local start_row = get_append_start_row(bufnr)
 
         self:_append_lines(lines)
         self:_append_lines({ "", "" })
 
-        if prompt_row then
+        if should_record_prompt then
             -- Offset by 2 to point at the first content line
             -- (header line, blank line, content line)
             local content_row = math.min(
-                prompt_row + 2,
+                start_row + 2,
                 vim.api.nvim_buf_line_count(self.bufnr) - 1
             )
             vim.api.nvim_buf_set_extmark(
@@ -218,6 +270,10 @@ function MessageWriter:write_message(update)
                 0,
                 {}
             )
+        end
+
+        if should_record_agent_message then
+            record_agent_message_position(bufnr, start_row, lines)
         end
     end)
 end
@@ -251,6 +307,58 @@ function MessageWriter:get_prompt_positions()
     return positions
 end
 
+--- Returns 1-indexed line numbers where agent messages start.
+--- This records only the first `agent_message_chunk` after any non-message
+--- update, whether that message arrived as streamed chunks or a full replayed
+--- agent message.
+--- @return integer[] positions
+function MessageWriter:get_agent_message_chunk_positions()
+    if not vim.api.nvim_buf_is_valid(self.bufnr) then
+        return {}
+    end
+
+    local marks = vim.api.nvim_buf_get_extmarks(
+        self.bufnr,
+        NS_AGENT_MESSAGE_CHUNK_POSITIONS,
+        0,
+        -1,
+        {}
+    )
+    --- @type integer[]
+    local positions = {}
+    local seen = {}
+    for _, mark in ipairs(marks) do
+        local line = mark[2] + 1
+        if not seen[line] then
+            seen[line] = true
+            table.insert(positions, line)
+        end
+    end
+    return positions
+end
+
+--- Clear prompt and agent chunk navigation extmarks.
+function MessageWriter:clear_navigation_positions()
+    if not vim.api.nvim_buf_is_valid(self.bufnr) then
+        return
+    end
+
+    pcall(
+        vim.api.nvim_buf_clear_namespace,
+        self.bufnr,
+        NS_PROMPT_POSITIONS,
+        0,
+        -1
+    )
+    pcall(
+        vim.api.nvim_buf_clear_namespace,
+        self.bufnr,
+        NS_AGENT_MESSAGE_CHUNK_POSITIONS,
+        0,
+        -1
+    )
+end
+
 --- Appends message chunks to the last line and column in the chat buffer
 --- Some ACP providers stream chunks instead of full messages
 --- @param update agentic.acp.AgentMessageChunk|agentic.acp.AgentThoughtChunk
@@ -270,6 +378,8 @@ function MessageWriter:write_message_chunk(update)
 
     local is_thought = update.sessionUpdate == "agent_thought_chunk"
     local was_thought = self._last_message_type == "agent_thought_chunk"
+    local is_first_agent_message =
+        self:_should_record_agent_message_start(update.sessionUpdate)
     local is_first_thought = is_thought and not was_thought
 
     if was_thought and not is_thought then
@@ -323,6 +433,10 @@ function MessageWriter:write_message_chunk(update)
         if not success then
             Logger.debug("Failed to set text in buffer", err, lines_to_write)
             return
+        end
+
+        if is_first_agent_message then
+            record_agent_message_position(bufnr, last_line, lines_to_write)
         end
 
         if is_thought then

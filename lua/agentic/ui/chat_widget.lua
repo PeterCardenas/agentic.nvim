@@ -515,18 +515,84 @@ function ChatWidget:_get_prompt_positions()
     return self.message_writer:get_prompt_positions()
 end
 
+--- Get all line numbers where agent messages start.
+--- @return integer[] positions 1-indexed line numbers
+function ChatWidget:_get_agent_message_chunk_positions()
+    if not self.message_writer then
+        return {}
+    end
+    return self.message_writer:get_agent_message_chunk_positions()
+end
+
+--- @return integer|nil
+function ChatWidget:_get_chat_winid()
+    local chat_winid = self.win_nrs.chat
+    if chat_winid and vim.api.nvim_win_is_valid(chat_winid) then
+        return chat_winid
+    end
+
+    local bufnr = self.buf_nrs.chat
+    chat_winid = bufnr and vim.fn.bufwinid(bufnr) or -1
+    if chat_winid == -1 then
+        Logger.notify("Chat window is not open", vim.log.levels.INFO)
+        return nil
+    end
+
+    return chat_winid
+end
+
+--- @param chat_winid integer
+--- @param target_line integer
+local function move_chat_cursor_to_line_start(chat_winid, target_line)
+    vim.api.nvim_win_call(chat_winid, function()
+        vim.api.nvim_win_set_cursor(chat_winid, { target_line, 0 })
+        vim.cmd("normal! zvzz")
+    end)
+end
+
+--- @param positions integer[]
+--- @param current_line integer
+--- @param direction "next"|"prev"
+--- @return integer
+local function get_adjacent_position(positions, current_line, direction)
+    local first = positions[1]
+    local last = positions[#positions]
+    if not first or not last then
+        return current_line
+    end
+
+    if direction == "next" then
+        for i, pos in ipairs(positions) do
+            if pos > current_line then
+                return pos
+            end
+            if pos == current_line then
+                return positions[i + 1] or first
+            end
+        end
+
+        return first
+    end
+
+    for i = #positions, 1, -1 do
+        local pos = positions[i]
+        if pos < current_line then
+            return pos
+        end
+        if pos == current_line then
+            return positions[i - 1] or last
+        end
+    end
+
+    return last
+end
+
 --- Navigate to next or previous user prompt in chat buffer
 --- @param direction "next"|"prev"
 function ChatWidget:_navigate_prompt(direction)
-    local chat_winid = self.win_nrs.chat
-    if not chat_winid or not vim.api.nvim_win_is_valid(chat_winid) then
-        -- Fallback: find the window currently showing the chat buffer
-        local bufnr = self.buf_nrs.chat
-        chat_winid = bufnr and vim.fn.bufwinid(bufnr) or -1
-        if chat_winid == -1 then
-            Logger.notify("Chat window is not open", vim.log.levels.INFO)
-            return
-        end
+    local chat_winid = self:_get_chat_winid()
+    if not chat_winid then
+        return
     end
 
     local positions = self:_get_prompt_positions()
@@ -537,39 +603,9 @@ function ChatWidget:_navigate_prompt(direction)
 
     local cursor = vim.api.nvim_win_get_cursor(chat_winid)
     local current_line = cursor[1]
-
-    local current_index = -1
-    local is_exactly_on_prompt = false
-
-    for i, pos in ipairs(positions) do
-        if pos == current_line then
-            current_index = i - 1
-            is_exactly_on_prompt = true
-            break
-        elseif pos < current_line then
-            current_index = i - 1
-        else
-            break
-        end
-    end
-
-    local new_index
-    if direction == "next" then
-        new_index = (current_index + 1) % #positions
-    else
-        if is_exactly_on_prompt then
-            new_index = current_index <= 0 and #positions - 1
-                or current_index - 1
-        else
-            new_index = current_index < 0 and #positions - 1 or current_index
-        end
-    end
-
-    local target_line = positions[new_index + 1]
-
-    vim.api.nvim_win_call(chat_winid, function()
-        vim.cmd(string.format("normal! %dGzz", target_line))
-    end)
+    local target_line =
+        get_adjacent_position(positions, current_line, direction)
+    move_chat_cursor_to_line_start(chat_winid, target_line)
 end
 
 --- Navigate to next user prompt
@@ -580,6 +616,43 @@ end
 --- Navigate to previous user prompt
 function ChatWidget:navigate_prev_prompt()
     self:_navigate_prompt("prev")
+end
+
+--- Navigate to the most recent agent message start in the chat buffer
+function ChatWidget:navigate_last_agent_message_chunk()
+    local chat_winid = self:_get_chat_winid()
+    if not chat_winid then
+        return
+    end
+
+    local positions = self:_get_agent_message_chunk_positions()
+    if #positions == 0 then
+        Logger.notify("No agent messages found in chat", vim.log.levels.INFO)
+        return
+    end
+
+    --- @type integer
+    local target_line = positions[#positions] or positions[1]
+    move_chat_cursor_to_line_start(chat_winid, target_line)
+end
+
+--- Navigate to the previous agent message start in the chat buffer
+function ChatWidget:navigate_prev_agent_message_chunk()
+    local chat_winid = self:_get_chat_winid()
+    if not chat_winid then
+        return
+    end
+
+    local positions = self:_get_agent_message_chunk_positions()
+    if #positions == 0 then
+        Logger.notify("No agent messages found in chat", vim.log.levels.INFO)
+        return
+    end
+
+    local cursor = vim.api.nvim_win_get_cursor(chat_winid)
+    local current_line = cursor[1]
+    local target_line = get_adjacent_position(positions, current_line, "prev")
+    move_chat_cursor_to_line_start(chat_winid, target_line)
 end
 
 function ChatWidget:_bind_keymaps()
@@ -696,6 +769,26 @@ function ChatWidget:_bind_keymaps()
             self:navigate_prev_prompt()
         end,
         { desc = "Agentic: Navigate to previous prompt" }
+    )
+
+    BufHelpers.keymap_set(
+        self.buf_nrs.chat,
+        "n",
+        Config.keymaps.chat_navigation.last_agent_chunk,
+        function()
+            self:navigate_last_agent_message_chunk()
+        end,
+        { desc = "Agentic: Navigate to latest agent message start" }
+    )
+
+    BufHelpers.keymap_set(
+        self.buf_nrs.chat,
+        "n",
+        Config.keymaps.chat_navigation.prev_agent_chunk,
+        function()
+            self:navigate_prev_agent_message_chunk()
+        end,
+        { desc = "Agentic: Navigate to previous agent message start" }
     )
 
     DiffPreview.setup_diff_navigation_keymaps(self.buf_nrs)

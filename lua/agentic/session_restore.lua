@@ -36,6 +36,10 @@ local function do_restore(session_id, tab_page_id)
                 session.agent:cancel_session(session.session_id)
             end
             session.widget:clear()
+            --- @diagnostic disable-next-line: unnecessary-if
+            if session.message_writer then
+                session.message_writer:clear_navigation_positions()
+            end
 
             session:restore_from_history(history, { replace_session = true })
 

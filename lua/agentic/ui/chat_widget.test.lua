@@ -662,4 +662,71 @@ describe("agentic.ui.ChatWidget", function()
             assert.equal("bottom", widget2.current_position)
         end)
     end)
+
+    describe("agent chunk navigation", function()
+        local MessageWriter
+        local tab_page_id
+        --- @type agentic.ui.ChatWidget
+        local widget
+
+        before_each(function()
+            MessageWriter = require("agentic.ui.message_writer")
+            vim.cmd("tabnew")
+            tab_page_id = vim.api.nvim_get_current_tabpage()
+
+            local on_submit_spy = spy.new(function() end)
+            widget =
+                ChatWidget:new(tab_page_id, on_submit_spy --[[@as function]])
+            widget.message_writer = MessageWriter:new(widget.buf_nrs.chat)
+
+            fill_buffer(widget, "chat", {
+                "line 1",
+                "line 2",
+                "line 3",
+                "line 4",
+                "line 5",
+                "line 6",
+                "line 7",
+                "line 8",
+            })
+            local ns = vim.api.nvim_create_namespace(
+                "agentic_agent_message_chunk_positions"
+            )
+            vim.api.nvim_buf_set_extmark(widget.buf_nrs.chat, ns, 1, 0, {})
+            vim.api.nvim_buf_set_extmark(widget.buf_nrs.chat, ns, 4, 0, {})
+            vim.api.nvim_buf_set_extmark(widget.buf_nrs.chat, ns, 7, 0, {})
+            widget:show({ focus_prompt = false })
+        end)
+
+        after_each(function()
+            if widget then
+                pcall(function()
+                    widget:destroy()
+                end)
+            end
+            pcall(function()
+                vim.cmd("tabclose")
+            end)
+        end)
+
+        it("jumps to the latest agent message chunk", function()
+            vim.api.nvim_win_set_cursor(widget.win_nrs.chat, { 1, 3 })
+
+            widget:navigate_last_agent_message_chunk()
+
+            local cursor = vim.api.nvim_win_get_cursor(widget.win_nrs.chat)
+            assert.equal(8, cursor[1])
+            assert.equal(0, cursor[2])
+        end)
+
+        it("jumps to the previous agent message chunk", function()
+            vim.api.nvim_win_set_cursor(widget.win_nrs.chat, { 5, 4 })
+
+            widget:navigate_prev_agent_message_chunk()
+
+            local cursor = vim.api.nvim_win_get_cursor(widget.win_nrs.chat)
+            assert.equal(2, cursor[1])
+            assert.equal(0, cursor[2])
+        end)
+    end)
 end)

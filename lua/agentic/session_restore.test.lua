@@ -620,4 +620,96 @@ describe("SessionRestore", function()
             assert.is_true(restore_call[3].replace_session)
         end)
     end)
+
+    describe("replay_messages", function()
+        --- @type agentic.ui.MessageWriter
+        local MessageWriter
+        --- @type integer
+        local bufnr
+        --- @type integer
+        local winid
+        --- @type agentic.ui.MessageWriter
+        local writer
+        --- @type TestStub
+        local schedule_stub
+
+        before_each(function()
+            MessageWriter = require("agentic.ui.message_writer")
+            schedule_stub = spy.stub(vim, "schedule")
+            schedule_stub:invokes(function(fn)
+                fn()
+            end)
+
+            bufnr = vim.api.nvim_create_buf(false, true)
+            vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {})
+            winid = vim.api.nvim_open_win(bufnr, true, {
+                relative = "editor",
+                width = 80,
+                height = 20,
+                row = 0,
+                col = 0,
+            })
+            writer = MessageWriter:new(bufnr)
+        end)
+
+        after_each(function()
+            schedule_stub:revert()
+            if vim.api.nvim_win_is_valid(winid) then
+                vim.api.nvim_win_close(winid, true)
+            end
+            if vim.api.nvim_buf_is_valid(bufnr) then
+                vim.api.nvim_buf_delete(bufnr, { force = true })
+            end
+        end)
+
+        it("records restored agent messages as navigation starts", function()
+            local replay_writer = writer
+
+            SessionRestore.replay_messages(replay_writer, {
+                {
+                    type = "user",
+                    text = "First question",
+                    timestamp = 1704067200,
+                    provider_name = "Claude Agent ACP",
+                },
+                {
+                    type = "agent",
+                    text = "First answer",
+                    provider_name = "Claude Agent ACP",
+                },
+                {
+                    type = "user",
+                    text = "Second question",
+                    timestamp = 1704067201,
+                    provider_name = "Claude Agent ACP",
+                },
+                {
+                    type = "agent",
+                    text = "Second answer",
+                    provider_name = "Claude Agent ACP",
+                },
+            })
+
+            local positions = replay_writer:get_agent_message_chunk_positions()
+            assert.equal(2, #positions)
+            local first_position = assert.not_nil(positions[1])
+            local second_position = assert.not_nil(positions[2])
+
+            local first_line = vim.api.nvim_buf_get_lines(
+                bufnr,
+                first_position - 1,
+                first_position,
+                false
+            )[1]
+            local second_line = vim.api.nvim_buf_get_lines(
+                bufnr,
+                second_position - 1,
+                second_position,
+                false
+            )[1]
+
+            assert.equal("First answer", first_line)
+            assert.equal("Second answer", second_line)
+        end)
+    end)
 end)

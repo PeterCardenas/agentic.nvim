@@ -329,10 +329,12 @@ local ConfigDefault = {
             prev_hunk = "[c",
         },
 
-        --- Keys bindings for chat prompt navigation
+        --- Keys bindings for chat navigation
         chat_navigation = {
             next_prompt = "]p",
             prev_prompt = "[p",
+            last_agent_chunk = "]a",
+            prev_agent_chunk = "[a",
         },
     },
 
