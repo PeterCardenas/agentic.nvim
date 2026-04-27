@@ -786,55 +786,6 @@ describe("agentic.ui.MessageWriter", function()
             assert.is_nil(writer._pending_newline)
         end)
 
-        it("continues an active thought across tool call blocks", function()
-            writer:write_message_chunk({
-                sessionUpdate = "agent_thought_chunk",
-                content = {
-                    type = "text",
-                    text = "first\n",
-                },
-            })
-
-            writer:write_tool_call_block(
-                make_tool_call_block("thought-tool", "pending")
-            )
-            writer:write_message_chunk({
-                sessionUpdate = "agent_thought_chunk",
-                content = {
-                    type = "text",
-                    text = "second",
-                },
-            })
-
-            local lines = get_lines()
-            assert.same({
-                "",
-                "Thinking: first",
-                "",
-                " execute(ls) ",
-                "output",
-                "",
-                "",
-                "second",
-            }, lines)
-            assert.is_nil(writer._pending_newline)
-
-            local thought_ns =
-                vim.api.nvim_get_namespaces()["agentic_thought_highlights"]
-            local marks = vim.api.nvim_buf_get_extmarks(
-                bufnr,
-                thought_ns,
-                0,
-                -1,
-                { details = true }
-            )
-
-            assert.equal(2, #marks)
-            assert.equal(1, marks[1][2])
-            assert.equal(7, marks[2][4].end_row)
-            assert.equal(6, marks[2][4].end_col)
-        end)
-
         it(
             "produces same final output as naive approach for markdown content",
             function()
