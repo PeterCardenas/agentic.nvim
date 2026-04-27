@@ -224,6 +224,14 @@ function MessageWriter:_clear_thought_state()
     self._pending_newline = nil
 end
 
+--- @private
+--- @return boolean
+function MessageWriter:_has_active_thought()
+    return self._thought_label_row ~= nil
+        and self._thought_label_start_col ~= nil
+        and self._thought_text_extmark_id ~= nil
+end
+
 --- @param session_update string|nil
 --- @return boolean
 function MessageWriter:_should_record_agent_message_start(session_update)
@@ -380,7 +388,9 @@ function MessageWriter:write_message_chunk(update)
     local was_thought = self._last_message_type == "agent_thought_chunk"
     local is_first_agent_message =
         self:_should_record_agent_message_start(update.sessionUpdate)
-    local is_first_thought = is_thought and not was_thought
+    local is_first_thought = is_thought
+        and not was_thought
+        and not self:_has_active_thought()
 
     if was_thought and not is_thought then
         -- Different message type, add newline before appending, to create visual separation
@@ -623,7 +633,8 @@ end
 
 --- @param tool_call_block agentic.ui.MessageWriter.ToolCallBlock
 function MessageWriter:write_tool_call_block(tool_call_block)
-    self:_clear_thought_state()
+    self._last_message_type = nil
+    self._pending_newline = nil
     self:_auto_scroll(self.bufnr)
 
     self:_with_modifiable_and_notify_change(function(bufnr)
