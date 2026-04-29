@@ -483,31 +483,90 @@ function M.attach(ChatWidget, opts)
         --- @param kind "row"|"col"
         --- @param children agentic.ui.ChatWidget.MaximizeNode[]
         --- @param child_wins table<integer, integer|nil>
-        local function restore_container_sizes(kind, children, child_wins)
-            if kind == "row" then
-                for index = 1, #children - 1 do
-                    local child_winid = child_wins[index]
-                    local child = children[index]
-                    if child_winid and child then
-                        pcall(
-                            vim.api.nvim_win_set_width,
-                            child_winid,
-                            child.width
-                        )
-                    end
-                end
+        --- @param parent_winid integer
+        local function restore_container_sizes(
+            kind,
+            children,
+            child_wins,
+            parent_winid
+        )
+            local captured_total = 0
+            for _, child in ipairs(children) do
+                captured_total = captured_total
+                    + (kind == "row" and child.width or child.height)
+            end
+
+            if captured_total <= 0 then
                 return
             end
 
-            for index = 1, #children - 1 do
+            local live_total = 0
+            for index = 1, #children do
                 local child_winid = child_wins[index]
+                if child_winid and vim.api.nvim_win_is_valid(child_winid) then
+                    local child_live_size = kind == "row"
+                            and vim.api.nvim_win_get_width(child_winid)
+                        or vim.api.nvim_win_get_height(child_winid)
+                    live_total = live_total + child_live_size
+                end
+            end
+
+            if live_total <= 0 then
+                live_total = kind == "row"
+                        and vim.api.nvim_win_get_width(parent_winid)
+                    or vim.api.nvim_win_get_height(parent_winid)
+                if live_total <= 0 then
+                    live_total = captured_total
+                end
+            end
+
+            local remaining_live = live_total
+            local remaining_captured = captured_total
+
+            for index = 1, #children - 1 do
                 local child = children[index]
-                if child_winid and child then
-                    pcall(
-                        vim.api.nvim_win_set_height,
-                        child_winid,
-                        child.height
-                    )
+                if child then
+                    local captured_size = kind == "row" and child.width
+                        or child.height
+                    local remaining_children = #children - index
+                    local max_for_child =
+                        math.max(1, remaining_live - remaining_children)
+
+                    local target_size
+                    if remaining_captured > 0 then
+                        target_size = math.floor(
+                            (remaining_live * captured_size)
+                                / remaining_captured
+                        )
+                    else
+                        target_size = captured_size
+                    end
+
+                    target_size =
+                        math.max(1, math.min(target_size, max_for_child))
+
+                    local child_winid = child_wins[index]
+                    if
+                        child_winid and vim.api.nvim_win_is_valid(child_winid)
+                    then
+                        if kind == "row" then
+                            pcall(
+                                vim.api.nvim_win_set_width,
+                                child_winid,
+                                target_size
+                            )
+                        else
+                            pcall(
+                                vim.api.nvim_win_set_height,
+                                child_winid,
+                                target_size
+                            )
+                        end
+                    end
+
+                    remaining_live = math.max(1, remaining_live - target_size)
+                    remaining_captured =
+                        math.max(0, remaining_captured - captured_size)
                 end
             end
         end
@@ -588,7 +647,7 @@ function M.attach(ChatWidget, opts)
                 end
             end
 
-            restore_container_sizes(node.kind, children, child_wins)
+            restore_container_sizes(node.kind, children, child_wins, winid)
             return winid
         end
 

@@ -177,6 +177,79 @@ describe("Maximize toggle with multiple tabpages", function()
         ))
     end
 
+    --- @param tabpage number
+    --- @return { columns: integer, lines: integer, leaves: table<integer, { width: integer, height: integer }> }
+    local function snapshot_maximize_leaf_sizes(tabpage)
+        return child.lua(string.format(
+            [[
+            local session = require("agentic.session_registry").sessions[%d]
+            local maximize_state = session and session.widget._maximize_state or nil
+            local leaves = {}
+            if maximize_state then
+                for _, leaf in pairs(maximize_state.leaves) do
+                    leaves[leaf.bufnr] = {
+                        width = leaf.width,
+                        height = leaf.height,
+                    }
+                end
+            end
+
+            return {
+                columns = vim.o.columns,
+                lines = vim.o.lines,
+                leaves = leaves,
+            }
+        ]],
+            tabpage
+        ))
+    end
+
+    --- @param tabpage number
+    --- @return { columns: integer, lines: integer, windows: table<integer, { width: integer, height: integer, filetype: string }> }
+    local function snapshot_editor_window_sizes(tabpage)
+        return child.lua(string.format(
+            [[
+            local session = require("agentic.session_registry").sessions[%d]
+            local widget_bufs = {}
+            if session and session.widget then
+                for _, bufnr in pairs(session.widget.buf_nrs) do
+                    widget_bufs[bufnr] = true
+                end
+            end
+
+            local agentic_fts = {
+                AgenticChat = true,
+                AgenticInput = true,
+                AgenticTodos = true,
+                AgenticCode = true,
+                AgenticFiles = true,
+                AgenticDiagnostics = true,
+            }
+
+            local windows = {}
+            for _, winid in ipairs(vim.api.nvim_tabpage_list_wins(%d)) do
+                local bufnr = vim.api.nvim_win_get_buf(winid)
+                local filetype = vim.bo[bufnr].filetype
+                if not widget_bufs[bufnr] and not agentic_fts[filetype] then
+                    windows[bufnr] = {
+                        width = vim.api.nvim_win_get_width(winid),
+                        height = vim.api.nvim_win_get_height(winid),
+                        filetype = filetype,
+                    }
+                end
+            end
+
+            return {
+                columns = vim.o.columns,
+                lines = vim.o.lines,
+                windows = windows,
+            }
+        ]],
+            tabpage,
+            tabpage
+        ))
+    end
+
     local function toggle_widget()
         child.lua([[ require("agentic").toggle() ]])
         child.flush()
@@ -337,6 +410,47 @@ describe("Maximize toggle with multiple tabpages", function()
         ]])
             assert.equal(layout.bottom, current.bufnr)
             assert.equal(2, current.cursor[1])
+        end
+    )
+
+    it(
+        "restores editor split widths proportionally after terminal resize",
+        function()
+            local layout = create_mixed_editor_layout()
+            toggle_widget()
+
+            local tab_id = child.api.nvim_get_current_tabpage()
+            toggle_maximize(tab_id)
+
+            local captured = snapshot_maximize_leaf_sizes(tab_id)
+            local before_left = captured.leaves[layout.left]
+            local before_top = captured.leaves[layout.top]
+            local before_bottom = captured.leaves[layout.bottom]
+
+            assert.truthy(before_left)
+            assert.truthy(before_top)
+            assert.truthy(before_bottom)
+
+            child.lua([[
+                vim.o.columns = vim.o.columns + 60
+                vim.o.lines = vim.o.lines + 20
+            ]])
+            child.flush()
+
+            toggle_maximize(tab_id)
+
+            local restored = snapshot_editor_window_sizes(tab_id)
+            local left = restored.windows[layout.left]
+            local top = restored.windows[layout.top]
+            local bottom = restored.windows[layout.bottom]
+
+            assert.truthy(left)
+            assert.truthy(top)
+            assert.truthy(bottom)
+            assert.is_true(restored.columns > captured.columns)
+            assert.is_true(left.width > before_left.width)
+            assert.is_true(top.width > before_top.width)
+            assert.is_true(bottom.width > before_bottom.width)
         end
     )
 
