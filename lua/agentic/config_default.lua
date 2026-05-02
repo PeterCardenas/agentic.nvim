@@ -333,7 +333,7 @@ local ConfigDefault = {
         chat_navigation = {
             next_prompt = "]p",
             prev_prompt = "[p",
-            last_agent_chunk = "]a",
+            next_agent_chunk = "]a",
             prev_agent_chunk = "[a",
         },
     },

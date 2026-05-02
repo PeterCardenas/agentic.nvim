@@ -485,7 +485,7 @@ These keybindings are automatically set in Agentic buffers:
 | `d`              | v     | Remove multiple selected files, code selections, or diagnostics |
 | `]p`             | n     | Navigate to next prompt in the chat                             |
 | `[p`             | n     | Navigate to previous prompt in the chat                         |
-| `]a`             | n     | Jump to the latest agent message start                          |
+| `]a`             | n     | Navigate to the next agent message start                        |
 | `[a`             | n     | Navigate to the previous agent message start                    |
 | `]c`             | n     | Navigate to next diff hunk (when diff preview is active)        |
 | `[c`             | n     | Navigate to previous diff hunk (when diff preview is active)    |
@@ -542,7 +542,7 @@ your setup:
       chat_navigation = {
         next_prompt = "]p",
         prev_prompt = "[p",
-        last_agent_chunk = "]a",
+        next_agent_chunk = "]a",
         prev_agent_chunk = "[a",
       },
     },

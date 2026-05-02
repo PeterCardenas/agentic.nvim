@@ -618,7 +618,7 @@ function ChatWidget:navigate_prev_prompt()
     self:_navigate_prompt("prev")
 end
 
---- Navigate to the most recent agent message start in the chat buffer
+--- Navigate to the next agent message start in the chat buffer
 function ChatWidget:navigate_last_agent_message_chunk()
     local chat_winid = self:_get_chat_winid()
     if not chat_winid then
@@ -631,8 +631,9 @@ function ChatWidget:navigate_last_agent_message_chunk()
         return
     end
 
-    --- @type integer
-    local target_line = positions[#positions] or positions[1]
+    local cursor = vim.api.nvim_win_get_cursor(chat_winid)
+    local current_line = cursor[1]
+    local target_line = get_adjacent_position(positions, current_line, "next")
     move_chat_cursor_to_line_start(chat_winid, target_line)
 end
 
@@ -774,11 +775,11 @@ function ChatWidget:_bind_keymaps()
     BufHelpers.keymap_set(
         self.buf_nrs.chat,
         "n",
-        Config.keymaps.chat_navigation.last_agent_chunk,
+        Config.keymaps.chat_navigation.next_agent_chunk,
         function()
             self:navigate_last_agent_message_chunk()
         end,
-        { desc = "Agentic: Navigate to latest agent message start" }
+        { desc = "Agentic: Navigate to next agent message start" }
     )
 
     BufHelpers.keymap_set(

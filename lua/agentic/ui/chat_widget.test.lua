@@ -709,13 +709,27 @@ describe("agentic.ui.ChatWidget", function()
             end)
         end)
 
-        it("jumps to the latest agent message chunk", function()
+        it("cycles to next agent message chunk with wrapping", function()
             vim.api.nvim_win_set_cursor(widget.win_nrs.chat, { 1, 3 })
 
             widget:navigate_last_agent_message_chunk()
-
             local cursor = vim.api.nvim_win_get_cursor(widget.win_nrs.chat)
+            assert.equal(2, cursor[1])
+            assert.equal(0, cursor[2])
+
+            widget:navigate_last_agent_message_chunk()
+            cursor = vim.api.nvim_win_get_cursor(widget.win_nrs.chat)
+            assert.equal(5, cursor[1])
+            assert.equal(0, cursor[2])
+
+            widget:navigate_last_agent_message_chunk()
+            cursor = vim.api.nvim_win_get_cursor(widget.win_nrs.chat)
             assert.equal(8, cursor[1])
+            assert.equal(0, cursor[2])
+
+            widget:navigate_last_agent_message_chunk()
+            cursor = vim.api.nvim_win_get_cursor(widget.win_nrs.chat)
+            assert.equal(2, cursor[1])
             assert.equal(0, cursor[2])
         end)
 
@@ -726,6 +740,16 @@ describe("agentic.ui.ChatWidget", function()
 
             local cursor = vim.api.nvim_win_get_cursor(widget.win_nrs.chat)
             assert.equal(2, cursor[1])
+            assert.equal(0, cursor[2])
+        end)
+
+        it("wraps previous agent message chunk from first to last", function()
+            vim.api.nvim_win_set_cursor(widget.win_nrs.chat, { 2, 0 })
+
+            widget:navigate_prev_agent_message_chunk()
+
+            local cursor = vim.api.nvim_win_get_cursor(widget.win_nrs.chat)
+            assert.equal(8, cursor[1])
             assert.equal(0, cursor[2])
         end)
     end)
