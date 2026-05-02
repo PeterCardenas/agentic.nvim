@@ -113,7 +113,16 @@ local function is_slash_context(context)
     local cursor_col = context.cursor[2]
     local text_to_cursor = context.line:sub(1, cursor_col)
     local current_word = text_to_cursor:match("%S*$") or ""
-    return current_word:match("^/") ~= nil
+    if current_word:sub(1, 1) ~= "/" then
+        return false
+    end
+
+    local has_subpath = current_word:find("/", 2, true) ~= nil
+    if has_subpath then
+        return false
+    end
+
+    return true
 end
 
 --- @param bufnr integer

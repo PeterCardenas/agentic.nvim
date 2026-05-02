@@ -305,4 +305,18 @@ describe("blink.cmp.sources.agentic_commands", function()
             wait_for_normal_mode()
         end)
     end)
+
+    describe("should_show_items", function()
+        it("does not show items for absolute path subpaths", function()
+            --- @type blink.cmp.AgenticCommands.Context
+            local context = {
+                bufnr = bufnr,
+                cursor = { 1, 13 },
+                line = "/tmp/project/",
+            }
+
+            local should_show = source:should_show_items(context, {})
+            assert.is_false(should_show)
+        end)
+    end)
 end)
