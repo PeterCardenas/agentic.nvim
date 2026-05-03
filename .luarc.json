@@ -53,7 +53,8 @@
   },
   "workspace": {
     "library": [
-      "$PWD/deps/mini.nvim/lua"
+      "$PWD/deps/mini.nvim/lua",
+      "$PWD/deps/fzf-lua/lua"
     ],
     "workspaceRoots": [
       "$PWD/lua",

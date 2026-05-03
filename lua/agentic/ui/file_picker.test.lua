@@ -43,14 +43,10 @@ describe("FilePicker:scan_files", function()
     local original_cmd_fd
     local original_cmd_git
 
-    --- @type agentic.ui.FilePicker
-    local picker
-
     before_each(function()
         original_cmd_rg = FilePicker.CMD_RG[1]
         original_cmd_fd = FilePicker.CMD_FD[1]
         original_cmd_git = FilePicker.CMD_GIT[1]
-        picker = FilePicker:new(vim.api.nvim_create_buf(false, true)) --[[@as agentic.ui.FilePicker]]
     end)
 
     after_each(function()
@@ -84,7 +80,7 @@ describe("FilePicker:scan_files", function()
                 end
             end)
 
-            local files = picker:scan_files()
+            local files = FilePicker.scan_files()
 
             -- git rev-parse returns "" with shell_error=0 so git is added as a command,
             -- then rg scan succeeds (returns files) = 2 total calls
@@ -110,19 +106,19 @@ describe("FilePicker:scan_files", function()
             FilePicker.CMD_RG[1] = original_cmd_rg
             FilePicker.CMD_FD[1] = "nonexistent_fd"
             FilePicker.CMD_GIT[1] = "nonexistent_git"
-            local files_rg = picker:scan_files()
+            local files_rg = FilePicker.scan_files()
 
             -- Test fd
             FilePicker.CMD_RG[1] = "nonexistent_rg"
             FilePicker.CMD_FD[1] = original_cmd_fd
             FilePicker.CMD_GIT[1] = "nonexistent_git"
-            local files_fd = picker:scan_files()
+            local files_fd = FilePicker.scan_files()
 
             -- Test git
             FilePicker.CMD_RG[1] = "nonexistent_rg"
             FilePicker.CMD_FD[1] = "nonexistent_fd"
             FilePicker.CMD_GIT[1] = original_cmd_git
-            local files_git = picker:scan_files()
+            local files_git = FilePicker.scan_files()
 
             -- All commands should return more than 0 files
             assert.is_true(#files_rg > 0)
@@ -155,7 +151,7 @@ describe("FilePicker:scan_files", function()
             FilePicker.CMD_RG[1] = original_cmd_rg
             FilePicker.CMD_FD[1] = "nonexistent_fd"
             FilePicker.CMD_GIT[1] = "nonexistent_git"
-            local files_rg = picker:scan_files()
+            local files_rg = FilePicker.scan_files()
 
             -- Disable all commands to force glob fallback
             FilePicker.CMD_RG[1] = "nonexistent_rg"
@@ -182,7 +178,7 @@ describe("FilePicker:scan_files", function()
                 "%.opencode/%.gitignore"
             )
 
-            local files_glob = picker:scan_files()
+            local files_glob = FilePicker.scan_files()
 
             assert.is_true(#files_glob > 0)
 
@@ -202,59 +198,34 @@ describe("FilePicker:scan_files", function()
     end)
 end)
 
-describe("FilePicker keymap fallback", function()
-    local child = require("tests.helpers.child").new()
-
-    --- Setup a tracking expr keymap using vimscript (fully typed, no child.lua needed)
-    --- @param key string The key to map (e.g., "<Tab>", "<CR>")
-    --- @param global_name string The global variable name (g:) to track calls
-    local function setup_tracking_keymap(key, global_name)
-        child.g[global_name] = false
-        -- vimscript expr: execute() returns "" on success, concat with return value
-        local rhs = ("execute('let g:%s = v:true') .. '%s_CALLED'"):format(
-            global_name,
-            key:upper():gsub("[<>]", "")
-        )
-        child.api.nvim_set_keymap("i", key, rhs, { expr = true })
-    end
-
-    --- Load FilePicker in child process to void polluting main test env
-    local function load_file_picker()
-        child.lua([[require("agentic.ui.file_picker"):new(0)]])
-    end
-
-    before_each(function()
-        child.setup()
-    end)
-
+describe("FilePicker:open", function()
     after_each(function()
-        child.stop()
+        package.loaded["fzf-lua"] = nil
     end)
 
-    it("should accept completion when completion menu is visible", function()
-        local prop_name = "tab_called"
-        setup_tracking_keymap("<Tab>", prop_name)
-        load_file_picker()
+    it("adds selected files from fzf picker callback", function()
+        local on_selected = spy.new(function(_file_path) end)
+        local on_complete = spy.new(function() end)
 
-        -- Set up buffer with multiple completion candidates
-        child.api.nvim_buf_set_lines(
-            0,
-            0,
-            -1,
-            false,
-            { "hello help helicopter", "" }
+        package.loaded["fzf-lua"] = {
+            files = function(opts)
+                opts.actions["default"]({ " lua/agentic/init.lua" })
+            end,
+            path = {
+                entry_to_file = function(_entry, _opts)
+                    return { path = "lua/agentic/init.lua" }
+                end,
+            },
+        }
+
+        FilePicker.open(
+            on_selected --[[@as function]],
+            on_complete --[[@as function]]
         )
-        child.api.nvim_win_set_cursor(0, { 2, 0 })
 
-        -- Type partial word and trigger keyword completion
-        child.type_keys("i", "hel", "<C-x><C-n>")
-
-        -- Verify completion menu is actually visible
-        assert.equal(1, child.fn.pumvisible())
-
-        -- Now press Tab while menu is visible - should accept completion, not call fallback
-        child.type_keys("<Tab>")
-
-        assert.is_false(child.g[prop_name])
+        assert.spy(on_selected).was.called(1)
+        assert.spy(on_complete).was.called(1)
+        local file_path = on_selected.calls[1][1]
+        assert.truthy(file_path:match("lua/agentic/init.lua$"))
     end)
 end)

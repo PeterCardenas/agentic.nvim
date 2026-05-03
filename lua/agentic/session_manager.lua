@@ -151,7 +151,6 @@ function SessionManager:new(tab_page_id)
     local ChatWidget = require("agentic.ui.chat_widget")
     local CodeSelection = require("agentic.ui.code_selection")
     local FileList = require("agentic.ui.file_list")
-    local FilePicker = require("agentic.ui.file_picker")
     local MessageWriter = require("agentic.ui.message_writer")
     local PermissionManager = require("agentic.ui.permission_manager")
     local StatusAnimation = require("agentic.ui.status_animation")
@@ -221,8 +220,6 @@ function SessionManager:new(tab_page_id)
     end)
 
     self:_bind_chat_buffer_events()
-
-    FilePicker:new(self.widget.buf_nrs.input)
 
     self.config_options = AgentConfigOptions:new(
         self.widget.buf_nrs,

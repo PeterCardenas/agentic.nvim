@@ -187,18 +187,19 @@ jobs:
           curl -sL "https://github.com/EmmyLuaLs/emmylua-analyzer-rust/releases/download/${{ env.EMMYLUA_VERSION }}/emmylua_check-${EMMY_ARCH}.tar.gz" |
             tar xzf - -C .local/emmylua
 
-      - name: Cache deps (mini.nvim)
+      - name: Cache deps (mini.nvim, fzf-lua)
         id: cache-deps
         uses: actions/cache@v4
         with:
           path: deps
-          key: deps-${{ runner.os }}-${{ hashFiles('tests/init.lua') }}
+          key: deps-v2-${{ runner.os }}-${{ hashFiles('tests/init.lua', '.luarc.json') }}
 
-      - name: Install deps (mini.nvim)
+      - name: Install deps (mini.nvim, fzf-lua)
         if: steps.cache-deps.outputs.cache-hit != 'true'
         run: |
           mkdir -p deps
           git clone --depth=1 https://github.com/echasnovski/mini.nvim deps/mini.nvim
+          git clone --depth=1 https://github.com/ibhagwan/fzf-lua deps/fzf-lua
 
       - name: Run type check
         run: |

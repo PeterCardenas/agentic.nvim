@@ -49,6 +49,8 @@ describe("blink.cmp.sources.agentic_commands", function()
         States.setSlashCommands(other_bufnr, {})
         package.loaded["blink.cmp.sources.agentic_commands"] = nil
         package.loaded["blink.cmp.types"] = nil
+        package.loaded["agentic.session_registry"] = nil
+        package.loaded["agentic.ui.file_picker"] = nil
 
         if bufnr and vim.api.nvim_buf_is_valid(bufnr) then
             vim.api.nvim_buf_delete(bufnr, { force = true })
@@ -59,6 +61,31 @@ describe("blink.cmp.sources.agentic_commands", function()
     end)
 
     describe("get_completions", function()
+        it("returns file picker completion for @ context", function()
+            --- @type blink.cmp.AgenticCommands.Context
+            local context = {
+                bufnr = bufnr,
+                cursor = { 1, 5 },
+                line = "foo @",
+            }
+
+            --- @type blink.cmp.AgenticCommands.CompletionResponse[]
+            local responses = {}
+            local cancel = source:get_completions(context, function(response)
+                table.insert(responses, response)
+            end)
+
+            assert.is_nil(cancel)
+            assert.equal(1, #responses)
+            local response = assert.not_nil(responses[1])
+            assert.equal(1, #response.items)
+            local item = assert.not_nil(response.items[1])
+            assert.equal("file", item.label)
+            assert.equal("file", item.insertText)
+            local text_edit = assert.not_nil(item.textEdit)
+            assert.equal("", text_edit.newText)
+        end)
+
         it(
             "streams buffer-local slash command updates without duplicates",
             function()
@@ -307,6 +334,18 @@ describe("blink.cmp.sources.agentic_commands", function()
     end)
 
     describe("should_show_items", function()
+        it("shows items for @ completion context", function()
+            --- @type blink.cmp.AgenticCommands.Context
+            local context = {
+                bufnr = bufnr,
+                cursor = { 1, 1 },
+                line = "@",
+            }
+
+            local should_show = source:should_show_items(context, {})
+            assert.is_true(should_show)
+        end)
+
         it("does not show items for absolute path subpaths", function()
             --- @type blink.cmp.AgenticCommands.Context
             local context = {
@@ -318,5 +357,69 @@ describe("blink.cmp.sources.agentic_commands", function()
             local should_show = source:should_show_items(context, {})
             assert.is_false(should_show)
         end)
+    end)
+
+    describe("get_trigger_characters", function()
+        it("triggers completion for slash and at-sign", function()
+            local triggers = source:get_trigger_characters()
+            assert.equal(2, #triggers)
+            assert.equal("/", triggers[1])
+            assert.equal("@", triggers[2])
+        end)
+    end)
+
+    describe("execute", function()
+        it(
+            "uses blink default accept and opens the session file picker",
+            function()
+                local file_picker_called = false
+                package.loaded["agentic.ui.file_picker"] = {
+                    open = function(on_file_selected, on_complete)
+                        file_picker_called = type(on_file_selected)
+                            == "function"
+                        if on_complete then
+                            on_complete()
+                        end
+                    end,
+                }
+                package.loaded["agentic.session_registry"] = {
+                    sessions = {
+                        [vim.api.nvim_get_current_tabpage()] = {
+                            widget = {
+                                focus_prompt = function() end,
+                                show = function(_opts) end,
+                            },
+                            file_list = {
+                                add = function(_file_path)
+                                    return true
+                                end,
+                            },
+                        },
+                    },
+                }
+
+                local default_called = false
+                local callback_called = false
+                source:execute(
+                    {
+                        bufnr = bufnr,
+                        cursor = { 1, 8 },
+                        line = "before @ after",
+                    },
+                    { data = { action = "agentic_open_file_picker" } },
+                    function()
+                        callback_called = true
+                    end,
+                    function()
+                        default_called = true
+                    end
+                )
+
+                assert.is_true(file_picker_called)
+                assert.is_true(callback_called)
+                assert.is_true(default_called)
+                package.loaded["agentic.session_registry"] = nil
+            end
+        )
     end)
 end)

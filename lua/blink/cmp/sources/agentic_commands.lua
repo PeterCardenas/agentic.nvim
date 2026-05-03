@@ -11,6 +11,7 @@
 --- @field items table[]
 
 local Kind = require("blink.cmp.types").CompletionItemKind
+local FILE_PICKER_ACTION = "agentic_open_file_picker"
 
 --- blink.cmp source for agentic.nvim slash commands
 --- Provides completion for \`/command\` in the agentic prompt buffer (filetype: AgenticInput)
@@ -26,12 +27,20 @@ function Source.new(_, _config)
 end
 
 --- @param context blink.cmp.AgenticCommands.Context
---- @return integer slash_char
-local function get_slash_char(context)
+--- @return string
+local function get_current_word(context)
     --- @diagnostic disable-next-line: need-check-nil
     local cursor_col = context.cursor[2]
     local text_to_cursor = context.line:sub(1, cursor_col)
-    local current_word = text_to_cursor:match("%S*$") or ""
+    return text_to_cursor:match("%S*$") or ""
+end
+
+--- @param context blink.cmp.AgenticCommands.Context
+--- @return integer word_start
+local function get_word_start(context)
+    --- @diagnostic disable-next-line: need-check-nil
+    local cursor_col = context.cursor[2]
+    local current_word = get_current_word(context)
     return math.floor(cursor_col - #current_word)
 end
 
@@ -44,7 +53,7 @@ local function build_response(context, commands, seen_words)
     local cursor_col = context.cursor[2]
     --- @diagnostic disable-next-line: need-check-nil
     local cursor_row = context.cursor[1] - 1
-    local slash_char = get_slash_char(context)
+    local slash_char = get_word_start(context)
     local range = {
         start = { line = cursor_row, character = slash_char + 1 },
         ["end"] = { line = cursor_row, character = cursor_col },
@@ -92,6 +101,49 @@ local function build_response(context, commands, seen_words)
     return response
 end
 
+--- @param context blink.cmp.AgenticCommands.Context
+--- @return blink.cmp.AgenticCommands.CompletionResponse
+local function build_file_response(context)
+    --- @diagnostic disable-next-line: need-check-nil
+    local cursor_col = context.cursor[2]
+    --- @diagnostic disable-next-line: need-check-nil
+    local cursor_row = context.cursor[1] - 1
+    local at_char = get_word_start(context)
+    local range = {
+        start = { line = cursor_row, character = at_char },
+        ["end"] = { line = cursor_row, character = cursor_col },
+    }
+
+    local item = {
+        label = "file",
+        kind = Kind.Event,
+        insertText = "file",
+        textEdit = {
+            range = range,
+            newText = "",
+        },
+        data = {
+            action = FILE_PICKER_ACTION,
+        },
+        labelDetails = {
+            description = "Open file picker",
+        },
+        documentation = {
+            value = "Open fzf-lua file picker and attach selections",
+            kind = "plaintext",
+        },
+    }
+
+    --- @type blink.cmp.AgenticCommands.CompletionResponse
+    local response = {
+        is_incomplete_forward = false,
+        is_incomplete_backward = false,
+        items = { item },
+    }
+
+    return response
+end
+
 --- Only enable in agentic prompt buffers
 --- @return boolean
 function Source:enabled()
@@ -103,16 +155,13 @@ end
 --- @return string[]
 function Source:get_trigger_characters()
     local _ = self
-    return { "/" }
+    return { "/", "@" }
 end
 
 --- @param context blink.cmp.AgenticCommands.Context
 --- @return boolean
 local function is_slash_context(context)
-    --- @diagnostic disable-next-line: need-check-nil
-    local cursor_col = context.cursor[2]
-    local text_to_cursor = context.line:sub(1, cursor_col)
-    local current_word = text_to_cursor:match("%S*$") or ""
+    local current_word = get_current_word(context)
     if current_word:sub(1, 1) ~= "/" then
         return false
     end
@@ -123,6 +172,13 @@ local function is_slash_context(context)
     end
 
     return true
+end
+
+--- @param context blink.cmp.AgenticCommands.Context
+--- @return boolean
+local function is_file_context(context)
+    local current_word = get_current_word(context)
+    return current_word:sub(1, 1) == "@"
 end
 
 --- @param bufnr integer
@@ -165,7 +221,7 @@ end
 --- @return boolean
 function Source:should_show_items(context, _items)
     local _ = self
-    return is_slash_context(context)
+    return is_slash_context(context) or is_file_context(context)
 end
 
 --- Return slash command completions from shared state
@@ -174,6 +230,11 @@ end
 --- @return fun()|nil
 function Source:get_completions(context, callback)
     local _ = self
+    if is_file_context(context) then
+        callback(build_file_response(context))
+        return nil
+    end
+
     local States = require("agentic.states")
     local bufnr = context.bufnr
     local commands = States.getSlashCommands(bufnr)
@@ -212,6 +273,42 @@ function Source:get_completions(context, callback)
         cancel_updates()
         cancel_updates = function() end
     end
+end
+
+--- @param _context blink.cmp.AgenticCommands.Context
+--- @param item table
+--- @param callback fun()
+--- @param default_implementation fun()
+function Source:execute(_context, item, callback, default_implementation)
+    local _ = self
+    local data = item and item.data or nil
+    if type(data) == "table" and data.action == FILE_PICKER_ACTION then
+        local FilePicker = require("agentic.ui.file_picker")
+        local SessionRegistry = require("agentic.session_registry")
+        local session =
+            SessionRegistry.sessions[vim.api.nvim_get_current_tabpage()]
+        if session then
+            default_implementation()
+            FilePicker.open(function(file_path)
+                local added = session.file_list:add(file_path)
+                if added == true then
+                    session.widget:show({
+                        focus_prompt = false,
+                    })
+                end
+            end, function()
+                vim.schedule(function()
+                    session.widget:focus_prompt()
+                    vim.cmd("startinsert!")
+                end)
+            end)
+        end
+        callback()
+        return
+    end
+
+    default_implementation()
+    callback()
 end
 
 return Source

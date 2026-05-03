@@ -516,9 +516,6 @@ Override default keybindings via the `keymaps` config option:
           { "<localLeader>p", mode = { "n" } },
           { "<C-v>", mode = { "i" } },
         },
-        accept_completion = {
-          { "<Tab>", mode = { "i" } },
-        },
       },
       diff_preview = {
         next_hunk = "]c",

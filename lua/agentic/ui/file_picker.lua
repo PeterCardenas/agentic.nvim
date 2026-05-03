@@ -1,12 +1,8 @@
 local FileSystem = require("agentic.utils.file_system")
 local Config = require("agentic.config")
 local Logger = require("agentic.utils.logger")
-local BufHelpers = require("agentic.utils.buf_helpers")
 
---- @class agentic.ui.FilePicker
---- @field _files table[]
 local FilePicker = {}
-FilePicker.__index = FilePicker
 
 FilePicker.CMD_RG = {
     "rg",
@@ -31,51 +27,158 @@ FilePicker.CMD_FD = {
 
 FilePicker.CMD_GIT = { "git", "ls-files", "-co", "--exclude-standard" }
 
---- Buffer-local storage (weak values for automatic cleanup)
-local instances_by_buffer = setmetatable({}, { __mode = "v" })
-
---- @param bufnr number
---- @return agentic.ui.FilePicker|nil
-function FilePicker:new(bufnr)
-    local file_picker_enabled = Config.file_picker.enabled --[[@as boolean]]
-    if not file_picker_enabled then
+--- @return fzf-lua|nil
+local function load_fzf_lua()
+    local ok, loaded_fzf = pcall(require, "fzf-lua")
+    if not ok then
         return nil
     end
 
-    --- @type agentic.ui.FilePicker
-    local instance = setmetatable({ _files = {} }, self)
-    --- @diagnostic disable-next-line: param-type-mismatch
-    instance:_setup_completion(bufnr)
-    return instance
+    local fzf = loaded_fzf --[[@as fzf-lua]]
+    return fzf
 end
 
---- Sets up omnifunc completion and @ trigger detection
---- @param bufnr integer
-function FilePicker:_setup_completion(bufnr)
-    vim.bo[bufnr].omnifunc =
-        "v:lua.require'agentic.ui.file_picker'.complete_func"
-    vim.bo[bufnr].iskeyword = vim.bo[bufnr].iskeyword .. ",@"
-    instances_by_buffer[bufnr] = self
+--- @param path string
+--- @return string|nil
+local function resolve_file_path(path)
+    if path == "" then
+        return nil
+    end
 
-    BufHelpers.multi_keymap_set(
-        Config.keymaps.prompt.accept_completion,
-        bufnr,
-        function()
-            vim.cmd.stopinsert()
-            vim.schedule(function()
-                local tab =
-                    vim.api.nvim_replace_termcodes("<Tab>", true, true, true)
-                vim.api.nvim_feedkeys(tab, "m", false)
-            end)
-        end,
-        {
-            desc = "Agentic cycle windows",
-        }
-    )
+    local absolute_path = FileSystem.to_absolute_path(path)
+    local stat = vim.uv.fs_stat(absolute_path)
+    if stat and stat.type == "file" then
+        return absolute_path
+    end
+
+    return nil
 end
 
-function FilePicker:scan_files()
-    local commands = self:_build_scan_commands()
+--- @param selected string[]|nil
+--- @param fzf fzf-lua
+--- @return string[]
+local function get_fzf_selected_paths(selected, fzf)
+    if type(selected) ~= "table" or #selected == 0 then
+        return {}
+    end
+
+    local cwd = vim.uv.cwd() or vim.fn.getcwd()
+
+    --- @type string[]
+    local file_paths = {}
+    for _, entry in ipairs(selected) do
+        if type(entry) == "string" and entry ~= "" then
+            local parsed_entry = fzf.path.entry_to_file(entry, { cwd = cwd })
+            if parsed_entry.path then
+                table.insert(file_paths, parsed_entry.path)
+            end
+        end
+    end
+
+    return file_paths
+end
+
+--- @param selected string[]|nil
+--- @param on_file_selected fun(file_path: string)|nil
+local function add_selected_files(selected, on_file_selected)
+    if type(selected) ~= "table" or #selected == 0 then
+        return
+    end
+
+    for _, path in ipairs(selected) do
+        if type(path) == "string" and path ~= "" then
+            local absolute_path = resolve_file_path(path)
+            if on_file_selected and absolute_path then
+                on_file_selected(absolute_path)
+            end
+        end
+    end
+end
+
+--- @return table[] commands
+local function build_scan_commands()
+    local commands = {}
+
+    if vim.fn.executable(FilePicker.CMD_RG[1]) == 1 then
+        table.insert(commands, vim.list_extend({}, FilePicker.CMD_RG))
+    end
+
+    if vim.fn.executable(FilePicker.CMD_FD[1]) == 1 then
+        table.insert(commands, vim.list_extend({}, FilePicker.CMD_FD))
+    end
+
+    if vim.fn.executable(FilePicker.CMD_GIT[1]) == 1 then
+        local _ = vim.fn.system("git rev-parse --git-dir 2>/dev/null")
+        if vim.v.shell_error == 0 then
+            table.insert(commands, vim.list_extend({}, FilePicker.CMD_GIT))
+        end
+    end
+
+    return commands
+end
+
+--- @param path string
+--- @return boolean
+local function should_exclude(path)
+    for _, pattern in ipairs(FilePicker.GLOB_EXCLUDE_PATTERNS) do
+        if path:match(pattern) then
+            return true
+        end
+    end
+
+    return false
+end
+
+--- @param on_file_selected fun(file_path: string)|nil
+--- @param on_complete fun()|nil
+function FilePicker.open(on_file_selected, on_complete)
+    local file_picker_enabled = Config.file_picker.enabled --[[@as boolean]]
+    if not file_picker_enabled then
+        return
+    end
+
+    local fzf = load_fzf_lua()
+    if fzf and type(fzf.files) == "function" then
+        fzf.files({
+            file_icons = false,
+            actions = {
+                ["default"] = function(selected)
+                    local selected_paths = selected
+                    if
+                        fzf.path
+                        and type(fzf.path.entry_to_file) == "function"
+                    then
+                        selected_paths = get_fzf_selected_paths(selected, fzf)
+                    end
+
+                    add_selected_files(selected_paths, on_file_selected)
+                    if on_complete then
+                        on_complete()
+                    end
+                end,
+            },
+        })
+        return
+    end
+
+    local files = FilePicker.scan_files()
+    local items = vim.tbl_map(function(file)
+        return file.word:gsub("^@", "")
+    end, files)
+    vim.ui.select(items, {
+        prompt = "Select file to attach:",
+    }, function(selected)
+        if selected then
+            add_selected_files({ selected }, on_file_selected)
+        end
+        if on_complete then
+            on_complete()
+        end
+    end)
+end
+
+function FilePicker.scan_files()
+    local commands = build_scan_commands()
 
     -- Try each command until one succeeds
     for _, cmd_parts in ipairs(commands) do
@@ -111,7 +214,6 @@ function FilePicker:scan_files()
                 return a.word < b.word
             end)
 
-            self._files = files
             return files
         end
     end
@@ -130,7 +232,7 @@ function FilePicker:scan_files()
     Logger.debug("[FilePicker] Glob returned", #glob_files, "paths")
 
     for _, path in ipairs(glob_files) do
-        if vim.fn.isdirectory(path) == 0 and not self:_should_exclude(path) then
+        if vim.fn.isdirectory(path) == 0 and not should_exclude(path) then
             local relative_path = FileSystem.to_smart_path(path)
             if not seen[relative_path] then
                 seen[relative_path] = true
@@ -148,33 +250,7 @@ function FilePicker:scan_files()
         return a.word < b.word
     end)
 
-    self._files = files
     return files
-end
-
---- Builds list of all available scan commands to try in order
---- All commands run in current working directory by default
---- @return table[] commands List of command arrays to try
-function FilePicker:_build_scan_commands()
-    local _ = self
-    local commands = {}
-
-    if vim.fn.executable(FilePicker.CMD_RG[1]) == 1 then
-        table.insert(commands, vim.list_extend({}, FilePicker.CMD_RG))
-    end
-
-    if vim.fn.executable(FilePicker.CMD_FD[1]) == 1 then
-        table.insert(commands, vim.list_extend({}, FilePicker.CMD_FD))
-    end
-
-    if vim.fn.executable(FilePicker.CMD_GIT[1]) == 1 then
-        local _ = vim.fn.system("git rev-parse --git-dir 2>/dev/null")
-        if vim.v.shell_error == 0 then
-            table.insert(commands, vim.list_extend({}, FilePicker.CMD_GIT))
-        end
-    end
-
-    return commands
 end
 
 --- used exclusively with glob fallback to exclude common unwanted files
@@ -211,50 +287,5 @@ FilePicker.GLOB_EXCLUDE_PATTERNS = {
     "%.pnpm%-store/",
     "bower_components/",
 }
-
---- Checks if path should be excluded from the file list
---- Necessary when using glob fallback, since it can't exclude files
---- @param path string
---- @return boolean
-function FilePicker:_should_exclude(path)
-    local _ = self
-    for _, pattern in ipairs(FilePicker.GLOB_EXCLUDE_PATTERNS) do
-        if path:match(pattern) then
-            return true
-        end
-    end
-
-    return false
-end
-
---- Omnifunc completion function (called by Neovim)
---- @param findstart number 1 for finding start position, 0 for returning matches
---- @param _base string The text to complete
---- @return number|table
-function FilePicker.complete_func(findstart, _base)
-    if findstart == 1 then
-        local line = vim.api.nvim_get_current_line()
-        local cursor = vim.api.nvim_win_get_cursor(0)
-        local before_cursor = line:sub(1, cursor[2])
-
-        local at_pos = before_cursor:reverse():find("@")
-        if at_pos then
-            local start_col = cursor[2] - at_pos
-            return start_col
-        end
-        -- Return -3: Cancel silently and leave completion mode (see :h complete-functions)
-        return -3
-    else
-        local bufnr = vim.api.nvim_get_current_buf()
-        local instance = instances_by_buffer[bufnr]
-        if not instance then
-            Logger.debug("[FilePicker] No instance found for buffer:", bufnr)
-            return {}
-        end
-
-        -- Return all files - Neovim handles fuzzy filtering
-        return instance._files
-    end
-end
 
 return FilePicker

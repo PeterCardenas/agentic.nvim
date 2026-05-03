@@ -314,13 +314,6 @@ local ConfigDefault = {
                     mode = { "i" },
                 },
             },
-
-            accept_completion = {
-                {
-                    "<Tab>",
-                    mode = { "i" },
-                },
-            },
         },
 
         --- Keys bindings for diff preview navigation

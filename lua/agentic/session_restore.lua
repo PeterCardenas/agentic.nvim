@@ -142,7 +142,7 @@ local function create_session_previewer(fixed_session_id)
     end
 
     function previewer:new(o, opts, fzf_win)
-        self.super.new(self, o, opts, fzf_win)
+        self.super.new(self --[[@as fzf-lua.Object]], o, opts, fzf_win)
         setmetatable(self, previewer)
         return self
     end
