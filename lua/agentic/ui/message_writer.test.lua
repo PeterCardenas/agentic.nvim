@@ -811,6 +811,91 @@ describe("agentic.ui.MessageWriter", function()
         )
     end)
 
+    describe("tool call body JSON formatting", function()
+        it("formats single-line JSON body when writing the block", function()
+            local long_value = string.rep("v", 100)
+            local json_text = '{"key":"' .. long_value .. '","x":42}'
+
+            local block =
+                make_tool_call_block("json-1", "completed", { json_text })
+            writer:write_tool_call_block(block)
+
+            local tracker = writer.tool_call_blocks["json-1"]
+            tracker = assert.not_nil(tracker)
+            local body = assert.not_nil(tracker.body)
+            assert.is_true(#body > 1)
+        end)
+
+        it("formats a JSON body with one trailing blank line", function()
+            local long_value = string.rep("v", 100)
+            local json_text = '{"key":"' .. long_value .. '","x":42}'
+
+            local block = make_tool_call_block(
+                "json-blank",
+                "completed",
+                { json_text, "" }
+            )
+            writer:write_tool_call_block(block)
+
+            local tracker = writer.tool_call_blocks["json-blank"]
+            tracker = assert.not_nil(tracker)
+            local body = assert.not_nil(tracker.body)
+            assert.equal("{", body[1])
+            assert.equal("", body[#body])
+            assert.is_true(#body > 2)
+        end)
+
+        it(
+            "leaves placeholder text untouched and formats only JSON segments on update",
+            function()
+                local placeholder = "I'm going to fetch this"
+                local long_value = string.rep("v", 100)
+                local json_text = '{"key":"' .. long_value .. '","x":42}'
+
+                local block = make_tool_call_block(
+                    "json-stream",
+                    "in_progress",
+                    { placeholder }
+                )
+                writer:write_tool_call_block(block)
+
+                writer:update_tool_call_block({
+                    tool_call_id = "json-stream",
+                    status = "completed",
+                    body = { json_text },
+                })
+
+                local tracker = writer.tool_call_blocks["json-stream"]
+                tracker = assert.not_nil(tracker)
+                local body = assert.not_nil(tracker.body)
+                assert.equal(placeholder, body[1])
+
+                local separator_idx
+                for i, line in ipairs(body) do
+                    if line == "---" then
+                        separator_idx = i
+                        break
+                    end
+                end
+
+                separator_idx = assert.not_nil(separator_idx)
+                assert.is_true(#body - separator_idx > 1)
+            end
+        )
+
+        it("leaves malformed JSON unchanged", function()
+            local malformed = "{" .. string.rep("not valid json ", 10) .. "}"
+
+            local block =
+                make_tool_call_block("json-bad", "completed", { malformed })
+            writer:write_tool_call_block(block)
+
+            local tracker = writer.tool_call_blocks["json-bad"]
+            tracker = assert.not_nil(tracker)
+            assert.same({ malformed }, tracker.body)
+        end)
+    end)
+
     describe("_prepare_block_lines", function()
         local FileSystem
         --- @type TestStub

@@ -6,6 +6,7 @@ local DiffHighlighter = require("agentic.utils.diff_highlighter")
 local DiffPreview = require("agentic.ui.diff_preview")
 local ExtmarkBlock = require("agentic.utils.extmark_block")
 local FileSystem = require("agentic.utils.file_system")
+local JsonFormat = require("agentic.utils.json_format")
 local Logger = require("agentic.utils.logger")
 local Theme = require("agentic.theme")
 
@@ -623,6 +624,10 @@ end
 
 --- @param tool_call_block agentic.ui.MessageWriter.ToolCallBlock
 function MessageWriter:write_tool_call_block(tool_call_block)
+    if tool_call_block.body then
+        tool_call_block.body = JsonFormat.format_lines(tool_call_block.body)
+    end
+
     self:_clear_thought_state()
     self:_auto_scroll(self.bufnr)
 
@@ -700,6 +705,10 @@ function MessageWriter:update_tool_call_block(tool_call_block)
         )
 
         return
+    end
+
+    if tool_call_block.body then
+        tool_call_block.body = JsonFormat.format_lines(tool_call_block.body)
     end
 
     -- Some ACP providers don't send the diff on the first tool_call
