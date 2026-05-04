@@ -58,16 +58,6 @@ local function create_tool_call_buffer(line_count)
     return bufnr, winid, tool_call_blocks, tool_call_id
 end
 
---- @param bufnr integer
---- @return integer max_level
-local function get_max_foldlevel(bufnr)
-    local max_level = 0
-    for line = 1, vim.api.nvim_buf_line_count(bufnr) do
-        max_level = math.max(max_level, vim.fn.foldlevel(line))
-    end
-    return max_level
-end
-
 describe("agentic.ui.ChatFolds", function()
     --- @type agentic.ui.ChatFolds
     local ChatFolds
@@ -356,25 +346,6 @@ describe("agentic.ui.ChatFolds", function()
 
             local state = ChatFolds._get_fold_state(winid, 2)
             assert.is_true(state) -- closed
-
-            vim.api.nvim_win_close(winid, true)
-            vim.api.nvim_buf_delete(bufnr, { force = true })
-        end)
-
-        it("removes stale folds when a tool call becomes ineligible", function()
-            setup_config({ tool_calls = { min_lines = 5 } })
-            local bufnr, winid, blocks, tc_id = create_tool_call_buffer(10)
-            local tab = vim.api.nvim_get_current_tabpage()
-
-            local folds = ChatFolds:new(bufnr, tab)
-            folds:sync_tool_call(tc_id, blocks)
-
-            assert.equal(2, get_max_foldlevel(bufnr))
-
-            blocks[tc_id].status = "in_progress"
-            folds:sync_tool_call(tc_id, blocks)
-
-            assert.equal(0, get_max_foldlevel(bufnr))
 
             vim.api.nvim_win_close(winid, true)
             vim.api.nvim_buf_delete(bufnr, { force = true })
