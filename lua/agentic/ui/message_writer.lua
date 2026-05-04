@@ -784,6 +784,13 @@ function MessageWriter:update_tool_call_block(tool_call_block)
                 tracker.status
             )
 
+            if self._chat_folds then
+                self._chat_folds:sync_tool_call(
+                    tool_call_block.tool_call_id,
+                    self.tool_call_blocks
+                )
+            end
+
             return false
         end
 
