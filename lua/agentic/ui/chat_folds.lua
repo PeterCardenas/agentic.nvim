@@ -370,6 +370,8 @@ function ChatFolds:sync_tool_call(tool_call_id, tool_call_blocks)
     local fold = self:_ensure_tool_call_fold(tool_call_id, tool_call_blocks)
 
     if not fold.should_render_fold then
+        self:_clear_fold_text_prefix(tool_call_id)
+        self:delete_folds_for_tool_call(tool_call_id, tool_call_blocks)
         return
     end
 

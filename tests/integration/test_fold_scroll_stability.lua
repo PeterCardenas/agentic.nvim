@@ -304,6 +304,265 @@ describe("Fold scroll stability", function()
         assert.equal(2, max_level)
     end)
 
+    it(
+        "keeps a single fold tree across claude-style statusless updates",
+        function()
+            --- @diagnostic disable-next-line: inject-field
+            Config.folding.tool_calls.preview = true
+            --- @diagnostic disable-next-line: inject-field
+            Config.folding.tool_calls.closed_by_default = false
+
+            local tab = vim.api.nvim_get_current_tabpage()
+            local chat_folds = ChatFolds:new(bufnr, tab)
+            local writer = MessageWriter:new(bufnr)
+            writer:set_chat_folds(chat_folds)
+
+            writer:write_tool_call_block({
+                tool_call_id = "tc_claude_statusless",
+                kind = "execute",
+                argument = "multi-step command",
+                status = "completed",
+                body = make_body(10),
+            })
+
+            writer:update_tool_call_block({
+                tool_call_id = "tc_claude_statusless",
+                body = {
+                    "stdout chunk 1",
+                    "stdout chunk 2",
+                    "stdout chunk 3",
+                    "stdout chunk 4",
+                    "stdout chunk 5",
+                    "stdout chunk 6",
+                },
+            })
+
+            writer:update_tool_call_block({
+                tool_call_id = "tc_claude_statusless",
+                body = {
+                    "stderr chunk 1",
+                    "stderr chunk 2",
+                    "stderr chunk 3",
+                    "stderr chunk 4",
+                    "stderr chunk 5",
+                    "stderr chunk 6",
+                },
+            })
+
+            local outer_state = ChatFolds._get_fold_state(winid, 2)
+            local inner_state = ChatFolds._get_fold_state(winid, 7)
+            local max_level = 0
+            local outer_fold_count = 0
+
+            vim.api.nvim_win_call(winid, function()
+                local previous_level = 0
+                for line = 1, vim.api.nvim_buf_line_count(bufnr) do
+                    local level = vim.fn.foldlevel(line)
+                    if level > max_level then
+                        max_level = level
+                    end
+                    if level > 0 and previous_level == 0 then
+                        outer_fold_count = outer_fold_count + 1
+                    end
+                    previous_level = level
+                end
+            end)
+
+            assert.is_false(outer_state)
+            assert.is_true(inner_state)
+            assert.equal(2, max_level)
+            assert.equal(1, outer_fold_count)
+        end
+    )
+
+    it(
+        "keeps later tool call folds stable when an earlier block updates again",
+        function()
+            --- @diagnostic disable-next-line: inject-field
+            Config.folding.tool_calls.preview = true
+            --- @diagnostic disable-next-line: inject-field
+            Config.folding.tool_calls.closed_by_default = false
+
+            local tab = vim.api.nvim_get_current_tabpage()
+            local chat_folds = ChatFolds:new(bufnr, tab)
+            local writer = MessageWriter:new(bufnr)
+            writer:set_chat_folds(chat_folds)
+
+            writer:write_tool_call_block({
+                tool_call_id = "tc_first",
+                kind = "execute",
+                argument = "first command",
+                status = "completed",
+                body = make_body(10),
+            })
+
+            writer:write_tool_call_block({
+                tool_call_id = "tc_second",
+                kind = "execute",
+                argument = "second command",
+                status = "completed",
+                body = make_body(10),
+            })
+
+            writer:update_tool_call_block({
+                tool_call_id = "tc_first",
+                body = {
+                    "late output 1",
+                    "late output 2",
+                    "late output 3",
+                    "late output 4",
+                    "late output 5",
+                    "late output 6",
+                },
+            })
+
+            local outer_fold_starts = {}
+            local max_level = 0
+
+            vim.api.nvim_win_call(winid, function()
+                local previous_level = 0
+                for line = 1, vim.api.nvim_buf_line_count(bufnr) do
+                    local level = vim.fn.foldlevel(line)
+                    if level > max_level then
+                        max_level = level
+                    end
+                    if level > 0 and previous_level == 0 then
+                        table.insert(outer_fold_starts, line)
+                    end
+                    previous_level = level
+                end
+            end)
+
+            assert.equal(2, #outer_fold_starts)
+            assert.equal(2, max_level)
+
+            local first_outer = assert.not_nil(outer_fold_starts[1])
+            local second_outer = assert.not_nil(outer_fold_starts[2])
+            assert.is_false(ChatFolds._get_fold_state(winid, first_outer))
+            assert.is_true(ChatFolds._get_fold_state(winid, first_outer + 5))
+            assert.is_false(ChatFolds._get_fold_state(winid, second_outer))
+            assert.is_true(ChatFolds._get_fold_state(winid, second_outer + 5))
+        end
+    )
+
+    it(
+        "renders multiple claude-style updates in one block with at most two folds",
+        function()
+            --- @diagnostic disable-next-line: inject-field
+            Config.folding.tool_calls.preview = true
+            --- @diagnostic disable-next-line: inject-field
+            Config.folding.tool_calls.closed_by_default = false
+
+            local tab = vim.api.nvim_get_current_tabpage()
+            local chat_folds = ChatFolds:new(bufnr, tab)
+            local writer = MessageWriter:new(bufnr)
+            writer:set_chat_folds(chat_folds)
+
+            writer:write_tool_call_block({
+                tool_call_id = "tc_claude_ui",
+                kind = "execute",
+                argument = "claude multi update",
+                status = "pending",
+                body = {
+                    "preparing command",
+                    "checking environment",
+                    "warming cache",
+                    "collecting files",
+                    "waiting for output",
+                    "still running",
+                },
+            })
+
+            writer:update_tool_call_block({
+                tool_call_id = "tc_claude_ui",
+                status = "in_progress",
+                body = {
+                    "stdout 1",
+                    "stdout 2",
+                    "stdout 3",
+                    "stdout 4",
+                    "stdout 5",
+                    "stdout 6",
+                },
+            })
+
+            writer:update_tool_call_block({
+                tool_call_id = "tc_claude_ui",
+                status = "in_progress",
+                body = {
+                    "stderr 1",
+                    "stderr 2",
+                    "stderr 3",
+                    "stderr 4",
+                    "stderr 5",
+                    "stderr 6",
+                },
+            })
+
+            writer:update_tool_call_block({
+                tool_call_id = "tc_claude_ui",
+                status = "completed",
+                body = {
+                    "exit code: 0",
+                    "done 1",
+                    "done 2",
+                    "done 3",
+                    "done 4",
+                    "done 5",
+                },
+            })
+
+            local tracker =
+                assert.not_nil(writer.tool_call_blocks["tc_claude_ui"])
+            local body = assert.not_nil(tracker.body)
+
+            assert.is_true(vim.tbl_contains(body, "preparing command"))
+            assert.is_true(vim.tbl_contains(body, "stdout 1"))
+            assert.is_true(vim.tbl_contains(body, "stderr 1"))
+            assert.is_true(vim.tbl_contains(body, "exit code: 0"))
+
+            local separator_count = 0
+            for _, line in ipairs(body) do
+                if line == "---" then
+                    separator_count = separator_count + 1
+                end
+            end
+            assert.equal(3, separator_count)
+
+            local body_start, body_end = ChatFolds._resolve_body_range(
+                bufnr,
+                writer.tool_call_blocks,
+                "tc_claude_ui"
+            )
+            body_start = assert.not_nil(body_start)
+            body_end = assert.not_nil(body_end)
+
+            local outer_fold_starts = {}
+            local max_level = 0
+
+            vim.api.nvim_win_call(winid, function()
+                local previous_level = 0
+                for line = body_start, body_end do
+                    local level = vim.fn.foldlevel(line)
+                    if level > max_level then
+                        max_level = level
+                    end
+                    if level > 0 and previous_level == 0 then
+                        table.insert(outer_fold_starts, line)
+                    end
+                    previous_level = level
+                end
+            end)
+
+            assert.equal(1, #outer_fold_starts)
+            assert.equal(2, max_level)
+
+            local outer_start = assert.not_nil(outer_fold_starts[1])
+            assert.is_false(ChatFolds._get_fold_state(winid, outer_start))
+            assert.is_true(ChatFolds._get_fold_state(winid, outer_start + 5))
+        end
+    )
+
     it("reapplies folds after the chat window is reopened", function()
         --- @diagnostic disable-next-line: inject-field
         Config.folding.tool_calls.preview = true

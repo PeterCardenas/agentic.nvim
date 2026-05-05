@@ -295,6 +295,28 @@ describe("agentic.ui.ChatFolds", function()
         end)
 
         it(
+            "removes an existing fold when the tool call becomes in progress",
+            function()
+                setup_config({ tool_calls = { min_lines = 5 } })
+                local bufnr, winid, blocks, tc_id = create_tool_call_buffer(10)
+                local tab = vim.api.nvim_get_current_tabpage()
+
+                local folds = ChatFolds:new(bufnr, tab)
+                folds:sync_tool_call(tc_id, blocks)
+
+                assert.is_not_nil(ChatFolds._get_fold_state(winid, 2))
+
+                blocks[tc_id].status = "in_progress"
+                folds:sync_tool_call(tc_id, blocks)
+
+                assert.is_nil(ChatFolds._get_fold_state(winid, 2))
+
+                vim.api.nvim_win_close(winid, true)
+                vim.api.nvim_buf_delete(bufnr, { force = true })
+            end
+        )
+
+        it(
             "records fold without creating any when no visible windows",
             function()
                 setup_config({ tool_calls = { min_lines = 5 } })
