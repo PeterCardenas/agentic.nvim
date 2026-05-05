@@ -2,6 +2,15 @@ local FileSystem = require("agentic.utils.file_system")
 local Config = require("agentic.config")
 local Logger = require("agentic.utils.logger")
 
+--- @class agentic.ui.FilePicker.FzfPathEntry
+--- @field path? string
+---
+--- @class agentic.ui.FilePicker.FzfPathModule
+--- @field entry_to_file fun(entry: string, opts: { cwd: string }): agentic.ui.FilePicker.FzfPathEntry
+---
+--- @class agentic.ui.FilePicker.FzfLua
+--- @field files? fun(opts: table)
+--- @field path? agentic.ui.FilePicker.FzfPathModule
 local FilePicker = {}
 
 FilePicker.CMD_RG = {
@@ -27,14 +36,14 @@ FilePicker.CMD_FD = {
 
 FilePicker.CMD_GIT = { "git", "ls-files", "-co", "--exclude-standard" }
 
---- @return fzf-lua|nil
+--- @return agentic.ui.FilePicker.FzfLua|nil
 local function load_fzf_lua()
     local ok, loaded_fzf = pcall(require, "fzf-lua")
     if not ok then
         return nil
     end
 
-    local fzf = loaded_fzf --[[@as fzf-lua]]
+    local fzf = loaded_fzf --[[@as agentic.ui.FilePicker.FzfLua]]
     return fzf
 end
 
@@ -55,10 +64,15 @@ local function resolve_file_path(path)
 end
 
 --- @param selected string[]|nil
---- @param fzf fzf-lua
+--- @param fzf agentic.ui.FilePicker.FzfLua
 --- @return string[]
 local function get_fzf_selected_paths(selected, fzf)
     if type(selected) ~= "table" or #selected == 0 then
+        return {}
+    end
+
+    local fzf_path = fzf.path
+    if not fzf_path then
         return {}
     end
 
@@ -68,7 +82,7 @@ local function get_fzf_selected_paths(selected, fzf)
     local file_paths = {}
     for _, entry in ipairs(selected) do
         if type(entry) == "string" and entry ~= "" then
-            local parsed_entry = fzf.path.entry_to_file(entry, { cwd = cwd })
+            local parsed_entry = fzf_path.entry_to_file(entry, { cwd = cwd })
             if parsed_entry.path then
                 table.insert(file_paths, parsed_entry.path)
             end
