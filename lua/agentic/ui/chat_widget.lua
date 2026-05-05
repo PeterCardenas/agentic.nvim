@@ -553,38 +553,49 @@ end
 --- @param positions integer[]
 --- @param current_line integer
 --- @param direction "next"|"prev"
---- @return integer
+--- @return integer target_line
+--- @return boolean did_wrap
 local function get_adjacent_position(positions, current_line, direction)
     local first = positions[1]
     local last = positions[#positions]
     if not first or not last then
-        return current_line
+        return current_line, false
     end
 
     if direction == "next" then
         for i, pos in ipairs(positions) do
             if pos > current_line then
-                return pos
+                return pos, false
             end
             if pos == current_line then
-                return positions[i + 1] or first
+                local next_pos = positions[i + 1]
+                if next_pos then
+                    return next_pos, false
+                end
+
+                return first, #positions > 1
             end
         end
 
-        return first
+        return first, #positions > 1 and current_line > last
     end
 
     for i = #positions, 1, -1 do
         local pos = positions[i]
         if pos < current_line then
-            return pos
+            return pos, false
         end
         if pos == current_line then
-            return positions[i - 1] or last
+            local prev_pos = positions[i - 1]
+            if prev_pos then
+                return prev_pos, false
+            end
+
+            return last, #positions > 1
         end
     end
 
-    return last
+    return last, #positions > 1 and current_line < first
 end
 
 --- Navigate to next or previous user prompt in chat buffer
@@ -603,9 +614,14 @@ function ChatWidget:_navigate_prompt(direction)
 
     local cursor = vim.api.nvim_win_get_cursor(chat_winid)
     local current_line = cursor[1]
-    local target_line =
+    local target_line, did_wrap =
         get_adjacent_position(positions, current_line, direction)
     move_chat_cursor_to_line_start(chat_winid, target_line)
+    if did_wrap then
+        local wrap_message = direction == "next" and "Wrapped to first prompt"
+            or "Wrapped to last prompt"
+        Logger.notify(wrap_message, vim.log.levels.WARN)
+    end
 end
 
 --- Navigate to next user prompt
@@ -633,8 +649,15 @@ function ChatWidget:navigate_last_agent_message_chunk()
 
     local cursor = vim.api.nvim_win_get_cursor(chat_winid)
     local current_line = cursor[1]
-    local target_line = get_adjacent_position(positions, current_line, "next")
+    local target_line, did_wrap =
+        get_adjacent_position(positions, current_line, "next")
     move_chat_cursor_to_line_start(chat_winid, target_line)
+    if did_wrap then
+        Logger.notify(
+            "Wrapped to first agent message chunk",
+            vim.log.levels.WARN
+        )
+    end
 end
 
 --- Navigate to the previous agent message start in the chat buffer
@@ -652,8 +675,15 @@ function ChatWidget:navigate_prev_agent_message_chunk()
 
     local cursor = vim.api.nvim_win_get_cursor(chat_winid)
     local current_line = cursor[1]
-    local target_line = get_adjacent_position(positions, current_line, "prev")
+    local target_line, did_wrap =
+        get_adjacent_position(positions, current_line, "prev")
     move_chat_cursor_to_line_start(chat_winid, target_line)
+    if did_wrap then
+        Logger.notify(
+            "Wrapped to last agent message chunk",
+            vim.log.levels.WARN
+        )
+    end
 end
 
 function ChatWidget:_bind_keymaps()

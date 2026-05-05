@@ -663,11 +663,90 @@ describe("agentic.ui.ChatWidget", function()
         end)
     end)
 
+    describe("prompt navigation", function()
+        local MessageWriter
+        local tab_page_id
+        --- @type agentic.ui.ChatWidget
+        local widget
+        --- @type TestStub
+        local notify_stub
+
+        before_each(function()
+            MessageWriter = require("agentic.ui.message_writer")
+            vim.cmd("tabnew")
+            tab_page_id = vim.api.nvim_get_current_tabpage()
+
+            local on_submit_spy = spy.new(function() end)
+            widget =
+                ChatWidget:new(tab_page_id, on_submit_spy --[[@as function]])
+            widget.message_writer = MessageWriter:new(widget.buf_nrs.chat)
+
+            fill_buffer(widget, "chat", {
+                "line 1",
+                "line 2",
+                "line 3",
+                "line 4",
+                "line 5",
+                "line 6",
+                "line 7",
+                "line 8",
+            })
+            local ns = vim.api.nvim_create_namespace("agentic_prompt_positions")
+            vim.api.nvim_buf_set_extmark(widget.buf_nrs.chat, ns, 1, 0, {})
+            vim.api.nvim_buf_set_extmark(widget.buf_nrs.chat, ns, 4, 0, {})
+            vim.api.nvim_buf_set_extmark(widget.buf_nrs.chat, ns, 7, 0, {})
+            widget:show({ focus_prompt = false })
+            notify_stub = spy.stub(Logger, "notify")
+        end)
+
+        after_each(function()
+            notify_stub:revert()
+            if widget then
+                pcall(function()
+                    widget:destroy()
+                end)
+            end
+            pcall(function()
+                vim.cmd("tabclose")
+            end)
+        end)
+
+        it("warns when next prompt wraps to the first one", function()
+            vim.api.nvim_win_set_cursor(widget.win_nrs.chat, { 8, 0 })
+
+            widget:navigate_next_prompt()
+
+            local cursor = vim.api.nvim_win_get_cursor(widget.win_nrs.chat)
+            assert.equal(2, cursor[1])
+            assert.equal(0, cursor[2])
+            assert.spy(notify_stub).was.called(1)
+            assert
+                .spy(notify_stub).was
+                .called_with("Wrapped to first prompt", vim.log.levels.WARN)
+        end)
+
+        it("warns when previous prompt wraps to the last one", function()
+            vim.api.nvim_win_set_cursor(widget.win_nrs.chat, { 2, 0 })
+
+            widget:navigate_prev_prompt()
+
+            local cursor = vim.api.nvim_win_get_cursor(widget.win_nrs.chat)
+            assert.equal(8, cursor[1])
+            assert.equal(0, cursor[2])
+            assert.spy(notify_stub).was.called(1)
+            assert
+                .spy(notify_stub).was
+                .called_with("Wrapped to last prompt", vim.log.levels.WARN)
+        end)
+    end)
+
     describe("agent chunk navigation", function()
         local MessageWriter
         local tab_page_id
         --- @type agentic.ui.ChatWidget
         local widget
+        --- @type TestStub
+        local notify_stub
 
         before_each(function()
             MessageWriter = require("agentic.ui.message_writer")
@@ -696,9 +775,11 @@ describe("agentic.ui.ChatWidget", function()
             vim.api.nvim_buf_set_extmark(widget.buf_nrs.chat, ns, 4, 0, {})
             vim.api.nvim_buf_set_extmark(widget.buf_nrs.chat, ns, 7, 0, {})
             widget:show({ focus_prompt = false })
+            notify_stub = spy.stub(Logger, "notify")
         end)
 
         after_each(function()
+            notify_stub:revert()
             if widget then
                 pcall(function()
                     widget:destroy()
@@ -752,5 +833,42 @@ describe("agentic.ui.ChatWidget", function()
             assert.equal(8, cursor[1])
             assert.equal(0, cursor[2])
         end)
+
+        it(
+            "warns when next agent message chunk wraps to the first one",
+            function()
+                vim.api.nvim_win_set_cursor(widget.win_nrs.chat, { 8, 0 })
+
+                widget:navigate_last_agent_message_chunk()
+
+                local cursor = vim.api.nvim_win_get_cursor(widget.win_nrs.chat)
+                assert.equal(2, cursor[1])
+                assert.equal(0, cursor[2])
+                assert.spy(notify_stub).was.called(1)
+                assert
+                    .spy(notify_stub).was
+                    .called_with(
+                        "Wrapped to first agent message chunk",
+                        vim.log.levels.WARN
+                    )
+            end
+        )
+
+        it(
+            "warns when previous agent message chunk wraps to the last one",
+            function()
+                vim.api.nvim_win_set_cursor(widget.win_nrs.chat, { 2, 0 })
+
+                widget:navigate_prev_agent_message_chunk()
+
+                local cursor = vim.api.nvim_win_get_cursor(widget.win_nrs.chat)
+                assert.equal(8, cursor[1])
+                assert.equal(0, cursor[2])
+                assert.spy(notify_stub).was.called(1)
+                assert
+                    .spy(notify_stub).was
+                    .called_with("Wrapped to last agent message chunk", vim.log.levels.WARN)
+            end
+        )
     end)
 end)
