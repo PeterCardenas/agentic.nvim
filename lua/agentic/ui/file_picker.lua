@@ -143,6 +143,53 @@ local function should_exclude(path)
     return false
 end
 
+--- Returns the 1-based screen row of the top edge of the AgenticInput window
+--- in the current tabpage, or nil when no such window exists.
+--- @return integer|nil
+local function find_agentic_prompt_top_row()
+    local tabpage = vim.api.nvim_get_current_tabpage()
+    for _, winid in ipairs(vim.api.nvim_tabpage_list_wins(tabpage)) do
+        local bufnr = vim.api.nvim_win_get_buf(winid)
+        if vim.bo[bufnr].filetype == "AgenticInput" then
+            local screenpos = vim.fn.win_screenpos(winid)
+            return screenpos[1]
+        end
+    end
+    return nil
+end
+
+--- Build a popup that anchors at the bottom of the editor (above the agentic
+--- prompt) so the picker pops upward. Results and preview sit side-by-side on
+--- top, with the fzf input line at the bottom of the picker.
+--- @return table
+local function build_fzf_winopts()
+    local lines = vim.o.lines
+    local cmdheight = vim.o.cmdheight or 1
+    local prompt_top_row = find_agentic_prompt_top_row()
+
+    -- Bottom edge of the picker (1-based screen row, inclusive). Leave a
+    -- single-row gap above the prompt so its border stays visible.
+    local picker_bottom_row = prompt_top_row and (prompt_top_row - 2)
+        or (lines - cmdheight)
+
+    -- Height accounts for the rounded border (top + bottom = 2 rows).
+    local available_height = math.max(picker_bottom_row, 1)
+    local picker_height = math.max(15, math.min(available_height, 25))
+    local picker_top_row = math.max(0, picker_bottom_row - picker_height)
+
+    return {
+        relative = "editor",
+        row = picker_top_row,
+        col = 0,
+        width = 1,
+        height = picker_height,
+        backdrop = 100,
+        preview = {
+            layout = "horizontal",
+        },
+    }
+end
+
 --- @param on_file_selected fun(file_path: string)|nil
 --- @param on_complete fun()|nil
 function FilePicker.open(on_file_selected, on_complete)
@@ -155,6 +202,12 @@ function FilePicker.open(on_file_selected, on_complete)
     if fzf and type(fzf.files) == "function" then
         fzf.files({
             file_icons = false,
+            winopts = build_fzf_winopts(),
+            -- Place fzf's input line at the bottom of the picker so results
+            -- grow upward toward the preview pane.
+            fzf_opts = {
+                ["--layout"] = "reverse-list",
+            },
             actions = {
                 ["default"] = function(selected)
                     local selected_paths = selected

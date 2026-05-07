@@ -203,6 +203,44 @@ describe("FilePicker:open", function()
         package.loaded["fzf-lua"] = nil
     end)
 
+    it(
+        "pops upward above the agentic prompt with side-by-side preview",
+        function()
+            --- @type table|nil
+            local captured_opts
+
+            package.loaded["fzf-lua"] = {
+                files = function(opts)
+                    captured_opts = opts
+                end,
+            }
+
+            FilePicker.open()
+
+            captured_opts = assert.not_nil(captured_opts)
+            assert.is_table(captured_opts)
+
+            local winopts = captured_opts.winopts
+            assert.equal("editor", winopts.relative)
+            assert.equal(0, winopts.col)
+            assert.equal(1, winopts.width)
+            assert.equal(100, winopts.backdrop)
+            assert.equal("horizontal", winopts.preview.layout)
+            -- Bottom-anchored: top + height must end above the editor's last
+            -- line minus cmdheight, so the picker never covers the prompt
+            -- buffer.
+            local cmdheight = vim.o.cmdheight or 1
+            assert.is_true(winopts.row >= 0)
+            assert.is_true(winopts.height > 0)
+            assert.is_true(
+                winopts.row + winopts.height <= vim.o.lines - cmdheight
+            )
+
+            -- fzf's prompt sits at the bottom of the picker.
+            assert.equal("reverse-list", captured_opts.fzf_opts["--layout"])
+        end
+    )
+
     it("adds selected files from fzf picker callback", function()
         local on_selected = spy.new(function(_file_path) end)
         local on_complete = spy.new(function() end)
