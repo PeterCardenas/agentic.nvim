@@ -336,6 +336,14 @@ function Agentic.setup(opts)
         end,
     })
 
+    -- Set up global keymap for switching providers
+    vim.keymap.set(
+        "n",
+        Config.keymaps.widget.switch_provider_global,
+        Agentic.switch_provider,
+        { desc = "Agentic: Switch provider", silent = true }
+    )
+
     -- Set up global keymap for toggling between prompt and code window
     vim.keymap.set(
         "n",

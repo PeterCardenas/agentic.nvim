@@ -1,5 +1,3 @@
-local BufHelpers = require("agentic.utils.buf_helpers")
-local Config = require("agentic.config")
 local Logger = require("agentic.utils.logger")
 
 --- Lazily load fzf-lua module
@@ -131,14 +129,14 @@ end
 local AgentConfigOptions = {}
 AgentConfigOptions.__index = AgentConfigOptions
 
---- @param buffers agentic.ui.ChatWidget.BufNrs Same buffers as ChatWidget instance
---- @param set_model_callback fun(model_id: string, is_legacy: boolean)
---- @param set_config_option_callback fun(config_id: string, option_value: string)|nil
+--- @param _buffers agentic.ui.ChatWidget.BufNrs Same buffers as ChatWidget instance
+--- @param _set_model_callback fun(model_id: string, is_legacy: boolean)
+--- @param _set_config_option_callback fun(config_id: string, option_value: string)|nil
 --- @return agentic.acp.AgentConfigOptions
 function AgentConfigOptions:new(
-    buffers,
-    set_model_callback,
-    set_config_option_callback
+    _buffers,
+    _set_model_callback,
+    _set_config_option_callback
 )
     local AgentModes = require("agentic.acp.agent_modes")
     local AgentModels = require("agentic.acp.agent_models")
@@ -151,33 +149,6 @@ function AgentConfigOptions:new(
         legacy_agent_modes = AgentModes:new(),
         legacy_agent_models = AgentModels:new(),
     }, self)
-
-    set_config_option_callback = set_config_option_callback
-        or function(_config_id, _option_value)
-            -- no-op
-        end
-
-    for _, bufnr in pairs(buffers) do
-        BufHelpers.multi_keymap_set(
-            Config.keymaps.widget.switch_model,
-            bufnr,
-            function()
-                self:show_model_selector(set_model_callback)
-            end,
-            { desc = "Agentic: Select Model" }
-        )
-
-        BufHelpers.multi_keymap_set(
-            Config.keymaps.widget.switch_config_option,
-            bufnr,
-            function()
-                self:show_config_option_picker(function(config_id, option_value)
-                    set_config_option_callback(config_id, option_value)
-                end)
-            end,
-            { desc = "Agentic: Select Config Option" }
-        )
-    end
 
     return self
 end

@@ -20,6 +20,15 @@ describe("agentic.ui.ChatWidget", function()
         vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, content)
     end
 
+    --- @param bufnr number
+    --- @param key string
+    --- @return table
+    local function get_keymap_in_buf(bufnr, key)
+        return vim.api.nvim_buf_call(bufnr, function()
+            return vim.fn.maparg(key, "n", false, true)
+        end)
+    end
+
     -- Tests that behave identically regardless of layout position
     for _, position in ipairs({ "right", "left", "bottom" }) do
         -- Bottom layout uses 2 to avoid touching the screen edge
@@ -870,5 +879,49 @@ describe("agentic.ui.ChatWidget", function()
                     .called_with("Wrapped to last agent message chunk", vim.log.levels.WARN)
             end
         )
+    end)
+
+    describe("keymaps", function()
+        local tab_page_id
+        --- @type agentic.ui.ChatWidget
+        local widget
+        local original_switch_provider
+        local original_maplocalleader
+
+        before_each(function()
+            original_maplocalleader = vim.g.maplocalleader
+            vim.g.maplocalleader = "\\"
+
+            original_switch_provider = Config.keymaps.widget.switch_provider
+            Config.keymaps.widget.switch_provider = "<localLeader>s"
+
+            vim.cmd("tabnew")
+            tab_page_id = vim.api.nvim_get_current_tabpage()
+
+            local on_submit_spy = spy.new(function() end)
+            widget =
+                ChatWidget:new(tab_page_id, on_submit_spy --[[@as function]])
+        end)
+
+        after_each(function()
+            Config.keymaps.widget.switch_provider = original_switch_provider
+            vim.g.maplocalleader = original_maplocalleader
+
+            if widget then
+                pcall(function()
+                    widget:destroy()
+                end)
+            end
+            pcall(function()
+                vim.cmd("tabclose")
+            end)
+        end)
+
+        it("does not install a buffer-local provider switch keymap", function()
+            local provider_map =
+                get_keymap_in_buf(widget.buf_nrs.chat, "<localLeader>s")
+
+            assert.is_nil(provider_map.lhs)
+        end)
     end)
 end)

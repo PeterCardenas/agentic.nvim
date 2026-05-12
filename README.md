@@ -37,9 +37,9 @@ interface, your colors, and your keymaps.
     once and, if they're working on your Terminal, they will work automatically
     on Agentic.
 - **🧠 Model Switcher** - Switch between available models mid-session
-  (`<localLeader>m` in the chat widget)
+  (`<leader>am` for the current tabpage session)
 - **🔀 Switch Providers** - Switch between ACP providers mid-conversation
-  without losing chat history (`<localLeader>s` in the chat widget)
+  without losing chat history (`<leader>ax` for the current tabpage session)
 - **♻️ Session Restore** - Restore your session and chat history at any time,
   for all providers
 - **📝 Context Control** - Add files and text selections to conversation context
@@ -468,7 +468,7 @@ require("agentic").add_selection({ focus_prompt = false })
 
 ### Built-in Keybindings
 
-These keybindings are automatically set in Agentic buffers:
+These keybindings are set by Agentic:
 
 | Keybinding       | Mode  | Description                                                     |
 | ---------------- | ----- | --------------------------------------------------------------- |
@@ -476,10 +476,10 @@ These keybindings are automatically set in Agentic buffers:
 | `<C-s>`          | n/v/i | Submit prompt                                                   |
 | `<localLeader>p` | n     | Paste image from clipboard in the Prompt buffer                 |
 | `<C-v>`          | i     | Paste image from clipboard (same as Claude-code)                |
-| `<localLeader>s` | n     | Switch ACP provider (preserves chat history)                    |
-| `<localLeader>m` | n     | Switch model without (preserves chat history)                   |
-| `<localLeader>o` | n     | Two-step config picker (including mode when provider exposes it) |
-| `<leader>ao`     | n     | Global two-step config picker (option, then value)              |
+| `<leader>ax`     | n     | Switch ACP provider for the current tabpage session             |
+| `<leader>af`     | n     | Toggle between the prompt and the last non-widget code window   |
+| `<leader>am`     | n     | Switch model for the current tabpage session                    |
+| `<leader>ao`     | n     | Open the global two-step config picker for the current session  |
 | `q`              | n     | Close chat widget                                               |
 | `d`              | n     | Remove file, code selection, or diagnostic at cursor            |
 | `d`              | v     | Remove multiple selected files, code selections, or diagnostics |
@@ -504,9 +504,9 @@ your setup:
       -- Keybindings for ALL buffers in the widget (chat, prompt, code, files)
       widget = {
         close = "q",  -- String for a single keybinding
-        switch_provider = "<localLeader>s",  -- Switch ACP provider
-        switch_model = "<localLeader>m",     -- Switch model
-        switch_config_option = "<localLeader>o", -- Two-step config picker
+        switch_provider_global = "<leader>ax", -- Global provider picker
+        toggle_prompt_code = "<leader>af", -- Prompt/code toggle
+        switch_model_global = "<leader>am", -- Global model picker
         switch_config_option_global = "<leader>ao", -- Global two-step config picker
       },
 

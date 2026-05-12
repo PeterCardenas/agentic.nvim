@@ -84,19 +84,9 @@ describe("agentic.acp.AgentConfigOptions", function()
 
     describe("constructor", function()
         it(
-            "registers keymaps for model and config options on all buffers",
+            "does not register buffer-local model or config-option keymaps",
             function()
-                -- multi_keymap_set is stubbed in before_each; constructor called there
-                -- Each buffer gets 2 keymaps
-                -- (switch_model + switch_config_option)
-                -- we pass 1 buffer so expect 2 calls
-                assert.stub(multi_keymap_stub).was.called(2)
-
-                local model_call = assert.not_nil(multi_keymap_stub.calls[1])
-                assert.equal("function", type(model_call[3]))
-
-                local config_call = assert.not_nil(multi_keymap_stub.calls[2])
-                assert.equal("function", type(config_call[3]))
+                assert.stub(multi_keymap_stub).was.called(0)
             end
         )
     end)

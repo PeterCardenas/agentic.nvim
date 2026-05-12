@@ -723,15 +723,6 @@ function ChatWidget:_bind_keymaps()
             { desc = "Agentic: Close Chat widget" }
         )
 
-        BufHelpers.multi_keymap_set(
-            Config.keymaps.widget.switch_provider,
-            bufnr,
-            function()
-                require("agentic").switch_provider()
-            end,
-            { desc = "Agentic: Switch provider" }
-        )
-
         -- Tab to cycle through windows
         BufHelpers.multi_keymap_set(
             Config.keymaps.widget.cycle_windows,

@@ -274,9 +274,6 @@ local ConfigDefault = {
         --- Keys bindings for ALL buffers in the widget
         widget = {
             close = "q",
-            switch_provider = "<localLeader>s",
-            switch_model = "<localLeader>m",
-            switch_config_option = "<localLeader>o",
             cycle_windows = {
                 {
                     "<Tab>",
@@ -289,6 +286,7 @@ local ConfigDefault = {
                     mode = { "i", "n" },
                 },
             },
+            switch_provider_global = "<leader>ax", -- Global keymap to switch provider
             toggle_prompt_code = "<leader>af", -- Global keymap to toggle between prompt and code window
             switch_model_global = "<leader>am", -- Global keymap to switch model
             switch_config_option_global = "<leader>ao", -- Global keymap to switch config options

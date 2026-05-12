@@ -138,4 +138,118 @@ describe("agentic", function()
             assert.spy(show_spy).was.called(1)
         end)
     end)
+
+    describe("setup", function()
+        --- @type agentic.Agentic|nil
+        local Agentic
+        --- @type table<string, any>|nil
+        local config_mock
+        --- @type table<string, any>
+        local original_loaded = {}
+        --- @type TestSpy|nil
+        local keymap_set_spy
+        --- @type TestStub|nil
+        local new_signal_stub
+
+        before_each(function()
+            config_mock = {
+                provider = "claude-acp",
+                acp_providers = {
+                    ["claude-acp"] = {},
+                    ["gemini-acp"] = {},
+                },
+                image_paste = { enabled = false },
+                keymaps = {
+                    widget = {
+                        toggle_prompt_code = "<leader>af",
+                        switch_model_global = "<leader>am",
+                        switch_config_option_global = "<leader>ao",
+                        switch_provider_global = "<leader>ax",
+                    },
+                },
+            }
+
+            original_loaded = {
+                ["agentic"] = package.loaded["agentic"],
+                ["agentic.config"] = package.loaded["agentic.config"],
+                ["agentic.acp.agent_instance"] = package.loaded["agentic.acp.agent_instance"],
+                ["agentic.theme"] = package.loaded["agentic.theme"],
+                ["agentic.session_registry"] = package.loaded["agentic.session_registry"],
+                ["agentic.session_restore"] = package.loaded["agentic.session_restore"],
+                ["agentic.session_prewarm"] = package.loaded["agentic.session_prewarm"],
+                ["agentic.utils.object"] = package.loaded["agentic.utils.object"],
+                ["agentic.utils.logger"] = package.loaded["agentic.utils.logger"],
+            }
+
+            package.loaded["agentic"] = nil
+            package.loaded["agentic.config"] = config_mock
+            package.loaded["agentic.acp.agent_instance"] = {
+                cleanup_all = function() end,
+            }
+            package.loaded["agentic.theme"] = {
+                setup = function() end,
+            }
+            package.loaded["agentic.session_registry"] = {
+                sessions = {},
+                get_session_for_tab_page = function() end,
+            }
+            package.loaded["agentic.session_restore"] = {}
+            package.loaded["agentic.session_prewarm"] = {
+                setup = function() end,
+            }
+            package.loaded["agentic.utils.object"] = {
+                merge_config = function() end,
+            }
+            package.loaded["agentic.utils.logger"] = {
+                notify = function() end,
+            }
+
+            keymap_set_spy = spy.on(vim.keymap, "set")
+            new_signal_stub = spy.stub(vim.uv, "new_signal")
+            new_signal_stub:returns(nil)
+
+            Agentic = require("agentic")
+        end)
+
+        after_each(function()
+            local resolved_keymap_set_spy = keymap_set_spy
+            if resolved_keymap_set_spy then
+                resolved_keymap_set_spy:revert()
+            end
+
+            local resolved_new_signal_stub = new_signal_stub
+            if resolved_new_signal_stub then
+                resolved_new_signal_stub:revert()
+            end
+
+            for key, value in pairs(original_loaded) do
+                package.loaded[key] = value
+            end
+        end)
+
+        it("registers the global provider switch keymap", function()
+            local agentic = assert.not_nil(Agentic)
+            local resolved_keymap_set_spy = assert.not_nil(keymap_set_spy)
+
+            agentic.setup({})
+
+            local provider_call
+            for _, call in ipairs(resolved_keymap_set_spy.calls) do
+                if call[2] == "<leader>ax" then
+                    provider_call = call
+                    break
+                end
+            end
+
+            local resolved_provider_call = assert.not_nil(provider_call)
+            assert.equal("n", resolved_provider_call[1])
+            assert.equal("<leader>ax", resolved_provider_call[2])
+            assert.equal(agentic.switch_provider, resolved_provider_call[3])
+            assert.equal(
+                "Agentic: Switch provider",
+                resolved_provider_call[4].desc
+            )
+            assert.equal(true, resolved_provider_call[4].silent)
+        end)
+    end)
 end)

@@ -234,8 +234,8 @@ acp_providers ~
                    `"bypassPermissions"`). Use <S-Tab> in the
                    chat widget to see modes your provider offers.
   `default_model`  Override the provider's default model (e.g.,
-                   `"haiku"`). Use <localLeader>m in the chat
-                   widget to see available models.
+                   `"haiku"`). Use <leader>am to see available
+                   models for the current session.
   `default_config_options`
                    Apply default config options after session
                    creation. Model is applied first, then dependent
@@ -470,7 +470,7 @@ agentic.rotate_layout({layouts})
 ==============================================================================
 KEYMAPS                                                *agentic-keymaps*
 
-These keybindings are automatically set in Agentic buffers:
+These keybindings are set by agentic.nvim:
 
   Key                    Mode    Description ~
   <CR>                   n       Submit prompt
@@ -478,10 +478,9 @@ These keybindings are automatically set in Agentic buffers:
   <Tab>                  i       Accept file completion
   <localLeader>p         n       Paste image from clipboard
   <C-v>                  i       Paste image from clipboard
-  <localLeader>s         n       Switch ACP provider (keeps history)
-  <localLeader>m         n       Switch model (keeps history)
-  <localLeader>o         n       Two-step config picker (includes mode if
-                                 provider exposes it)
+  <leader>ax             n       Switch ACP provider for current session
+  <leader>af             n       Toggle between prompt and code window
+  <leader>am             n       Switch model for current session
   <leader>ao             n       Global two-step config picker
   q                      n       Close chat widget
   d                      n/v     Remove file/selection/diagnostic
@@ -502,9 +501,9 @@ Override default keybindings via the `keymaps` config option:
     keymaps = {
       widget = {
         close = "q",
-        switch_provider = "<localLeader>s",
-        switch_model = "<localLeader>m",
-        switch_config_option = "<localLeader>o",
+        switch_provider_global = "<leader>ax",
+        toggle_prompt_code = "<leader>af",
+        switch_model_global = "<leader>am",
         switch_config_option_global = "<leader>ao",
       },
       prompt = {
