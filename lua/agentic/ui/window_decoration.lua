@@ -171,8 +171,13 @@ local function set_winbar(winid, text)
         return
     end
 
+    local current_winbar = vim.wo[winid].winbar
+
     -- Handle empty string case - disable winbar completely
     if text == "" then
+        if current_winbar == "" then
+            return
+        end
         vim.api.nvim_set_option_value("winbar", nil, { win = winid })
         return
     end
@@ -190,6 +195,10 @@ local function set_winbar(winid, text)
     end
 
     winbar_text = "%#Normal#" .. winbar_text
+
+    if current_winbar == winbar_text then
+        return
+    end
 
     vim.api.nvim_set_option_value("winbar", winbar_text, { win = winid })
 
@@ -218,6 +227,11 @@ local function set_buffer_name(bufnr, header_text, tab_page_id)
         buf_name = header_text
     end
 
+    if vim.b[bufnr].agentic_buffer_name == buf_name then
+        return
+    end
+
+    vim.b[bufnr].agentic_buffer_name = buf_name
     pcall(vim.api.nvim_buf_set_name, bufnr, buf_name)
 end
 

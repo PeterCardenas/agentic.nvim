@@ -55,6 +55,10 @@ end
 --- Always stops and restarts to avoid overlapping with new content
 --- @param state agentic.Theme.SpinnerState
 function StatusAnimation:start(state)
+    if self._state == state and self._next_frame_handle ~= nil then
+        return
+    end
+
     self:stop()
 
     self._state = state

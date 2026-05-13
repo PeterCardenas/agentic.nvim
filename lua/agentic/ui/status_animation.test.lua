@@ -1,5 +1,6 @@
 local assert = require("tests.helpers.assert")
 local BufHelpers = require("agentic.utils.buf_helpers")
+local spy = require("tests.helpers.spy")
 
 describe("agentic.ui.StatusAnimation", function()
     --- @type agentic.ui.StatusAnimation
@@ -99,4 +100,20 @@ describe("agentic.ui.StatusAnimation", function()
             assert.are.same(before, after)
         end
     )
+
+    it("does not restart the spinner when the state is unchanged", function()
+        local stop_spy = spy.on(StatusAnimation, "stop")
+        local render_spy = spy.on(StatusAnimation, "_render_frame")
+
+        vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, { "agent output" })
+
+        animation:start("thinking")
+        animation:start("thinking")
+
+        assert.spy(stop_spy).was.called(1)
+        assert.spy(render_spy).was.called(1)
+
+        render_spy:revert()
+        stop_spy:revert()
+    end)
 end)
