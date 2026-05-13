@@ -442,7 +442,7 @@ local ConfigDefault = {
     --- @field kinds? table<string, agentic.UserConfig.FoldingToolCallKindConfig>
 
     --- @class agentic.UserConfig.FoldtextInfo
-    --- @field virt_text string[][] Highlighted virtual text chunks {{text, hl_group}, ...}
+    --- @field virt_text [string, string][] Highlighted virtual text chunks {{text, hl_group}, ...}
     --- @field line_count integer
     --- @field width integer Available text area width in columns
     --- @field truncate fun(str: string, target_width: integer): string

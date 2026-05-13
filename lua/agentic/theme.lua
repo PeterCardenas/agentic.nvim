@@ -23,6 +23,7 @@ Theme.HL_GROUPS = {
 
     THOUGHT_LABEL = "AgenticThoughtLabel",
     THOUGHT_TEXT = "AgenticThoughtText",
+    TOOL_CALL_TEXT = "AgenticToolCallText",
 }
 
 local COLORS = {
@@ -69,7 +70,66 @@ local spinner_hl = {
     busy = Theme.HL_GROUPS.SPINNER_BUSY,
 }
 
+--- @param color string|integer|nil
+--- @return string|integer|nil normalized
+local function normalize_hl_color(color)
+    if type(color) == "number" then
+        return string.format("#%06x", color)
+    end
+
+    return color
+end
+
+--- @return table
+local function get_neutral_body_hl()
+    local comment_hl = vim.api.nvim_get_hl(
+        0,
+        { name = "Comment", link = false, create = false }
+    )
+    local normal_hl = vim.api.nvim_get_hl(
+        0,
+        { name = "Normal", link = false, create = false }
+    )
+
+    --- @type table
+    local hl = {
+        bold = false,
+        standout = false,
+        underline = false,
+        undercurl = false,
+        underdouble = false,
+        underdotted = false,
+        underdashed = false,
+        strikethrough = false,
+        italic = false,
+        reverse = false,
+        nocombine = true,
+    }
+
+    if comment_hl.fg then
+        hl.fg = normalize_hl_color(comment_hl.fg)
+    end
+
+    if comment_hl.ctermfg then
+        hl.ctermfg = comment_hl.ctermfg
+    end
+
+    if normal_hl.bg then
+        hl.bg = normalize_hl_color(normal_hl.bg)
+    else
+        hl.bg = "bg"
+    end
+
+    if normal_hl.ctermbg then
+        hl.ctermbg = normal_hl.ctermbg
+    end
+
+    return hl
+end
+
 function Theme.setup()
+    local neutral_body_hl = get_neutral_body_hl()
+
     -- stylua: ignore start
     local highlights = {
         -- Diff highlights
@@ -95,7 +155,8 @@ function Theme.setup()
 
         -- Thought highlights
         { Theme.HL_GROUPS.THOUGHT_LABEL, { fg = COLORS.spinner_thinking_fg, bold = true } },
-        { Theme.HL_GROUPS.THOUGHT_TEXT, { link = "Comment" } },
+        { Theme.HL_GROUPS.THOUGHT_TEXT, neutral_body_hl },
+        { Theme.HL_GROUPS.TOOL_CALL_TEXT, neutral_body_hl },
     }
     -- stylua: ignore end
 

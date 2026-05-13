@@ -25,6 +25,7 @@ local NS_PROMPT_POSITIONS =
     vim.api.nvim_create_namespace("agentic_prompt_positions")
 local NS_AGENT_MESSAGE_CHUNK_POSITIONS =
     vim.api.nvim_create_namespace("agentic_agent_message_chunk_positions")
+local MARKDOWN_NEUTRAL_PRIORITY = 120
 
 --- Decode base64 image data to a temp file and return a markdown image link.
 --- @param data string
@@ -478,7 +479,7 @@ function MessageWriter:write_message_chunk(update)
                         end_row = new_last_line,
                         end_col = #new_last_text,
                         hl_group = Theme.HL_GROUPS.THOUGHT_TEXT,
-                        priority = 100,
+                        priority = MARKDOWN_NEUTRAL_PRIORITY,
                     }
                 )
             end
@@ -1152,7 +1153,7 @@ function MessageWriter:remove_permission_buttons(start_row, end_row)
     end)
 end
 
---- Apply highlights to block content (either diff highlights or Comment for non-edit blocks)
+--- Apply highlights to block content (either diff highlights or neutral tool-call styling)
 --- @param bufnr integer
 --- @param start_row integer Header line number
 --- @param end_row integer Footer line number
@@ -1168,7 +1169,7 @@ function MessageWriter:_apply_block_highlights(
     if #highlight_ranges > 0 then
         self:_apply_diff_highlights(start_row, highlight_ranges)
     elseif kind ~= "edit" and kind ~= "switch_mode" then
-        -- Apply Comment highlight for non-edit blocks without diffs
+        -- Apply neutral body styling for non-edit blocks without diffs
         for line_idx = start_row + 1, end_row - 1 do
             local line = vim.api.nvim_buf_get_lines(
                 bufnr,
@@ -1184,7 +1185,8 @@ function MessageWriter:_apply_block_highlights(
                     0,
                     {
                         end_col = #line,
-                        hl_group = "Comment",
+                        hl_group = Theme.HL_GROUPS.TOOL_CALL_TEXT,
+                        priority = MARKDOWN_NEUTRAL_PRIORITY,
                     }
                 )
             end
@@ -1242,7 +1244,8 @@ function MessageWriter:_apply_diff_highlights(start_row, highlight_ranges)
                     0,
                     {
                         end_col = #line,
-                        hl_group = "Comment",
+                        hl_group = Theme.HL_GROUPS.TOOL_CALL_TEXT,
+                        priority = MARKDOWN_NEUTRAL_PRIORITY,
                     }
                 )
             end

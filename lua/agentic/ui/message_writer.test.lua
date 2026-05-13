@@ -688,6 +688,108 @@ describe("agentic.ui.MessageWriter", function()
         end)
     end)
 
+    describe("block highlights", function()
+        it(
+            "uses a dedicated highlight group for non-diff tool call bodies",
+            function()
+                local Theme = require("agentic.theme")
+                local diff_ns =
+                    vim.api.nvim_create_namespace("agentic_diff_highlights")
+
+                writer:write_tool_call_block({
+                    tool_call_id = "tool-highlight",
+                    status = "completed",
+                    kind = "execute",
+                    argument = "ls",
+                    body = { "output line" },
+                })
+
+                local extmarks = vim.api.nvim_buf_get_extmarks(
+                    bufnr,
+                    diff_ns,
+                    0,
+                    -1,
+                    { details = true }
+                )
+
+                assert.is_true(#extmarks > 0)
+                local details = assert.not_nil(extmarks[1][4])
+                assert.equal(Theme.HL_GROUPS.TOOL_CALL_TEXT, details.hl_group)
+                assert.is_not.equal("Comment", details.hl_group)
+            end
+        )
+
+        it(
+            "uses highlight priorities above treesitter for markdown-neutral text",
+            function()
+                local Theme = require("agentic.theme")
+                local diff_ns =
+                    vim.api.nvim_create_namespace("agentic_diff_highlights")
+                local thought_ns =
+                    vim.api.nvim_create_namespace("agentic_thought_highlights")
+
+                writer:write_message_chunk({
+                    sessionUpdate = "agent_thought_chunk",
+                    content = { type = "text", text = "# heading\n*italic*" },
+                })
+
+                writer:write_tool_call_block({
+                    tool_call_id = "tool-highlight-priority",
+                    status = "completed",
+                    kind = "execute",
+                    argument = "printf",
+                    body = { "# heading", "*italic*" },
+                })
+
+                local thought_extmarks = vim.api.nvim_buf_get_extmarks(
+                    bufnr,
+                    thought_ns,
+                    0,
+                    -1,
+                    { details = true }
+                )
+                local tool_extmarks = vim.api.nvim_buf_get_extmarks(
+                    bufnr,
+                    diff_ns,
+                    0,
+                    -1,
+                    { details = true }
+                )
+
+                local thought_priority
+                for _, mark in ipairs(thought_extmarks) do
+                    local mark_details = mark[4]
+                    if
+                        mark_details
+                        and mark_details.hl_group
+                            == Theme.HL_GROUPS.THOUGHT_TEXT
+                    then
+                        thought_priority = mark_details.priority
+                        break
+                    end
+                end
+
+                local tool_priority
+                for _, mark in ipairs(tool_extmarks) do
+                    local mark_details = mark[4]
+                    if
+                        mark_details
+                        and mark_details.hl_group
+                            == Theme.HL_GROUPS.TOOL_CALL_TEXT
+                    then
+                        tool_priority = mark_details.priority
+                        break
+                    end
+                end
+
+                thought_priority = assert.not_nil(thought_priority)
+                tool_priority = assert.not_nil(tool_priority)
+                assert.is_true(thought_priority > 100)
+                assert.is_true(tool_priority > 100)
+            end
+        )
+    end)
+
     describe("write_message_chunk trailing newline deferral", function()
         --- @type TestStub
         local schedule_stub

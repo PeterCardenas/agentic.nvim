@@ -662,7 +662,14 @@ loads, that definition is preserved.
   `AgenticStatusFailed`      Failed tool status         bg=#7a2d2d
   `AgenticCodeBlockFence`    Tool call left border      Links to Directory
   `AgenticTitle`             Window titles              bg=#2787b0 fg=#000000
-  `AgenticThinking`          Thinking block text        Links to Comment
+  `AgenticThoughtText`       Thought block text         Comment fg,
+                                                        bg=Normal,
+                                                        nocombine,
+                                                        no text attrs
+  `AgenticToolCallText`      Tool call body text        Comment fg,
+                                                        bg=Normal,
+                                                        nocombine,
+                                                        no text attrs
 
 Spinner highlight groups (not user-overridable in config, but
 can be set via |nvim_set_hl()|):
