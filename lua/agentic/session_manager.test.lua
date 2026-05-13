@@ -606,14 +606,14 @@ describe("agentic.SessionManager", function()
             child.stop()
         end)
 
-        it("sets fcs_choice to reload when FileChangedShell fires", function()
+        it("sets fcs_choice to edit when FileChangedShell fires", function()
             child.v.fcs_choice = ""
             child.api.nvim_exec_autocmds("FileChangedShell", {
                 group = "AgenticCleanup",
                 pattern = "*",
             })
 
-            assert.equal("reload", child.v.fcs_choice)
+            assert.equal("edit", child.v.fcs_choice)
         end)
     end)
 
