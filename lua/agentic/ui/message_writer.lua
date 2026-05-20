@@ -25,7 +25,7 @@ local NS_PROMPT_POSITIONS =
     vim.api.nvim_create_namespace("agentic_prompt_positions")
 local NS_AGENT_MESSAGE_CHUNK_POSITIONS =
     vim.api.nvim_create_namespace("agentic_agent_message_chunk_positions")
-local MARKDOWN_NEUTRAL_PRIORITY = 120
+local MARKDOWN_NEUTRAL_PRIORITY = 150
 
 --- Decode base64 image data to a temp file and return a markdown image link.
 --- @param data string
