@@ -33,6 +33,40 @@ describe("object utils", function()
     end)
 
     it(
+        "replaces list-like tables instead of retaining stale default entries",
+        function()
+            local obj1 = {
+                acp_providers = {
+                    ["cursor-acp"] = {
+                        command = "agent",
+                        args = { "acp" },
+                    },
+                },
+            }
+            local obj2 = {
+                acp_providers = {
+                    ["cursor-acp"] = {
+                        command = "cursor-acp",
+                        args = {},
+                    },
+                },
+            }
+
+            local expected = {
+                acp_providers = {
+                    ["cursor-acp"] = {
+                        command = "cursor-acp",
+                        args = {},
+                    },
+                },
+            }
+
+            local result = Object.deep_merge_into(obj1, obj2)
+            assert.same(expected, result)
+        end
+    )
+
+    it(
         "merges config with default config with keymaps overrides instead of merge",
         function()
             --- @type table<string, any>

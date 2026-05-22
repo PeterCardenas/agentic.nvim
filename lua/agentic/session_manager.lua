@@ -1834,6 +1834,10 @@ function SessionManager:_handle_new_config_options(new_config_options)
     if self.config_options.mode and self.config_options.mode.currentValue then
         self:_set_mode_to_chat_header(self.config_options.mode.currentValue)
     end
+
+    -- Startup config options arrive outside the session-update path, so custom
+    -- function headers need an explicit refresh to pick up model/runtime state.
+    self:schedule_header_refresh()
 end
 
 function SessionManager:_get_system_info()

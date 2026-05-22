@@ -1,10 +1,27 @@
 --- @class agentic.utils.object
 local M = {}
 
+--- @param value table
+--- @return boolean
+local function has_array_entries(value)
+    for key, _ in pairs(value) do
+        if type(key) == "number" then
+            return true
+        end
+    end
+
+    return false
+end
+
 function M.deep_merge_into(target, ...)
     for _, source in ipairs({ ... }) do
         for k, v in pairs(source) do
-            if type(v) == "table" and type(target[k]) == "table" then
+            if
+                type(v) == "table"
+                and type(target[k]) == "table"
+                and not has_array_entries(v)
+                and not has_array_entries(target[k])
+            then
                 M.deep_merge_into(target[k], v)
             else
                 target[k] = v

@@ -169,6 +169,90 @@ describe("agentic.SessionManager", function()
         end)
     end)
 
+    describe("_handle_new_config_options", function()
+        --- @type TestSpy
+        local render_header_spy
+        --- @type TestStub
+        local defer_stub
+        --- @type agentic.SessionManager
+        local session
+        --- @type integer
+        local test_bufnr
+        local original_headers
+
+        before_each(function()
+            render_header_spy = spy.new(function() end)
+            defer_stub = spy.stub(vim, "defer_fn")
+            defer_stub:invokes(function(fn, _ms)
+                fn()
+            end)
+            test_bufnr = vim.api.nvim_create_buf(false, true)
+            original_headers = Config.headers
+            Config.headers = {
+                chat = function(_parts)
+                    return "custom"
+                end,
+            }
+
+            local AgentConfigOptions =
+                require("agentic.acp.agent_config_options")
+            local BufHelpers = require("agentic.utils.buf_helpers")
+            local keymap_stub = spy.stub(BufHelpers, "multi_keymap_set")
+
+            local config_opts = AgentConfigOptions:new(
+                { chat = test_bufnr },
+                function() end,
+                function() end
+            )
+
+            keymap_stub:revert()
+
+            session = {
+                _header_refresh_scheduled = false,
+                config_options = config_opts,
+                widget = {
+                    render_header = render_header_spy,
+                    buf_nrs = { chat = test_bufnr },
+                },
+            }
+            setmetatable(session, { __index = SessionManager })
+        end)
+
+        after_each(function()
+            Config.headers = original_headers
+            defer_stub:revert()
+            vim.api.nvim_buf_delete(test_bufnr, { force = true })
+        end)
+
+        it("refreshes custom headers when only model changes", function()
+            SessionManager._handle_new_config_options(session, {
+                {
+                    id = "model",
+                    category = "model",
+                    currentValue = "gpt-5.4-high",
+                    description = "Model",
+                    name = "Model",
+                    options = {
+                        {
+                            value = "gpt-5.4-high",
+                            name = "GPT 5.4 High",
+                            description = "",
+                        },
+                    },
+                },
+            })
+
+            assert.is_not_nil(session.config_options.model)
+            assert.equal(
+                "gpt-5.4-high",
+                session.config_options.model.currentValue
+            )
+            assert.spy(render_header_spy).was.called(1)
+            assert.equal("chat", render_header_spy.calls[1][2])
+            assert.is_nil(render_header_spy.calls[1][3])
+        end)
+    end)
+
     describe("_generate_welcome_header", function()
         it(
             "returns header with provider name, session id, and timestamp",
