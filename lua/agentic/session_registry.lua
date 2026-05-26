@@ -21,23 +21,57 @@ local SessionRegistry = {
 }
 
 --- @param tab_page_id integer|nil
---- @param callback fun(session: agentic.SessionManager)|nil
---- @return agentic.SessionManager|nil session valid session instance or nil on failure
-function SessionRegistry.get_session_for_tab_page(tab_page_id, callback)
+--- @return integer resolved_tab_page_id
+local function resolve_tab_page_id(tab_page_id)
     local resolved_tab_page_id = tab_page_id ~= nil and tab_page_id
         or vim.api.nvim_get_current_tabpage()
     --- @cast resolved_tab_page_id integer
+    return resolved_tab_page_id
+end
+
+--- @param tab_page_id integer|nil
+--- @return agentic.UserConfig.ProviderName provider_name
+function SessionRegistry.get_provider_for_tab_page(tab_page_id)
+    local resolved_tab_page_id = resolve_tab_page_id(tab_page_id)
+
+    if vim.api.nvim_tabpage_is_valid(resolved_tab_page_id) then
+        local provider_name = vim.t[resolved_tab_page_id].agentic_provider
+        if provider_name ~= nil and provider_name ~= "" then
+            return provider_name
+        end
+    end
+
+    return Config.provider
+end
+
+--- @param tab_page_id integer|nil
+--- @param provider_name agentic.UserConfig.ProviderName
+function SessionRegistry.set_provider_for_tab_page(tab_page_id, provider_name)
+    local resolved_tab_page_id = resolve_tab_page_id(tab_page_id)
+
+    if vim.api.nvim_tabpage_is_valid(resolved_tab_page_id) then
+        vim.t[resolved_tab_page_id].agentic_provider = provider_name
+    end
+end
+
+--- @param tab_page_id integer|nil
+--- @param callback fun(session: agentic.SessionManager)|nil
+--- @return agentic.SessionManager|nil session valid session instance or nil on failure
+function SessionRegistry.get_session_for_tab_page(tab_page_id, callback)
+    local resolved_tab_page_id = resolve_tab_page_id(tab_page_id)
     local instance = SessionRegistry.sessions[resolved_tab_page_id]
+    local provider_name =
+        SessionRegistry.get_provider_for_tab_page(resolved_tab_page_id)
 
     if not instance then
-        if not ACPHealth.check_configured_provider() then
+        if not ACPHealth.check_configured_provider(provider_name) then
             Logger.debug("Session creation aborted: No configured ACP provider")
             return nil
         end
 
         local SessionManager = require("agentic.session_manager")
 
-        instance = SessionManager:new(resolved_tab_page_id)
+        instance = SessionManager:new(resolved_tab_page_id, provider_name)
         if instance ~= nil then
             SessionRegistry.sessions[resolved_tab_page_id] = instance
         end
@@ -59,9 +93,7 @@ end
 ---@return agentic.SessionManager|nil session
 ---@return "creating"|"blank"|nil reuse_reason
 function SessionRegistry.get_reusable_session(tab_page_id, provider_name)
-    local resolved_tab_page_id = tab_page_id ~= nil and tab_page_id
-        or vim.api.nvim_get_current_tabpage()
-    --- @cast resolved_tab_page_id integer
+    local resolved_tab_page_id = resolve_tab_page_id(tab_page_id)
     local session = SessionRegistry.sessions[resolved_tab_page_id]
     if not session then
         return nil, nil
@@ -70,7 +102,8 @@ function SessionRegistry.get_reusable_session(tab_page_id, provider_name)
         return nil, nil
     end
 
-    local target_provider = provider_name or Config.provider
+    local target_provider = provider_name
+        or SessionRegistry.get_provider_for_tab_page(resolved_tab_page_id)
     local reuse_reason = session:get_new_session_reuse_reason(target_provider)
     if not reuse_reason then
         return nil, nil
@@ -85,8 +118,13 @@ end
 --- @return agentic.SessionManager|nil
 function SessionRegistry.new_session(tab_page_id, opts)
     opts = opts or {}
-    tab_page_id = tab_page_id ~= nil and tab_page_id
-        or vim.api.nvim_get_current_tabpage()
+    tab_page_id = resolve_tab_page_id(tab_page_id)
+
+    if opts.provider ~= nil then
+        local provider_name = opts.provider
+        --- @cast provider_name agentic.UserConfig.ProviderName
+        SessionRegistry.set_provider_for_tab_page(tab_page_id, provider_name)
+    end
 
     if opts.skip_reuse_check ~= true then
         local session =
@@ -105,8 +143,7 @@ end
 --- Destroys the session for the given tab page, if it exists and removes it from the registry
 --- @param tab_page_id integer|nil
 function SessionRegistry.destroy_session(tab_page_id)
-    tab_page_id = tab_page_id ~= nil and tab_page_id
-        or vim.api.nvim_get_current_tabpage()
+    tab_page_id = resolve_tab_page_id(tab_page_id)
     local session = rawget(SessionRegistry.sessions, tab_page_id)
 
     if session then
@@ -124,6 +161,7 @@ end
 --- @param on_selected fun(provider_name: agentic.UserConfig.ProviderName|nil) Callback that will be called with the selected provider name, if any
 function SessionRegistry.select_provider(on_selected)
     local available_providers = ACPHealth.get_default_provider_names()
+    local current_provider = SessionRegistry.get_provider_for_tab_page(nil)
 
     --- @class _ProviderStatus
     --- @field name string
@@ -160,7 +198,7 @@ function SessionRegistry.select_provider(on_selected)
     local function format_provider(item)
         local label = item.name
 
-        if label == Config.provider then
+        if label == current_provider then
             label = label .. " (current)"
         elseif label == DefaultConfig.provider then
             label = label .. " (default)"

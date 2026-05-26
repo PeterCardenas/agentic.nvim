@@ -5,12 +5,14 @@ describe("agentic", function()
     describe("new_session", function()
         --- @type agentic.Agentic|nil
         local Agentic
-        --- @type table<string, any>|nil
-        local config_mock
-        --- @type table<string, any>|nil
-        local session_registry_mock
+        --- @type table<string, any>
+        local config_mock = {}
+        --- @type table<string, any>
+        local session_registry_mock = {}
         --- @type TestStub|nil
         local get_reusable_session_stub
+        --- @type TestSpy|nil
+        local set_provider_for_tab_page_spy
         --- @type table<string, any>
         local original_loaded = {}
 
@@ -26,8 +28,15 @@ describe("agentic", function()
             session_registry_mock = {
                 sessions = {},
                 get_session_for_tab_page = function() end,
+                get_provider_for_tab_page = function()
+                    return session_registry_mock._selected_provider
+                        or config_mock.provider
+                end,
                 get_reusable_session = function() end,
                 new_session = spy.new(function() end),
+                set_provider_for_tab_page = function(_, provider_name)
+                    session_registry_mock._selected_provider = provider_name
+                end,
             }
 
             original_loaded = {
@@ -63,6 +72,8 @@ describe("agentic", function()
             local session_registry = assert.not_nil(session_registry_mock)
             get_reusable_session_stub =
                 spy.stub(session_registry, "get_reusable_session")
+            set_provider_for_tab_page_spy =
+                spy.on(session_registry, "set_provider_for_tab_page")
         end)
 
         after_each(function()
@@ -136,6 +147,144 @@ describe("agentic", function()
             assert.spy(clear_maximize_state_spy).was.called(1)
             assert.spy(add_context_spy).was.called(0)
             assert.spy(show_spy).was.called(1)
+        end)
+
+        it("stores opts.provider on the current tab", function()
+            local agentic = assert.not_nil(Agentic)
+            local session_registry = assert.not_nil(session_registry_mock)
+            local current_tab_id = vim.api.nvim_get_current_tabpage()
+            local set_provider_spy =
+                assert.not_nil(set_provider_for_tab_page_spy)
+
+            agentic.new_session({
+                provider = "gemini-acp",
+            })
+
+            assert.equal("claude-acp", assert.not_nil(config_mock).provider)
+            assert.spy(set_provider_spy).was.called(1)
+            assert.equal(current_tab_id, set_provider_spy.calls[1][1])
+            assert.equal("gemini-acp", set_provider_spy.calls[1][2])
+            assert.equal(
+                "gemini-acp",
+                session_registry.new_session.calls[1][2].provider
+            )
+        end)
+
+        it(
+            "uses the tab-local provider when opts.provider is omitted",
+            function()
+                local agentic = assert.not_nil(Agentic)
+                local session_registry = assert.not_nil(session_registry_mock)
+                session_registry._selected_provider = "gemini-acp"
+
+                agentic.new_session()
+
+                assert.equal(
+                    "gemini-acp",
+                    assert.not_nil(get_reusable_session_stub).calls[1][2]
+                )
+                assert.equal(
+                    "gemini-acp",
+                    session_registry.new_session.calls[1][2].provider
+                )
+            end
+        )
+    end)
+
+    describe("switch_provider", function()
+        --- @type agentic.Agentic|nil
+        local Agentic
+        --- @type table<string, any>
+        local config_mock = {}
+        --- @type table<string, any>
+        local session_registry_mock = {}
+        --- @type TestSpy|nil
+        local set_provider_for_tab_page_spy
+        --- @type table<string, any>
+        local original_loaded = {}
+
+        before_each(function()
+            config_mock = {
+                provider = "claude-acp",
+                acp_providers = {
+                    ["claude-acp"] = {},
+                    ["gemini-acp"] = {},
+                },
+            }
+
+            session_registry_mock = {
+                sessions = {},
+                get_provider_for_tab_page = function()
+                    return session_registry_mock._selected_provider
+                        or config_mock.provider
+                end,
+                set_provider_for_tab_page = function(_, provider_name)
+                    session_registry_mock._selected_provider = provider_name
+                end,
+                get_session_for_tab_page = function(_, callback)
+                    callback(session_registry_mock._session)
+                end,
+            }
+
+            original_loaded = {
+                ["agentic"] = package.loaded["agentic"],
+                ["agentic.config"] = package.loaded["agentic.config"],
+                ["agentic.acp.agent_instance"] = package.loaded["agentic.acp.agent_instance"],
+                ["agentic.theme"] = package.loaded["agentic.theme"],
+                ["agentic.session_registry"] = package.loaded["agentic.session_registry"],
+                ["agentic.session_restore"] = package.loaded["agentic.session_restore"],
+                ["agentic.utils.object"] = package.loaded["agentic.utils.object"],
+                ["agentic.utils.logger"] = package.loaded["agentic.utils.logger"],
+            }
+
+            package.loaded["agentic"] = nil
+            package.loaded["agentic.config"] = config_mock
+            package.loaded["agentic.acp.agent_instance"] = {
+                cleanup_all = function() end,
+            }
+            package.loaded["agentic.theme"] = {
+                setup = function() end,
+            }
+            package.loaded["agentic.session_registry"] = session_registry_mock
+            package.loaded["agentic.session_restore"] = {}
+            package.loaded["agentic.utils.object"] = {
+                merge_config = function() end,
+            }
+            package.loaded["agentic.utils.logger"] = {
+                notify = function() end,
+            }
+
+            Agentic = require("agentic")
+            set_provider_for_tab_page_spy =
+                spy.on(session_registry_mock, "set_provider_for_tab_page")
+        end)
+
+        after_each(function()
+            for key, value in pairs(original_loaded) do
+                package.loaded[key] = value
+            end
+        end)
+
+        it("switches the provider only for the current tab", function()
+            local agentic = assert.not_nil(Agentic)
+            local set_provider_spy =
+                assert.not_nil(set_provider_for_tab_page_spy)
+            local switch_provider_spy = spy.new(function() end)
+            local current_tab_id = vim.api.nvim_get_current_tabpage()
+            session_registry_mock._session = {
+                switch_provider = switch_provider_spy,
+            }
+
+            agentic.switch_provider({
+                provider = "gemini-acp",
+            })
+
+            assert.equal("claude-acp", assert.not_nil(config_mock).provider)
+            assert.spy(set_provider_spy).was.called(1)
+            assert.equal(current_tab_id, set_provider_spy.calls[1][1])
+            assert.equal("gemini-acp", set_provider_spy.calls[1][2])
+            assert.spy(switch_provider_spy).was.called(1)
+            assert.equal("gemini-acp", switch_provider_spy.calls[1][2])
         end)
     end)
 

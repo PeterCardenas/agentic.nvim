@@ -81,6 +81,7 @@ end
 --- @class agentic.SessionManagerData
 --- @field session_id? string
 --- @field tab_page_id integer
+--- @field provider_name agentic.UserConfig.ProviderName
 --- @field _is_first_message boolean
 --- @field is_generating boolean
 --- @field _turn_start_time? number
@@ -106,6 +107,7 @@ end
 --- @class agentic.SessionManager : agentic.SessionManagerData
 --- @field session_id? string
 --- @field tab_page_id integer
+--- @field provider_name agentic.UserConfig.ProviderName
 --- @field _is_first_message boolean Whether this is the first message in the session, used to add system info only once
 --- @field is_generating boolean
 --- @field _turn_start_time? number High-resolution timestamp (from vim.uv.hrtime) when the current turn started
@@ -145,8 +147,9 @@ function SessionManager._generate_welcome_header(provider_name, session_id)
 end
 
 --- @param tab_page_id integer
+--- @param provider_name agentic.UserConfig.ProviderName
 --- @return agentic.SessionManager|nil
-function SessionManager:new(tab_page_id)
+function SessionManager:new(tab_page_id, provider_name)
     local AgentInstance = require("agentic.acp.agent_instance")
     local ChatWidget = require("agentic.ui.chat_widget")
     local CodeSelection = require("agentic.ui.code_selection")
@@ -161,6 +164,7 @@ function SessionManager:new(tab_page_id)
     local instance = {
         session_id = nil,
         tab_page_id = tab_page_id,
+        provider_name = provider_name,
         _is_first_message = true,
         is_generating = false,
         _header_refresh_scheduled = false,
@@ -170,7 +174,7 @@ function SessionManager:new(tab_page_id)
     }
     self = setmetatable(instance, self)
 
-    local agent = AgentInstance.get_instance(Config.provider, function(_client)
+    local agent = AgentInstance.get_instance(provider_name, function(_client)
         vim.schedule(function()
             -- Skip auto-new_session if restore_from_history was called
             if not self._restoring then
@@ -198,7 +202,12 @@ function SessionManager:new(tab_page_id)
     self.message_writer = MessageWriter:new(self.widget.buf_nrs.chat)
     self.widget.message_writer = self.message_writer
     self.status_animation = StatusAnimation:new(self.widget.buf_nrs.chat)
-    self.permission_manager = PermissionManager:new(self.message_writer)
+    self.permission_manager = PermissionManager:new(
+        self.message_writer,
+        function()
+            return self.agent and self.agent.provider_config or nil
+        end
+    )
 
     local ChatFolds = require("agentic.ui.chat_folds")
     self.chat_folds = ChatFolds:new(self.widget.buf_nrs.chat, tab_page_id)
@@ -283,6 +292,25 @@ function SessionManager:new(tab_page_id)
     end)
 
     return self
+end
+
+--- @return agentic.UserConfig.ProviderName
+function SessionManager:get_provider_name()
+    if self.provider_name ~= nil then
+        return self.provider_name
+    end
+
+    for candidate_provider_name, provider_config in pairs(Config.acp_providers) do
+        if
+            self.agent ~= nil
+            and self.agent.provider_config == provider_config
+        then
+            self.provider_name = candidate_provider_name
+            return candidate_provider_name
+        end
+    end
+
+    return Config.provider
 end
 
 --- @param update agentic.acp.SessionUpdateMessage
@@ -1419,7 +1447,7 @@ function SessionManager:new_session(opts)
     opts = opts or {}
     local restore_mode = opts.restore_mode == true
     local on_created = opts.on_created
-    local provider_name = Config.provider
+    local provider_name = SessionManager.get_provider_name(self)
     if not restore_mode and opts.skip_reuse_check ~= true then
         if SessionManager.get_new_session_reuse_reason(self, provider_name) then
             return
@@ -1630,8 +1658,8 @@ function SessionManager:switch_config_option()
 end
 
 --- Switch to a different ACP provider while preserving chat UI and history.
---- Reads Config.provider (already set by caller) for the target provider.
-function SessionManager:switch_provider()
+--- @param provider_name agentic.UserConfig.ProviderName
+function SessionManager:switch_provider(provider_name)
     if self.is_generating then
         Logger.notify(
             "Cannot switch provider while generating. Stop generation first.",
@@ -1640,7 +1668,7 @@ function SessionManager:switch_provider()
         return
     end
 
-    if SessionManager.uses_provider(self, Config.provider) then
+    if SessionManager.uses_provider(self, provider_name) then
         return
     end
 
@@ -1652,31 +1680,29 @@ function SessionManager:switch_provider()
     local old_session_id = self.session_id
 
     -- Get new agent instance BEFORE tearing down the current session
-    local new_agent = AgentInstance.get_instance(
-        Config.provider,
-        function(client)
-            vim.schedule(function()
-                self.agent = client
+    local new_agent = AgentInstance.get_instance(provider_name, function(client)
+        vim.schedule(function()
+            self.agent = client
+            self.provider_name = provider_name
 
-                self:new_session({
-                    restore_mode = true,
-                    on_created = function()
-                        local new_history = self.chat_history
-                        -- Capture new session metadata before overwriting
-                        local new_session_id = new_history.session_id
-                        local new_timestamp = new_history.timestamp
+            self:new_session({
+                restore_mode = true,
+                on_created = function()
+                    local new_history = self.chat_history
+                    -- Capture new session metadata before overwriting
+                    local new_session_id = new_history.session_id
+                    local new_timestamp = new_history.timestamp
 
-                        -- Restore saved messages (new_session created a fresh one)
-                        self.chat_history = saved_history
-                        self.chat_history.session_id = new_session_id
-                        self.chat_history.timestamp = new_timestamp
-                        self._history_to_send = saved_history.messages
-                        self._is_first_message = true
-                    end,
-                })
-            end)
-        end
-    )
+                    -- Restore saved messages (new_session created a fresh one)
+                    self.chat_history = saved_history
+                    self.chat_history.session_id = new_session_id
+                    self.chat_history.timestamp = new_timestamp
+                    self._history_to_send = saved_history.messages
+                    self._is_first_message = true
+                end,
+            })
+        end)
+    end)
 
     if not new_agent then
         return
@@ -1693,6 +1719,7 @@ function SessionManager:switch_provider()
     -- If agent was already cached, on_ready fired synchronously above.
     -- If not, it will fire when the process is ready.
     self.agent = new_agent
+    self.provider_name = provider_name
 end
 
 function SessionManager:add_selection_or_file_to_session()
@@ -1709,7 +1736,10 @@ function SessionManager:uses_provider(provider_name)
     local provider_config = Config.acp_providers[provider_name]
     return provider_config ~= nil
         and self.agent ~= nil
-        and self.agent.provider_config == provider_config
+        and (
+            self.provider_name == provider_name
+            or self.agent.provider_config == provider_config
+        )
 end
 
 ---@return boolean

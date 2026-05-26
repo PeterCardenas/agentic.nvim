@@ -38,18 +38,23 @@ local PERMISSION_KIND_PRIORITY = {
 --- @field queue agentic.ui.PermissionManager.QueueItem[]
 --- @field current_request? agentic.ui.PermissionManager.PermissionRequest Currently displayed request with button positions
 --- @field keymap_info agentic.ui.PermissionManager.KeymapInfo[] Keymap info for cleanup
+--- @field _get_provider_config fun(): agentic.acp.ACPProviderConfig|nil
 --- @field _reanchoring boolean Guard flag to prevent recursive on_content_changed during reanchor
 local PermissionManager = {}
 PermissionManager.__index = PermissionManager
 
 --- @param message_writer agentic.ui.MessageWriter
+--- @param get_provider_config (fun(): agentic.acp.ACPProviderConfig|nil)|nil
 --- @return agentic.ui.PermissionManager
-function PermissionManager:new(message_writer)
+function PermissionManager:new(message_writer, get_provider_config)
     local instance = setmetatable({
         message_writer = message_writer,
         queue = {},
         current_request = nil,
         keymap_info = {},
+        _get_provider_config = get_provider_config or function()
+            return Config.acp_providers[Config.provider]
+        end,
         _reanchoring = false,
     }, self)
 
@@ -69,7 +74,7 @@ function PermissionManager:add_request(request, callback)
 
     local toolCallId = request.toolCall.toolCallId
 
-    local provider_config = Config.acp_providers[Config.provider]
+    local provider_config = self._get_provider_config()
     if provider_config and provider_config.auto_approve then
         local allow_option = self._find_allow_option(request.options)
         if allow_option then

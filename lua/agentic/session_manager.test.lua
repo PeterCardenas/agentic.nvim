@@ -328,7 +328,7 @@ describe("agentic.SessionManager", function()
                     new_session = spy.new(function() end),
                 }
 
-                SessionManager.switch_provider(session)
+                SessionManager.switch_provider(session, "claude-acp")
 
                 assert.spy(notify_stub).was.called(0)
                 assert.spy(get_instance_stub).was.called(0)
@@ -344,7 +344,7 @@ describe("agentic.SessionManager", function()
                 is_generating = true,
             }
 
-            SessionManager.switch_provider(session)
+            SessionManager.switch_provider(session, "gemini-acp")
 
             assert.spy(notify_stub).was.called(1)
             local msg = notify_stub.calls[1][1]
@@ -401,7 +401,7 @@ describe("agentic.SessionManager", function()
                     new_session = new_session_spy,
                 }
 
-                SessionManager.switch_provider(session)
+                SessionManager.switch_provider(session, "new-provider")
 
                 assert.spy(cancel_spy).was.called(1)
                 assert.is_nil(session.session_id)
@@ -464,7 +464,7 @@ describe("agentic.SessionManager", function()
                     new_session = new_session_spy,
                 }
 
-                SessionManager.switch_provider(session)
+                SessionManager.switch_provider(session, "new-provider")
 
                 assert.is_not_nil(captured_on_created)
 
@@ -512,7 +512,7 @@ describe("agentic.SessionManager", function()
                 new_session = spy.new(function() end),
             }
 
-            SessionManager.switch_provider(session)
+            SessionManager.switch_provider(session, "some-provider")
 
             assert.spy(mock_agent.cancel_session).was.called(0)
             assert.spy(session.permission_manager.clear).was.called(1)
@@ -658,6 +658,28 @@ describe("agentic.SessionManager", function()
         end)
 
         it("reuses blank created sessions", function()
+            local session = {
+                agent = {
+                    provider_config = Config.acp_providers["claude-acp"],
+                    create_session = spy.new(function() end),
+                },
+                status_animation = { start = spy.new(function() end) },
+                _is_creating_session = false,
+                session_id = "session-1",
+                chat_history = { messages = {} },
+                _cancel_session = spy.new(function() end),
+            }
+
+            SessionManager.new_session(session)
+
+            assert.spy(session._cancel_session).was.called(0)
+            assert.spy(session.status_animation.start).was.called(0)
+            assert.spy(session.agent.create_session).was.called(0)
+        end)
+
+        it("reuses blank sessions based on the session provider", function()
+            Config.provider = "gemini-acp"
+
             local session = {
                 agent = {
                     provider_config = Config.acp_providers["claude-acp"],

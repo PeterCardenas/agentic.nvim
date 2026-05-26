@@ -1,6 +1,7 @@
 --- @diagnostic disable: invisible
 local assert = require("tests.helpers.assert")
 local spy = require("tests.helpers.spy")
+local Config = require("agentic.config")
 
 describe("agentic.ui.PermissionManager", function()
     --- @type agentic.ui.MessageWriter
@@ -21,6 +22,10 @@ describe("agentic.ui.PermissionManager", function()
     local hint_stub
     --- @type TestStub
     local hint_style_stub
+    --- @type agentic.UserConfig.ProviderName|nil
+    local original_provider
+    --- @type boolean|nil
+    local original_global_auto_approve
 
     --- @return agentic.acp.RequestPermission
     local function make_request(tool_call_id)
@@ -70,6 +75,7 @@ describe("agentic.ui.PermissionManager", function()
     end
 
     before_each(function()
+        original_provider = Config.provider
         schedule_stub = spy.stub(vim, "schedule")
 
         local DiffPreview = require("agentic.ui.diff_preview")
@@ -96,6 +102,17 @@ describe("agentic.ui.PermissionManager", function()
     end)
 
     after_each(function()
+        Config.provider = original_provider
+        if original_global_auto_approve ~= nil then
+            local resolved_original_provider = assert.not_nil(original_provider)
+            local global_provider_config =
+                Config.acp_providers[resolved_original_provider]
+            if global_provider_config ~= nil then
+                global_provider_config.auto_approve =
+                    original_global_auto_approve
+            end
+            original_global_auto_approve = nil
+        end
         schedule_stub:revert()
         hint_stub:revert()
         hint_style_stub:revert()
@@ -106,6 +123,47 @@ describe("agentic.ui.PermissionManager", function()
         if bufnr and vim.api.nvim_buf_is_valid(bufnr) then
             vim.api.nvim_buf_delete(bufnr, { force = true })
         end
+    end)
+
+    describe("auto approve", function()
+        it(
+            "uses the session provider config instead of global provider",
+            function()
+                local resolved_original_provider =
+                    assert.not_nil(original_provider)
+                local global_provider_config = assert.not_nil(
+                    Config.acp_providers[resolved_original_provider]
+                )
+                original_global_auto_approve =
+                    global_provider_config.auto_approve
+                global_provider_config.auto_approve = false
+
+                pm = PermissionManager:new(writer, function()
+                    --- @type agentic.acp.ACPProviderConfig
+                    local provider_config = {
+                        name = "Auto",
+                        command = "auto",
+                        auto_approve = true,
+                    }
+                    return provider_config
+                end)
+
+                local callback_spy = spy.new(function() end)
+                schedule_stub:invokes(function(fn)
+                    fn()
+                end)
+
+                pm:add_request(
+                    make_request("tc-auto-1"),
+                    callback_spy --[[@as function]]
+                )
+
+                assert.spy(callback_spy).was.called(1)
+                assert.equal("allow-once", callback_spy.calls[1][1])
+                assert.equal(0, #pm.queue)
+                assert.is_nil(pm.current_request)
+            end
+        )
     end)
 
     describe("reanchor permission prompt", function()

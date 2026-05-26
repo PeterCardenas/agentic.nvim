@@ -4,6 +4,7 @@ local spy = require("tests.helpers.spy")
 --- @class agentic.tests.SessionRegistry.MockSession
 --- @field tab_page_id integer
 --- @field is_mock boolean
+--- @field provider_name? string
 --- @field destroy fun(self: agentic.tests.SessionRegistry.MockSession)
 --- @field get_new_session_reuse_reason? fun(self: agentic.tests.SessionRegistry.MockSession, provider_name: string): "creating"|"blank"|nil
 
@@ -46,8 +47,10 @@ describe("agentic.SessionRegistry", function()
     end
 
     session_manager_mock = {
-        new = function(_, tab_page_id)
-            return create_mock_session(tab_page_id) --[[@as agentic.SessionManager]]
+        new = function(_, tab_page_id, provider_name)
+            local session = create_mock_session(tab_page_id)
+            session.provider_name = provider_name
+            return session --[[@as agentic.SessionManager]]
         end,
     }
 
@@ -105,7 +108,7 @@ describe("agentic.SessionRegistry", function()
     before_each(function()
         package.loaded["agentic.session_manager"] = session_manager_mock
 
-        acp_health_mock.check_configured_provider = function()
+        acp_health_mock.check_configured_provider = function(_provider_name)
             return true
         end
         acp_health_mock.get_default_provider_names = function()
@@ -122,14 +125,20 @@ describe("agentic.SessionRegistry", function()
         }
         default_config_mock.provider = "claude-acp"
 
-        session_manager_mock.new = function(_, tab_page_id)
-            return create_mock_session(tab_page_id) --[[@as agentic.SessionManager]]
+        session_manager_mock.new = function(_, tab_page_id, provider_name)
+            local session = create_mock_session(tab_page_id)
+            session.provider_name = provider_name
+            return session --[[@as agentic.SessionManager]]
         end
     end)
 
     after_each(function()
         for k in pairs(SessionRegistry.sessions) do
             SessionRegistry.sessions[k] = nil
+        end
+
+        for _, tabpage in ipairs(vim.api.nvim_list_tabpages()) do
+            vim.t[tabpage].agentic_provider = nil
         end
 
         package.loaded["agentic.session_manager"] =
@@ -261,6 +270,66 @@ describe("agentic.SessionRegistry", function()
                 assert.is_nil(SessionRegistry.sessions[1])
             end
         )
+    end)
+
+    describe("provider state", function()
+        it("falls back to Config.provider when tab has no override", function()
+            config_mock.provider = "claude-acp"
+
+            assert.equal(
+                "claude-acp",
+                SessionRegistry.get_provider_for_tab_page(nil)
+            )
+        end)
+
+        it("keeps provider selection isolated per tabpage", function()
+            local tab1 = vim.api.nvim_get_current_tabpage()
+
+            vim.cmd("tabnew")
+            local tab2 = vim.api.nvim_get_current_tabpage()
+
+            SessionRegistry.set_provider_for_tab_page(tab1, "claude-acp")
+            SessionRegistry.set_provider_for_tab_page(tab2, "gemini-acp")
+
+            assert.equal(
+                "claude-acp",
+                SessionRegistry.get_provider_for_tab_page(tab1)
+            )
+            assert.equal(
+                "gemini-acp",
+                SessionRegistry.get_provider_for_tab_page(tab2)
+            )
+
+            vim.cmd("tabclose")
+            vim.api.nvim_set_current_tabpage(tab1)
+        end)
+
+        it("passes the tab-local provider into session creation", function()
+            local tab_id = vim.api.nvim_get_current_tabpage()
+            local captured_provider_name
+
+            acp_health_mock.check_configured_provider = function(provider_name)
+                captured_provider_name = provider_name
+                return true
+            end
+            session_manager_mock.new = function(
+                _,
+                resolved_tab_id,
+                provider_name
+            )
+                captured_provider_name = provider_name
+                local session = create_mock_session(resolved_tab_id)
+                session.provider_name = provider_name
+                return session --[[@as agentic.SessionManager]]
+            end
+
+            SessionRegistry.set_provider_for_tab_page(tab_id, "gemini-acp")
+            local session =
+                assert.not_nil(SessionRegistry.get_session_for_tab_page(tab_id))
+
+            assert.equal("gemini-acp", captured_provider_name)
+            assert.equal("gemini-acp", session.provider_name)
+        end)
     end)
 
     describe("new_session", function()
@@ -562,6 +631,20 @@ describe("agentic.SessionRegistry", function()
             it("appends '(current)' for Config.provider", function()
                 config_mock.provider = "claude-acp"
                 default_config_mock.provider = "gemini-acp"
+
+                SessionRegistry.select_provider(function() end)
+
+                local label = assert.not_nil(captured_opts).format_item({
+                    name = "claude-acp",
+                    installed = true,
+                })
+                assert.equal("claude-acp (current) ✓ available", label)
+            end)
+
+            it("uses the tab-local provider for the current label", function()
+                config_mock.provider = "gemini-acp"
+                default_config_mock.provider = "gemini-acp"
+                SessionRegistry.set_provider_for_tab_page(nil, "claude-acp")
 
                 SessionRegistry.select_provider(function() end)
 

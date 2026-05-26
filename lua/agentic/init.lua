@@ -121,14 +121,17 @@ end
 --- If the widget is already open, reuses existing windows instead of creating new ones
 --- @param opts agentic.ui.NewSessionOpts|nil
 function Agentic.new_session(opts)
-    if opts and opts.provider then
-        Config.provider = opts.provider
+    local tab_page_id = vim.api.nvim_get_current_tabpage()
+
+    if opts and opts.provider ~= nil then
+        local provider_name = opts.provider
+        SessionRegistry.set_provider_for_tab_page(tab_page_id, provider_name)
     end
 
-    local tab_page_id = vim.api.nvim_get_current_tabpage()
+    local provider_name = SessionRegistry.get_provider_for_tab_page(tab_page_id)
     local old_session = SessionRegistry.sessions[tab_page_id]
     local reusable_session =
-        SessionRegistry.get_reusable_session(tab_page_id, Config.provider)
+        SessionRegistry.get_reusable_session(tab_page_id, provider_name)
 
     if reusable_session then
         reusable_session.widget:_clear_maximize_state("new_session", {
@@ -171,7 +174,7 @@ function Agentic.new_session(opts)
     end
 
     local session = SessionRegistry.new_session(tab_page_id, {
-        provider = Config.provider,
+        provider = provider_name,
         skip_reuse_check = true,
     })
     if session then
@@ -209,9 +212,10 @@ end
 
 --- @param provider_name agentic.UserConfig.ProviderName
 local function apply_provider_switch(provider_name)
-    Config.provider = provider_name
-    SessionRegistry.get_session_for_tab_page(nil, function(session)
-        session:switch_provider()
+    local tab_page_id = vim.api.nvim_get_current_tabpage()
+    SessionRegistry.set_provider_for_tab_page(tab_page_id, provider_name)
+    SessionRegistry.get_session_for_tab_page(tab_page_id, function(session)
+        session:switch_provider(provider_name)
     end)
 end
 
