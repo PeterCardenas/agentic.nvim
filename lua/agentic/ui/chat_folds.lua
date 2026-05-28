@@ -143,6 +143,40 @@ function ChatFolds._resolve_body_range(bufnr, tool_call_blocks, tool_call_id)
     return body_start_1, body_end_1, start_row
 end
 
+--- Resolve the full tool block line range (header through footer).
+--- @param bufnr integer
+--- @param tool_call_blocks table<string, agentic.ui.MessageWriter.ToolCallBlock>
+--- @param tool_call_id string
+--- @return integer|nil block_start 1-indexed
+--- @return integer|nil block_end 1-indexed
+function ChatFolds._resolve_block_range(bufnr, tool_call_blocks, tool_call_id)
+    local tracker = tool_call_blocks[tool_call_id]
+    if not tracker or not tracker.extmark_id then
+        return nil, nil
+    end
+
+    local pos = vim.api.nvim_buf_get_extmark_by_id(
+        bufnr,
+        NS_TOOL_BLOCKS,
+        tracker.extmark_id,
+        { details = true }
+    )
+
+    if not pos or not pos[1] then
+        return nil, nil
+    end
+
+    local start_row = pos[1]
+    local details = pos[3]
+    local end_row = details and details.end_row
+
+    if not end_row then
+        return nil, nil
+    end
+
+    return start_row + 1, end_row + 1
+end
+
 --- Evaluate (or re-evaluate) fold eligibility for a tool call.
 --- Preserves user toggle state across re-evaluations.
 --- @param tool_call_id string
@@ -258,6 +292,51 @@ function ChatFolds._get_fold_state(winid, line)
     return state
 end
 
+--- Delete all manual folds in the current window across a 1-indexed line range.
+--- Caller must already be inside the target window via `nvim_win_call`.
+--- A single `zD` at the range start is not enough when stale folds were shifted
+--- by `nvim_buf_set_lines`; scanning the full body range clears every level.
+--- @param body_start integer 1-indexed
+--- @param body_end integer 1-indexed
+function ChatFolds._delete_folds_in_current_window_range(body_start, body_end)
+    local max_passes = (body_end - body_start + 1) * 4
+    local pass = 0
+
+    while pass < max_passes do
+        local removed = false
+        local line = body_start
+        while line <= body_end do
+            if vim.fn.foldlevel(line) > 0 then
+                vim.api.nvim_win_set_cursor(0, { line, 0 })
+                --- @diagnostic disable-next-line: param-type-mismatch
+                pcall(vim.cmd, "silent! normal! zD")
+                removed = true
+            end
+            line = line + 1
+        end
+
+        if not removed then
+            break
+        end
+
+        pass = pass + 1
+    end
+end
+
+--- Delete all manual folds in a window across a 1-indexed line range.
+--- @param winid integer
+--- @param body_start integer 1-indexed
+--- @param body_end integer 1-indexed
+function ChatFolds._delete_folds_in_window_range(winid, body_start, body_end)
+    if not vim.api.nvim_win_is_valid(winid) then
+        return
+    end
+
+    vim.api.nvim_win_call(winid, function()
+        ChatFolds._delete_folds_in_current_window_range(body_start, body_end)
+    end)
+end
+
 --- Delete any existing folds for a tool call before the buffer is modified.
 --- Needed because nvim_buf_set_lines shifts manual folds by the net line delta
 --- rather than removing them. Without this cleanup, successive updates stack
@@ -270,30 +349,18 @@ function ChatFolds:delete_folds_for_tool_call(tool_call_id, tool_call_blocks)
         return
     end
 
-    local body_start, body_end = ChatFolds._resolve_body_range(
+    local block_start, block_end = ChatFolds._resolve_block_range(
         self._bufnr,
         tool_call_blocks,
         tool_call_id
     )
 
-    if not body_start or not body_end then
+    if not block_start or not block_end then
         return
     end
 
     for _, winid in ipairs(winids) do
-        if vim.api.nvim_win_is_valid(winid) then
-            vim.api.nvim_win_call(winid, function()
-                local line = body_start
-                while line <= body_end do
-                    if vim.fn.foldlevel(line) > 0 then
-                        vim.api.nvim_win_set_cursor(0, { line, 0 })
-                        --- @diagnostic disable-next-line: param-type-mismatch
-                        pcall(vim.cmd, "silent! normal! zD")
-                    end
-                    line = line + 1
-                end
-            end)
-        end
+        ChatFolds._delete_folds_in_window_range(winid, block_start, block_end)
     end
 end
 
@@ -392,6 +459,12 @@ function ChatFolds:sync_tool_call(tool_call_id, tool_call_blocks)
         return
     end
 
+    local block_start, block_end = ChatFolds._resolve_block_range(
+        self._bufnr,
+        tool_call_blocks,
+        tool_call_id
+    )
+
     self:_set_fold_text_prefix(
         tool_call_id,
         fold.fold_text_prefix or ExtmarkBlock.BODY_PREFIX
@@ -402,11 +475,25 @@ function ChatFolds:sync_tool_call(tool_call_id, tool_call_blocks)
     -- Calculate inner fold start (preview boundary)
     --- @type integer|nil
     local inner_start = nil
-    if fold.min_lines and body_start + fold.min_lines <= body_end then
+    if
+        fold.preview
+        and fold.min_lines
+        and body_start + fold.min_lines <= body_end
+    then
         inner_start = body_start + fold.min_lines
     end
 
     for _, winid in ipairs(winids) do
+        if block_start and block_end then
+            -- Clear stale folds across the full block before recreating. Body-only
+            -- cleanup misses manual folds shifted outside the new body by updates.
+            ChatFolds._delete_folds_in_window_range(
+                winid,
+                block_start,
+                block_end
+            )
+        end
+
         self:_sync_fold_to_window(
             winid,
             body_start,
@@ -446,7 +533,6 @@ function ChatFolds:_sync_fold_to_window(
     vim.api.nvim_win_call(winid, function()
         local view = vim.fn.winsaveview()
 
-        -- Delete any existing folds at this range
         vim.api.nvim_win_set_cursor(0, { body_start, 0 })
         --- @diagnostic disable-next-line: param-type-mismatch
         pcall(vim.cmd, "silent! normal! zD")
@@ -520,7 +606,12 @@ function ChatFolds:capture_visible_fold_states(tool_call_blocks)
                 end
 
                 -- Capture inner fold state (only meaningful when outer is open)
-                if outer_state == false and fold.min_lines and body_end then
+                if
+                    outer_state == false
+                    and fold.preview
+                    and fold.min_lines
+                    and body_end
+                then
                     local inner_start = body_start + fold.min_lines
                     if inner_start <= body_end then
                         --- @diagnostic disable-next-line: param-type-mismatch
@@ -613,7 +704,8 @@ function ChatFolds:on_buf_win_enter(winid, tool_call_blocks)
                 --- @type integer|nil
                 local inner_start = nil
                 if
-                    fold.min_lines
+                    fold.preview
+                    and fold.min_lines
                     and body_start + fold.min_lines <= body_end
                 then
                     inner_start = body_start + fold.min_lines
@@ -623,6 +715,19 @@ function ChatFolds:on_buf_win_enter(winid, tool_call_blocks)
                     tool_call_id,
                     fold.fold_text_prefix or ExtmarkBlock.BODY_PREFIX
                 )
+
+                local block_start, block_end = ChatFolds._resolve_block_range(
+                    self._bufnr,
+                    tool_call_blocks,
+                    tool_call_id
+                )
+                if block_start and block_end then
+                    ChatFolds._delete_folds_in_window_range(
+                        winid,
+                        block_start,
+                        block_end
+                    )
+                end
 
                 self:_sync_fold_to_window(
                     winid,
