@@ -39,10 +39,12 @@ describe("agentic.ui.ChatWidget", function()
             --- @type agentic.ui.ChatWidget
             local widget
             local original_position
+            local skip_widget_destroy
 
             before_each(function()
                 original_position = Config.windows.position
                 Config.windows.position = position
+                skip_widget_destroy = false
 
                 vim.cmd("tabnew")
                 tab_page_id = vim.api.nvim_get_current_tabpage()
@@ -55,7 +57,7 @@ describe("agentic.ui.ChatWidget", function()
             end)
 
             after_each(function()
-                if widget then
+                if widget and not skip_widget_destroy then
                     pcall(function()
                         widget:destroy()
                     end)
@@ -64,6 +66,7 @@ describe("agentic.ui.ChatWidget", function()
                     vim.cmd("tabclose")
                 end)
 
+                skip_widget_destroy = false
                 Config.windows.position = original_position
             end)
 
@@ -133,6 +136,34 @@ describe("agentic.ui.ChatWidget", function()
                 assert.has_no_errors(function()
                     widget:hide()
                 end)
+            end)
+
+            it("hides after a primary window closes", function()
+                widget:show()
+                local original_input_winid = widget.win_nrs.input
+                local hide_stub = spy.stub(widget, "hide")
+
+                widget.win_nrs.input = 999999
+                widget:_hide_if_primary_window_closed()
+
+                assert.equal(1, hide_stub.call_count)
+
+                widget.win_nrs.input = original_input_winid
+                hide_stub:revert()
+            end)
+
+            it("skips hide once the tabpage is gone", function()
+                widget:show()
+                local hide_stub = spy.stub(widget, "hide")
+
+                widget.win_nrs.input = 999999
+                vim.cmd("tabclose")
+                widget:_hide_if_primary_window_closed()
+
+                assert.equal(0, hide_stub.call_count)
+
+                hide_stub:revert()
+                skip_widget_destroy = true
             end)
 
             it("show() after hide() creates new windows", function()

@@ -94,6 +94,8 @@ local CYCLE_ORDER = { "chat", "todos", "code", "files", "diagnostics", "input" }
 --- @field _on_after_show? fun(chat_winid: integer|nil)
 --- @field _is_hiding? boolean
 --- @field _maximize_state? agentic.ui.ChatWidget.MaximizeState
+--- @field _hide_if_primary_window_closed fun(self: agentic.ui.ChatWidget)
+--- @field _schedule_hide_if_primary_window_closed fun(self: agentic.ui.ChatWidget)
 --- @field _is_owner_tab fun(self: agentic.ui.ChatWidget): boolean
 --- @field _is_supported_maximize_window fun(self: agentic.ui.ChatWidget, winid: integer|nil): boolean
 --- @field _get_preferred_editor_focus_winid fun(self: agentic.ui.ChatWidget): integer|nil
@@ -412,6 +414,29 @@ function ChatWidget:move_cursor_to(winid, callback)
     end)
 end
 
+function ChatWidget:_hide_if_primary_window_closed()
+    if not vim.api.nvim_tabpage_is_valid(self.tab_page_id) then
+        return
+    end
+
+    local chat_is_open = self.win_nrs.chat ~= nil
+        and vim.api.nvim_win_is_valid(self.win_nrs.chat)
+    local input_is_open = self.win_nrs.input ~= nil
+        and vim.api.nvim_win_is_valid(self.win_nrs.input)
+
+    if chat_is_open and input_is_open then
+        return
+    end
+
+    self:hide()
+end
+
+function ChatWidget:_schedule_hide_if_primary_window_closed()
+    vim.schedule(function()
+        self:_hide_if_primary_window_closed()
+    end)
+end
+
 function ChatWidget:_resize_input_window()
     local max_height =
         math.max(3, Config.windows.input.height --[[@as integer]])
@@ -432,7 +457,7 @@ function ChatWidget:_initialize()
         vim.api.nvim_create_autocmd("BufWinLeave", {
             buffer = bufnr,
             callback = function()
-                self:hide()
+                self:_schedule_hide_if_primary_window_closed()
             end,
         })
     end

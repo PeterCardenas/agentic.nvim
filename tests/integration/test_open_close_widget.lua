@@ -180,4 +180,23 @@ end)()
         -- Should only have 1 window visible
         assert.equal(1, final_windows)
     end)
+
+    it("allows tabclose after the prompt buffer gets content", function()
+        child.cmd("tabnew")
+        child.lua([[ require("agentic").toggle() ]])
+        child.flush()
+
+        child.lua([[
+            local tab_id = vim.api.nvim_get_current_tabpage()
+            local session = require("agentic.session_registry").sessions[tab_id]
+            local input_bufnr = session.widget.buf_nrs.input
+            vim.api.nvim_buf_set_lines(input_bufnr, 0, -1, false, { "draft prompt" })
+        ]])
+        child.flush()
+
+        assert.has_no_errors(function()
+            child.cmd("tabclose")
+            child.flush()
+        end)
+    end)
 end)
