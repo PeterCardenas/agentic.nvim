@@ -9,6 +9,7 @@ local FileSystem = require("agentic.utils.file_system")
 local JsonFormat = require("agentic.utils.json_format")
 local Logger = require("agentic.utils.logger")
 local Theme = require("agentic.theme")
+local ToolCallBody = require("agentic.utils.tool_call_body")
 
 local NS_TOOL_BLOCKS = vim.api.nvim_create_namespace("agentic_tool_blocks")
 local NS_THOUGHT_HIGHLIGHTS =
@@ -198,6 +199,26 @@ end
 --- @param chat_folds agentic.ui.ChatFolds|nil
 function MessageWriter:set_chat_folds(chat_folds)
     self._chat_folds = chat_folds
+end
+
+function MessageWriter:suspend_fold_sync()
+    if self._chat_folds then
+        self._chat_folds:defer_sync()
+    end
+end
+
+function MessageWriter:resume_fold_sync()
+    if self._chat_folds then
+        self._chat_folds:flush_sync(self.tool_call_blocks)
+    end
+end
+
+--- @private
+--- @param tool_call_id string
+function MessageWriter:_sync_tool_call_fold(tool_call_id)
+    if self._chat_folds then
+        self._chat_folds:sync_tool_call(tool_call_id, self.tool_call_blocks)
+    end
 end
 
 function MessageWriter:_notify_content_changed()
@@ -684,12 +705,7 @@ function MessageWriter:write_tool_call_block(tool_call_block)
 
         self:_append_lines({ "", "" })
 
-        if self._chat_folds then
-            self._chat_folds:sync_tool_call(
-                tool_call_block.tool_call_id,
-                self.tool_call_blocks
-            )
-        end
+        self:_sync_tool_call_fold(tool_call_block.tool_call_id)
     end)
 
     self:_fix_scroll_after_fold()
@@ -857,13 +873,7 @@ function MessageWriter:update_tool_call_block(tool_call_block)
             tracker.status
         )
 
-        -- Sync fold after content update
-        if self._chat_folds then
-            self._chat_folds:sync_tool_call(
-                tool_call_block.tool_call_id,
-                self.tool_call_blocks
-            )
-        end
+        self:_sync_tool_call_fold(tool_call_block.tool_call_id)
     end)
 
     self:_fix_scroll_after_fold()
@@ -996,7 +1006,11 @@ function MessageWriter:_prepare_block_lines(tool_call_block)
         table.insert(lines, "````")
     else
         if tool_call_block.body then
-            vim.list_extend(lines, tool_call_block.body)
+            local display_body = ToolCallBody.truncate_for_display(
+                tool_call_block.body,
+                ToolCallBody.get_max_display_lines()
+            )
+            vim.list_extend(lines, display_body)
         end
     end
 

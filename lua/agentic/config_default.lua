@@ -439,6 +439,7 @@ local ConfigDefault = {
     --- @field closed_by_default boolean
     --- @field min_lines integer
     --- @field preview boolean
+    --- @field max_display_lines? integer|nil Max tool output lines in chat (nil = unlimited)
     --- @field kinds? table<string, agentic.UserConfig.FoldingToolCallKindConfig>
 
     --- @class agentic.UserConfig.FoldtextInfo
@@ -459,6 +460,7 @@ local ConfigDefault = {
             closed_by_default = true,
             preview = true,
             min_lines = 20,
+            max_display_lines = 500,
             kinds = {
                 fetch = { min_lines = 8 },
                 execute = { min_lines = 12 },

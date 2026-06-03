@@ -15,9 +15,12 @@ describe("agentic.ui.MessageWriter", function()
 
     --- @type agentic.UserConfig.AutoScroll|nil
     local original_auto_scroll
+    --- @type agentic.UserConfig.Folding|nil
+    local original_folding
 
     before_each(function()
         original_auto_scroll = Config.auto_scroll
+        original_folding = Config.folding
         MessageWriter = require("agentic.ui.message_writer")
 
         bufnr = vim.api.nvim_create_buf(false, true)
@@ -36,6 +39,7 @@ describe("agentic.ui.MessageWriter", function()
 
     after_each(function()
         Config.auto_scroll = original_auto_scroll --- @diagnostic disable-line: assign-type-mismatch
+        Config.folding = original_folding --- @diagnostic disable-line: assign-type-mismatch
         if winid and vim.api.nvim_win_is_valid(winid) then
             vim.api.nvim_win_close(winid, true)
         end
@@ -911,6 +915,29 @@ describe("agentic.ui.MessageWriter", function()
                 assert.equal("Done!", lines[7])
             end
         )
+    end)
+
+    describe("tool call body display truncation", function()
+        it("truncates large execute bodies in the chat buffer", function()
+            Config.folding = {
+                tool_calls = { max_display_lines = 2 },
+            } --- @diagnostic disable-line: assign-type-mismatch
+
+            local body = { "line 1", "line 2", "line 3", "line 4" }
+            writer:write_tool_call_block(
+                make_tool_call_block("big-exec", "completed", body)
+            )
+
+            local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+            local found_footer = false
+            for _, line in ipairs(lines) do
+                if line:match("more lines omitted from display") then
+                    found_footer = true
+                end
+            end
+            assert.is_true(found_footer)
+            assert.is_true(#lines < #body + 5)
+        end)
     end)
 
     describe("tool call body JSON formatting", function()

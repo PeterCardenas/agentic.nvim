@@ -345,6 +345,19 @@ end
 --- @param writer agentic.ui.MessageWriter
 --- @param messages agentic.ui.ChatHistory.Message[]
 function SessionRestore.replay_messages(writer, messages)
+    local bufnr = writer.bufnr
+    local treesitter_was_active = false
+    if vim.api.nvim_buf_is_valid(bufnr) then
+        local ok, parser = pcall(vim.treesitter.get_parser, bufnr)
+        treesitter_was_active = ok and parser ~= nil
+    end
+
+    if treesitter_was_active then
+        pcall(vim.treesitter.stop, bufnr)
+    end
+
+    writer:suspend_fold_sync()
+
     for _, msg in ipairs(messages) do
         if msg.type == "user" then
             -- Format user message for display with original timestamp
@@ -388,6 +401,12 @@ function SessionRestore.replay_messages(writer, messages)
             }
             writer:write_tool_call_block(tool_block)
         end
+    end
+
+    writer:resume_fold_sync()
+
+    if treesitter_was_active and vim.api.nvim_buf_is_valid(bufnr) then
+        pcall(vim.treesitter.start, bufnr)
     end
 end
 
