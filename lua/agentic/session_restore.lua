@@ -108,22 +108,47 @@ end
 --- @param session_id string
 --- @return table|nil
 local function load_session_from_disk_sync(session_id)
-    local path = ChatHistory.get_file_path(session_id)
-    if vim.fn.filereadable(path) == 0 then
+    local function read_json_file_sync(path)
+        if vim.fn.filereadable(path) == 0 then
+            return nil
+        end
+
+        local content = vim.fn.readfile(path)
+        if #content == 0 then
+            return nil
+        end
+
+        local ok, parsed = pcall(vim.json.decode, table.concat(content, "\n"))
+        if not ok or type(parsed) ~= "table" then
+            return nil
+        end
+
+        return parsed
+    end
+
+    local parsed = read_json_file_sync(ChatHistory.get_file_path(session_id))
+    if not parsed then
         return nil
     end
 
-    local content = vim.fn.readfile(path)
-    if #content == 0 then
-        return nil
+    if
+        parsed.title ~= nil
+        or parsed.timestamp ~= nil
+        or parsed.session_id ~= nil
+    then
+        return parsed
     end
 
-    local ok, parsed = pcall(vim.json.decode, table.concat(content, "\n"))
-    if not ok or not parsed then
-        return nil
-    end
-
-    return parsed
+    local metadata =
+        read_json_file_sync(ChatHistory.get_metadata_file_path(session_id))
+    --- @type table
+    local combined = {
+        session_id = metadata and metadata.session_id or session_id,
+        title = metadata and metadata.title or "",
+        timestamp = metadata and metadata.timestamp or 0,
+        messages = parsed.messages or {},
+    }
+    return combined
 end
 
 --- @param fixed_session_id string|nil
@@ -185,12 +210,15 @@ end
 --- @param build_items fun(): table[] Function that returns current session items
 --- @param on_choice fun(choice: table|nil) Callback when user selects an item
 --- @param on_delete fun(choice: table)|nil Callback when user requests deletion
-local function show_fzf_picker(build_items, on_choice, on_delete)
+--- @param initial_items table[]|nil Items already loaded for the first render
+local function show_fzf_picker(build_items, on_choice, on_delete, initial_items)
     local fzf = load_fzf_lua()
+    local first_items = initial_items
+    local has_used_initial_items = false
 
     if not fzf then
         -- Fallback to vim.ui.select if fzf-lua is not available
-        local items = build_items()
+        local items = first_items or build_items()
         vim.ui.select(items, {
             prompt = "Select session to restore:",
             format_item = function(item)
@@ -205,7 +233,13 @@ local function show_fzf_picker(build_items, on_choice, on_delete)
 
     --- @param fzf_cb fun(entry: string|nil)
     local function contents(fzf_cb)
-        local current_items = build_items()
+        local current_items
+        if first_items and not has_used_initial_items then
+            current_items = first_items
+            has_used_initial_items = true
+        else
+            current_items = build_items()
+        end
         current_items_by_session_id = {}
         for _, item in ipairs(current_items) do
             current_items_by_session_id[item.session_id] = item
@@ -338,7 +372,7 @@ function SessionRestore.show_picker(tab_page_id)
             end
             Logger.notify("Session deleted", vim.log.levels.INFO)
         end)
-    end)
+    end, initial_items)
 end
 
 --- Replay stored messages to the UI

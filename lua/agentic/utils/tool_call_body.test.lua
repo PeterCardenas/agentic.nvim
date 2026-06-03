@@ -30,7 +30,8 @@ describe("agentic.utils.ToolCallBody", function()
             assert.equal(3, #display)
             assert.equal("1", display[1])
             assert.equal("2", display[2])
-            assert.truthy(display[3]:match("2 more lines omitted"))
+            local footer = assert.not_nil(display[3])
+            assert.truthy(footer:match("2 more lines omitted"))
         end)
 
         it("does not truncate when max_lines is nil", function()
@@ -45,7 +46,13 @@ describe("agentic.utils.ToolCallBody", function()
     describe("get_max_display_lines", function()
         it("uses config value when set", function()
             Config.folding = {
-                tool_calls = { max_display_lines = 42 },
+                tool_calls = {
+                    enabled = true,
+                    closed_by_default = false,
+                    preview = true,
+                    min_lines = 20,
+                    max_display_lines = 42,
+                },
             } --- @diagnostic disable-line: assign-type-mismatch
             assert.equal(42, ToolCallBody.get_max_display_lines())
         end)

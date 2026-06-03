@@ -13,6 +13,7 @@ describe("tool_call_diff", function()
     local path_stub
 
     before_each(function()
+        package.loaded["agentic.ui.tool_call_diff"] = nil
         FileSystem = require("agentic.utils.file_system")
         ToolCallDiff = require("agentic.ui.tool_call_diff")
 

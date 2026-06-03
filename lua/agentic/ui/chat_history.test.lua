@@ -124,6 +124,19 @@ describe("ChatHistory", function()
                 assert.truthy(path:match("session%-abc%.json$"))
             end
         )
+
+        it(
+            "combines storage_path, project_folder, and session_id.meta.json",
+            function()
+                stub_cwd()
+                local path = ChatHistory.get_metadata_file_path("session-abc")
+                local project_folder = ChatHistory.get_project_folder()
+
+                assert.truthy(path:match("^" .. vim.pesc("/test/storage")))
+                assert.truthy(path:find(project_folder, 1, true))
+                assert.truthy(path:match("session%-abc%.meta%.json$"))
+            end
+        )
     end)
 
     describe("message operations", function()
@@ -258,7 +271,7 @@ describe("ChatHistory", function()
             stub_cwd()
         end)
 
-        it("persists and restores ChatHistory instance", function()
+        it("persists messages and metadata in separate files", function()
             local original = ChatHistory:new()
             original.session_id = "roundtrip-test"
             original:add_message({
@@ -280,17 +293,26 @@ describe("ChatHistory", function()
             end)
             assert.is_nil(save_err)
 
-            local path = ChatHistory.get_file_path(original.session_id)
+            local messages_path = ChatHistory.get_file_path(original.session_id)
+            local metadata_path =
+                ChatHistory.get_metadata_file_path(original.session_id)
             assert.equal(1, mkdirp_stub.call_count)
-            assert.equal(1, write_file_stub.call_count)
+            assert.equal(2, write_file_stub.call_count)
 
-            local saved_content = mock_files[path]
-            assert.is_not_nil(saved_content)
+            local saved_messages = mock_files[messages_path]
+            local saved_metadata = mock_files[metadata_path]
+            assert.is_not_nil(saved_messages)
+            assert.is_not_nil(saved_metadata)
 
-            local parsed = vim.json.decode(saved_content)
-            assert.equal(original.session_id, parsed.session_id)
-            assert.equal("Test message", parsed.title)
-            assert.is_not_nil(parsed.timestamp)
+            local parsed_messages = vim.json.decode(saved_messages)
+            local parsed_metadata = vim.json.decode(saved_metadata)
+            assert.equal(1, #parsed_messages.messages)
+            local saved_first_message =
+                assert.not_nil(parsed_messages.messages[1])
+            assert.equal("Test message", saved_first_message.text)
+            assert.equal(original.session_id, parsed_metadata.session_id)
+            assert.equal("Test message", parsed_metadata.title)
+            assert.is_not_nil(parsed_metadata.timestamp)
 
             local loaded = nil
             local load_err = nil
@@ -311,8 +333,49 @@ describe("ChatHistory", function()
             assert.equal(original.session_id, loaded.session_id)
             assert.equal(original.timestamp, loaded.timestamp)
             assert.equal(1, #loaded.messages)
+            local loaded_first_message = assert.not_nil(loaded.messages[1])
+            assert.equal("Test message", loaded_first_message.text)
+        end)
+
+        it("loads legacy monolithic session files", function()
+            local path = ChatHistory.get_file_path("legacy-session")
+            mock_files[path] = vim.json.encode({
+                session_id = "legacy-session",
+                title = "Legacy title",
+                timestamp = 1704067200,
+                messages = {
+                    {
+                        type = "user",
+                        text = "Legacy message",
+                        timestamp = 1704067201,
+                        provider_name = "test-provider",
+                    },
+                },
+            })
+
+            local loaded = nil
+            local load_err = nil
+            local done = false
+
+            ChatHistory.load("legacy-session", function(history, err)
+                loaded = history
+                load_err = err
+                done = true
+            end)
+
+            vim.wait(1000, function()
+                return done
+            end)
+
+            assert.is_nil(load_err)
+            assert.is_not_nil(loaded)
+            --- @cast loaded agentic.ui.ChatHistory
+            assert.equal("legacy-session", loaded.session_id)
+            assert.equal("Legacy title", loaded.title)
+            assert.equal(1704067200, loaded.timestamp)
+            assert.equal(1, #loaded.messages)
             local first_message = assert.not_nil(loaded.messages[1])
-            assert.equal("Test message", first_message.text)
+            assert.equal("Legacy message", first_message.text)
         end)
 
         it("returns error for missing or corrupted files", function()
@@ -371,26 +434,37 @@ describe("ChatHistory", function()
 
         local function create_session_file(session_id)
             local file_path = ChatHistory.get_file_path(session_id)
+            local metadata_path = ChatHistory.get_metadata_file_path(session_id)
             local dir = vim.fn.fnamemodify(file_path, ":h")
             vim.fn.mkdir(dir, "p")
-            local f = io.open(file_path, "w")
-            assert.is_not_nil(f)
-            if not f then
+            local message_file = io.open(file_path, "w")
+            assert.is_not_nil(message_file)
+            if not message_file then
                 error("failed to create session file")
             end
-            f:write(vim.json.encode({
+            message_file:write(vim.json.encode({
+                messages = {},
+            }))
+            message_file:close()
+
+            local metadata_file = io.open(metadata_path, "w")
+            assert.is_not_nil(metadata_file)
+            if not metadata_file then
+                error("failed to create metadata file")
+            end
+            metadata_file:write(vim.json.encode({
                 session_id = session_id,
                 title = "Test " .. session_id,
                 timestamp = os.time(),
-                messages = {},
             }))
-            f:close()
-            return file_path
+            metadata_file:close()
+            return file_path, metadata_path
         end
 
         it("deletes session file and calls callback with nil", function()
-            local file_path = create_session_file("delete-me")
+            local file_path, metadata_path = create_session_file("delete-me")
             assert.is_not_nil(vim.uv.fs_stat(file_path))
+            assert.is_not_nil(vim.uv.fs_stat(metadata_path))
 
             --- @type string|nil
             local result_err = "not-called"
@@ -400,6 +474,7 @@ describe("ChatHistory", function()
 
             assert.is_nil(result_err)
             assert.is_nil(vim.uv.fs_stat(file_path))
+            assert.is_nil(vim.uv.fs_stat(metadata_path))
         end)
 
         it("calls callback with error when file does not exist", function()
@@ -418,24 +493,28 @@ describe("ChatHistory", function()
         end)
 
         it("works without callback on existing file", function()
-            create_session_file("no-callback")
+            local path, metadata_path = create_session_file("no-callback")
 
             assert.has_no_errors(function()
                 ChatHistory.delete_session("no-callback")
             end)
 
-            local path = ChatHistory.get_file_path("no-callback")
             assert.is_nil(vim.uv.fs_stat(path))
+            assert.is_nil(vim.uv.fs_stat(metadata_path))
         end)
 
         it("only deletes the specified session file", function()
-            local keep_path = create_session_file("session-keep")
-            local delete_path = create_session_file("session-delete")
+            local keep_path, keep_metadata_path =
+                create_session_file("session-keep")
+            local delete_path, delete_metadata_path =
+                create_session_file("session-delete")
 
             ChatHistory.delete_session("session-delete", function(_err) end)
 
             assert.is_not_nil(vim.uv.fs_stat(keep_path))
+            assert.is_not_nil(vim.uv.fs_stat(keep_metadata_path))
             assert.is_nil(vim.uv.fs_stat(delete_path))
+            assert.is_nil(vim.uv.fs_stat(delete_metadata_path))
         end)
 
         it("deleted session no longer appears in list_sessions", function()
@@ -537,6 +616,96 @@ describe("ChatHistory", function()
             end
             assert.is_true(ids["session-1"])
             assert.is_true(ids["session-2"])
+        end)
+
+        it("reads session metadata from meta files only", function()
+            local temp_dir = vim.fn.tempname()
+            vim.fn.mkdir(temp_dir, "p")
+
+            local Config = require("agentic.config")
+            local original_list_storage = Config.session_restore.storage_path
+            Config.session_restore.storage_path = temp_dir
+
+            local metadata_path =
+                ChatHistory.get_metadata_file_path("split-session")
+            local messages_path = ChatHistory.get_file_path("split-session")
+            local dir = vim.fn.fnamemodify(metadata_path, ":h")
+            vim.fn.mkdir(dir, "p")
+
+            local metadata_file = io.open(metadata_path, "w")
+            assert.is_not_nil(metadata_file)
+            if not metadata_file then
+                error("failed to create metadata file")
+            end
+            metadata_file:write(vim.json.encode({
+                session_id = "split-session",
+                title = "Metadata title",
+                timestamp = 1704067200,
+            }))
+            metadata_file:close()
+
+            local messages_file = io.open(messages_path, "w")
+            assert.is_not_nil(messages_file)
+            if not messages_file then
+                error("failed to create messages file")
+            end
+            messages_file:write("not valid json")
+            messages_file:close()
+
+            local sessions = nil
+            ChatHistory.list_sessions(function(result)
+                sessions = result
+            end)
+
+            assert.is_not_nil(sessions)
+            --- @cast sessions agentic.ui.ChatHistory.SessionMeta[]
+            assert.equal(1, #sessions)
+            local first_session = assert.not_nil(sessions[1])
+            assert.equal("split-session", first_session.session_id)
+            assert.equal("Metadata title", first_session.title)
+
+            vim.fn.delete(temp_dir, "rf")
+            Config.session_restore.storage_path = original_list_storage
+        end)
+
+        it("falls back to legacy monolithic files without metadata", function()
+            local temp_dir = vim.fn.tempname()
+            vim.fn.mkdir(temp_dir, "p")
+
+            local Config = require("agentic.config")
+            local original_list_storage = Config.session_restore.storage_path
+            Config.session_restore.storage_path = temp_dir
+
+            local file_path = ChatHistory.get_file_path("legacy-session")
+            local dir = vim.fn.fnamemodify(file_path, ":h")
+            vim.fn.mkdir(dir, "p")
+            local legacy_file = io.open(file_path, "w")
+            assert.is_not_nil(legacy_file)
+            if not legacy_file then
+                error("failed to create legacy file")
+            end
+            legacy_file:write(vim.json.encode({
+                session_id = "legacy-session",
+                title = "Legacy session",
+                timestamp = 1704067200,
+                messages = {},
+            }))
+            legacy_file:close()
+
+            local sessions = nil
+            ChatHistory.list_sessions(function(result)
+                sessions = result
+            end)
+
+            assert.is_not_nil(sessions)
+            --- @cast sessions agentic.ui.ChatHistory.SessionMeta[]
+            assert.equal(1, #sessions)
+            local first_session = assert.not_nil(sessions[1])
+            assert.equal("legacy-session", first_session.session_id)
+            assert.equal("Legacy session", first_session.title)
+
+            vim.fn.delete(temp_dir, "rf")
+            Config.session_restore.storage_path = original_list_storage
         end)
     end)
 end)

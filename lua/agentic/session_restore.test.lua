@@ -564,7 +564,7 @@ describe("SessionRestore", function()
                 local call_count = 0
                 chat_history_list_stub:invokes(function(callback)
                     call_count = call_count + 1
-                    if call_count <= 2 then
+                    if call_count == 1 then
                         callback(test_sessions)
                     else
                         -- After deletion: only second session remains

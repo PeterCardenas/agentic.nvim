@@ -150,12 +150,9 @@ end
 --- @return integer|nil body_end
 --- @return integer|nil block_start
 function ChatFolds._resolve_body_range(bufnr, tool_call_blocks, tool_call_id)
-    local body_start, body_end, block_start = ChatFolds._resolve_ranges(
-        bufnr,
-        tool_call_blocks,
-        tool_call_id
-    )
-    if not body_start then
+    local body_start, body_end, block_start =
+        ChatFolds._resolve_ranges(bufnr, tool_call_blocks, tool_call_id)
+    if not body_start or not block_start then
         return nil, nil, nil
     end
 
@@ -168,11 +165,8 @@ end
 --- @return integer|nil block_start
 --- @return integer|nil block_end
 function ChatFolds._resolve_block_range(bufnr, tool_call_blocks, tool_call_id)
-    local _, _, block_start, block_end = ChatFolds._resolve_ranges(
-        bufnr,
-        tool_call_blocks,
-        tool_call_id
-    )
+    local _, _, block_start, block_end =
+        ChatFolds._resolve_ranges(bufnr, tool_call_blocks, tool_call_id)
     return block_start, block_end
 end
 
@@ -188,11 +182,8 @@ function ChatFolds:_ensure_tool_call_fold(tool_call_id, tool_call_blocks)
     local enabled, min_lines, closed_by_default, preview =
         ChatFolds._resolve_policy(kind)
 
-    local body_start, body_end = ChatFolds._resolve_ranges(
-        self._bufnr,
-        tool_call_blocks,
-        tool_call_id
-    )
+    local body_start, body_end =
+        ChatFolds._resolve_ranges(self._bufnr, tool_call_blocks, tool_call_id)
 
     local body_lines = 0
     if body_start and body_end then
@@ -496,11 +487,8 @@ function ChatFolds._sorted_tool_call_ids(bufnr, tool_call_blocks)
     local entries = {}
 
     for tool_call_id in pairs(tool_call_blocks) do
-        local body_start = ChatFolds._resolve_ranges(
-            bufnr,
-            tool_call_blocks,
-            tool_call_id
-        )
+        local body_start =
+            ChatFolds._resolve_ranges(bufnr, tool_call_blocks, tool_call_id)
         table.insert(entries, {
             id = tool_call_id,
             start = body_start or math.huge,
@@ -557,9 +545,9 @@ function ChatFolds:sync_all_tool_calls(tool_call_blocks)
         return
     end
 
-    for _, tool_call_id in ipairs(
-        ChatFolds._sorted_tool_call_ids(self._bufnr, tool_call_blocks)
-    ) do
+    for _, tool_call_id in
+        ipairs(ChatFolds._sorted_tool_call_ids(self._bufnr, tool_call_blocks))
+    do
         self:_sync_tool_call_impl(tool_call_id, tool_call_blocks)
     end
 end
@@ -574,11 +562,8 @@ function ChatFolds:_capture_fold_state_at_window(
     tool_call_blocks,
     fold
 )
-    local body_start, body_end = ChatFolds._resolve_ranges(
-        self._bufnr,
-        tool_call_blocks,
-        tool_call_id
-    )
+    local body_start, body_end =
+        ChatFolds._resolve_ranges(self._bufnr, tool_call_blocks, tool_call_id)
 
     if not body_start then
         return
@@ -663,11 +648,7 @@ function ChatFolds:_sync_tool_call_to_window(
     end
 
     local body_start, body_end, block_start, block_end =
-        ChatFolds._resolve_ranges(
-            self._bufnr,
-            tool_call_blocks,
-            tool_call_id
-        )
+        ChatFolds._resolve_ranges(self._bufnr, tool_call_blocks, tool_call_id)
 
     if not body_start or not body_end or not block_start or not block_end then
         return
@@ -695,9 +676,9 @@ function ChatFolds:on_buf_win_enter(winid, tool_call_blocks)
         return
     end
 
-    for _, tool_call_id in ipairs(
-        ChatFolds._sorted_tool_call_ids(self._bufnr, tool_call_blocks)
-    ) do
+    for _, tool_call_id in
+        ipairs(ChatFolds._sorted_tool_call_ids(self._bufnr, tool_call_blocks))
+    do
         self:_sync_tool_call_to_window(winid, tool_call_id, tool_call_blocks)
     end
 end

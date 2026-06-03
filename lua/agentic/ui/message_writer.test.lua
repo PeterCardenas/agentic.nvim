@@ -920,7 +920,13 @@ describe("agentic.ui.MessageWriter", function()
     describe("tool call body display truncation", function()
         it("truncates large execute bodies in the chat buffer", function()
             Config.folding = {
-                tool_calls = { max_display_lines = 2 },
+                tool_calls = {
+                    enabled = true,
+                    closed_by_default = false,
+                    preview = true,
+                    min_lines = 20,
+                    max_display_lines = 2,
+                },
             } --- @diagnostic disable-line: assign-type-mismatch
 
             local body = { "line 1", "line 2", "line 3", "line 4" }
