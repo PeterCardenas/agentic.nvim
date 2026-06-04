@@ -56,6 +56,7 @@ end
 --- @param state agentic.Theme.SpinnerState
 function StatusAnimation:start(state)
     if self._state == state and self._next_frame_handle ~= nil then
+        self:_reanchor_current_frame()
         return
     end
 
@@ -91,21 +92,28 @@ function StatusAnimation:stop()
     self._extmark_id = nil
 end
 
-function StatusAnimation:_render_frame()
-    if not self._state or not vim.api.nvim_buf_is_valid(self._bufnr) then
-        -- return early to stop the animation in case state was cleared, or buffer is invalid
-        -- this avoids an infinite loop of deferred calls without a state and it actually renders nil in the UI
-        return
+--- @return string[]
+function StatusAnimation:_get_spinner_chars()
+    return Config.spinner_chars[self._state] or Config.spinner_chars.generating
+end
+
+--- @param spinner_chars string[]
+--- @return string
+function StatusAnimation:_get_current_spinner_char(spinner_chars)
+    local current_idx = self._spinner_idx - 1
+    if current_idx < 1 then
+        current_idx = #spinner_chars
     end
 
-    local spinner_chars = Config.spinner_chars[self._state]
-        or Config.spinner_chars.generating
+    local char = spinner_chars[current_idx] or spinner_chars[1] or ""
+    return char
+end
 
-    local char = spinner_chars[self._spinner_idx] or spinner_chars[1]
-
-    self._spinner_idx = (self._spinner_idx % #spinner_chars) + 1
-
-    local display_text = string.format(" %s %s ", char, self._state)
+--- @param display_text string
+function StatusAnimation:_update_extmark(display_text)
+    if not self._state or not vim.api.nvim_buf_is_valid(self._bufnr) then
+        return
+    end
 
     local hl_group = Theme.get_spinner_hl_group(self._state)
     local lines = vim.api.nvim_buf_get_lines(self._bufnr, 0, -1, false)
@@ -124,8 +132,6 @@ function StatusAnimation:_render_frame()
             table.insert(virt_text, 1, { string.rep(" ", padding), "Normal" })
         end
     end
-
-    local delay = TIMING[self._state] or TIMING.generating
 
     local virt_lines = {
         { { "" } }, -- Empty line above
@@ -148,6 +154,33 @@ function StatusAnimation:_render_frame()
     then
         BufHelpers.scroll_window_to_bottom(winid)
     end
+end
+
+function StatusAnimation:_reanchor_current_frame()
+    if not self._state then
+        return
+    end
+
+    local spinner_chars = self:_get_spinner_chars()
+    local char = self:_get_current_spinner_char(spinner_chars)
+    self:_update_extmark(string.format(" %s %s ", char, self._state))
+end
+
+function StatusAnimation:_render_frame()
+    if not self._state or not vim.api.nvim_buf_is_valid(self._bufnr) then
+        -- return early to stop the animation in case state was cleared, or buffer is invalid
+        -- this avoids an infinite loop of deferred calls without a state and it actually renders nil in the UI
+        return
+    end
+
+    local spinner_chars = self:_get_spinner_chars()
+
+    local char = spinner_chars[self._spinner_idx] or spinner_chars[1]
+
+    self._spinner_idx = (self._spinner_idx % #spinner_chars) + 1
+
+    local delay = TIMING[self._state] or TIMING.generating
+    self:_update_extmark(string.format(" %s %s ", char, self._state))
 
     self._next_frame_handle = vim.defer_fn(function()
         self:_render_frame()

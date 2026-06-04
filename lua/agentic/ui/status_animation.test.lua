@@ -101,19 +101,27 @@ describe("agentic.ui.StatusAnimation", function()
         end
     )
 
-    it("does not restart the spinner when the state is unchanged", function()
+    it("reanchors the spinner when the state is unchanged", function()
         local stop_spy = spy.on(StatusAnimation, "stop")
-        local render_spy = spy.on(StatusAnimation, "_render_frame")
+        local ns = vim.api.nvim_get_namespaces().agentic_animation
 
         vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, { "agent output" })
 
         animation:start("thinking")
+        vim.api.nvim_buf_set_lines(
+            bufnr,
+            -1,
+            -1,
+            false,
+            { "new streamed line" }
+        )
         animation:start("thinking")
 
         assert.spy(stop_spy).was.called(1)
-        assert.spy(render_spy).was.called(1)
+        local marks = vim.api.nvim_buf_get_extmarks(bufnr, ns, 0, -1, {})
+        local extmark = assert.not_nil(marks[1])
+        assert.equal(vim.api.nvim_buf_line_count(bufnr) - 1, extmark[2])
 
-        render_spy:revert()
         stop_spy:revert()
     end)
 end)
