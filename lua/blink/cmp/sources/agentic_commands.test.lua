@@ -1,4 +1,5 @@
 local assert = require("tests.helpers.assert")
+local spy = require("tests.helpers.spy")
 
 local States = require("agentic.states")
 
@@ -421,5 +422,113 @@ describe("blink.cmp.sources.agentic_commands", function()
                 package.loaded["agentic.session_registry"] = nil
             end
         )
+
+        it("defers prompt restore after file picker completion", function()
+            local defer_fn_stub = spy.stub(vim, "defer_fn")
+            defer_fn_stub:invokes(function(fn, _timeout)
+                fn()
+            end)
+
+            local focus_prompt_spy = spy.new(function() end)
+            package.loaded["agentic.ui.file_picker"] = {
+                open = function(_on_file_selected, on_complete)
+                    if on_complete then
+                        on_complete()
+                    end
+                end,
+            }
+            package.loaded["agentic.session_registry"] = {
+                sessions = {
+                    [vim.api.nvim_get_current_tabpage()] = {
+                        widget = {
+                            focus_prompt = focus_prompt_spy,
+                            show = function(_opts) end,
+                        },
+                        file_list = {
+                            add = function(_file_path)
+                                return false
+                            end,
+                        },
+                    },
+                },
+            }
+
+            source:execute(
+                {
+                    bufnr = bufnr,
+                    cursor = { 1, 1 },
+                    line = "@",
+                },
+                { data = { action = "agentic_open_file_picker" } },
+                function() end,
+                function() end
+            )
+
+            assert.equal(1, defer_fn_stub.call_count)
+            assert.equal(20, defer_fn_stub.calls[1][2])
+            assert.spy(focus_prompt_spy).was.called(1)
+
+            defer_fn_stub:revert()
+        end)
+
+        it("returns to insert mode after picker selection finishes", function()
+            vim.api.nvim_set_current_buf(bufnr)
+            vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, { "" })
+            vim.api.nvim_win_set_cursor(0, { 1, 0 })
+            vim.cmd("startinsert")
+            wait_for_insert_mode()
+
+            local focus_prompt_spy = spy.new(function()
+                vim.api.nvim_set_current_buf(bufnr)
+            end)
+
+            package.loaded["agentic.ui.file_picker"] = {
+                open = function(on_file_selected, on_complete)
+                    vim.cmd("stopinsert")
+                    if on_file_selected then
+                        on_file_selected("/tmp/test.lua")
+                    end
+                    if on_complete then
+                        on_complete()
+                    end
+                    vim.schedule(function()
+                        vim.cmd("stopinsert")
+                    end)
+                end,
+            }
+            package.loaded["agentic.session_registry"] = {
+                sessions = {
+                    [vim.api.nvim_get_current_tabpage()] = {
+                        widget = {
+                            focus_prompt = focus_prompt_spy,
+                            show = function(_opts) end,
+                        },
+                        file_list = {
+                            add = function(_file_path)
+                                return true
+                            end,
+                        },
+                    },
+                },
+            }
+
+            source:execute(
+                {
+                    bufnr = bufnr,
+                    cursor = { 1, 1 },
+                    line = "@",
+                },
+                { data = { action = "agentic_open_file_picker" } },
+                function() end,
+                function() end
+            )
+
+            wait_for_insert_mode()
+            vim.wait(50, function()
+                return false
+            end, 10)
+            assert.equal("i", vim.api.nvim_get_mode().mode:sub(1, 1))
+            assert.spy(focus_prompt_spy).was.called(1)
+        end)
     end)
 end)

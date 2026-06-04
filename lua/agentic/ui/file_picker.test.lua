@@ -248,6 +248,10 @@ describe("FilePicker:open", function()
         package.loaded["fzf-lua"] = {
             files = function(opts)
                 opts.actions["default"]({ " lua/agentic/init.lua" })
+                local on_close = opts.winopts.on_close
+                if type(on_close) == "function" then
+                    on_close()
+                end
             end,
             path = {
                 entry_to_file = function(_entry, _opts)
@@ -265,5 +269,26 @@ describe("FilePicker:open", function()
         assert.spy(on_complete).was.called(1)
         local file_path = on_selected.calls[1][1]
         assert.truthy(file_path:match("lua/agentic/init.lua$"))
+    end)
+
+    it("runs completion callback when fzf picker closes", function()
+        local on_complete = spy.new(function() end)
+        --- @type table|nil
+        local captured_opts
+
+        package.loaded["fzf-lua"] = {
+            files = function(opts)
+                captured_opts = opts
+            end,
+        }
+
+        FilePicker.open(nil, on_complete --[[@as function]])
+
+        captured_opts = assert.not_nil(captured_opts)
+        local winopts = assert.not_nil(captured_opts.winopts)
+        local on_close = assert.not_nil(winopts.on_close)
+        on_close()
+
+        assert.spy(on_complete).was.called(1)
     end)
 end)

@@ -200,9 +200,26 @@ function FilePicker.open(on_file_selected, on_complete)
 
     local fzf = load_fzf_lua()
     if fzf and type(fzf.files) == "function" then
+        local completed = false
+        local function complete_once()
+            if completed then
+                return
+            end
+            completed = true
+
+            if on_complete then
+                on_complete()
+            end
+        end
+
+        local winopts = build_fzf_winopts()
+        -- Restore the prompt only after the picker fully closes so accept and
+        -- cancel share the same mode handoff.
+        winopts.on_close = complete_once
+
         fzf.files({
             file_icons = false,
-            winopts = build_fzf_winopts(),
+            winopts = winopts,
             -- Place fzf's input line at the bottom of the picker so results
             -- grow upward toward the preview pane.
             fzf_opts = {
@@ -219,9 +236,6 @@ function FilePicker.open(on_file_selected, on_complete)
                     end
 
                     add_selected_files(selected_paths, on_file_selected)
-                    if on_complete then
-                        on_complete()
-                    end
                 end,
             },
         })

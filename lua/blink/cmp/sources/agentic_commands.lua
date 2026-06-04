@@ -297,10 +297,12 @@ function Source:execute(_context, item, callback, default_implementation)
                     })
                 end
             end, function()
-                vim.schedule(function()
+                -- fzf can report completion before its terminal-mode window fully
+                -- yields control back to the prompt, so defer the handoff briefly.
+                vim.defer_fn(function()
                     session.widget:focus_prompt()
                     vim.cmd("startinsert!")
-                end)
+                end, 20)
             end)
         end
         callback()
