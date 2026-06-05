@@ -2,6 +2,7 @@
 local assert = require("tests.helpers.assert")
 local spy = require("tests.helpers.spy")
 local Config = require("agentic.config")
+local BufHelpers = require("agentic.utils.buf_helpers")
 local Logger = require("agentic.utils.logger")
 
 describe("agentic.ui.ChatWidget", function()
@@ -177,6 +178,69 @@ describe("agentic.ui.ChatWidget", function()
                 assert.is_false(vim.api.nvim_win_is_valid(first_chat_win))
                 assert.is_true(vim.api.nvim_win_is_valid(widget.win_nrs.chat))
             end)
+
+            it(
+                "G reveals spinner footer lines below the last chat line",
+                function()
+                    local ns = vim.api.nvim_create_namespace(
+                        "agentic_test_chat_bottom_tail"
+                    )
+                    local scroll_spy =
+                        spy.on(BufHelpers, "scroll_window_to_bottom")
+
+                    fill_buffer(widget, "chat", {
+                        "header 1",
+                        "header 2",
+                        "header 3",
+                        "header 4",
+                        "agent: " .. string.rep("x", 20),
+                    })
+
+                    widget:show({ focus_prompt = false })
+                    local chat_win = assert.not_nil(widget.win_nrs.chat)
+                    vim.api.nvim_win_set_height(chat_win, 5)
+                    vim.api.nvim_set_current_win(chat_win)
+                    vim.api.nvim_win_set_cursor(chat_win, { 1, 0 })
+
+                    vim.api.nvim_buf_set_extmark(
+                        widget.buf_nrs.chat,
+                        ns,
+                        4,
+                        0,
+                        {
+                            virt_lines = {
+                                { { "" } },
+                                { { " spinner ", "Comment" } },
+                                { { "" } },
+                            },
+                            virt_lines_above = false,
+                        }
+                    )
+
+                    assert.is_false(
+                        BufHelpers.is_window_bottom_visible(chat_win)
+                    )
+
+                    local bottom_map =
+                        get_keymap_in_buf(widget.buf_nrs.chat, "G")
+                    assert.equal("G", bottom_map.lhs)
+                    widget:go_to_chat_bottom()
+                    vim.cmd("redraw")
+                    scroll_spy:revert()
+
+                    local cursor = vim.api.nvim_win_get_cursor(chat_win)
+                    local winline = vim.api.nvim_win_call(chat_win, function()
+                        return vim.fn.winline()
+                    end)
+
+                    assert.spy(scroll_spy).was.called_with(chat_win)
+                    assert.equal(
+                        vim.api.nvim_buf_line_count(widget.buf_nrs.chat),
+                        cursor[1]
+                    )
+                    assert.equal(vim.api.nvim_win_get_height(chat_win), winline)
+                end
+            )
 
             it("windows are created in correct tabpage", function()
                 widget:show()

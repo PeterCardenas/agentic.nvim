@@ -659,6 +659,23 @@ function ChatWidget:navigate_prev_prompt()
     self:_navigate_prompt("prev")
 end
 
+--- @param count integer|nil
+function ChatWidget:go_to_chat_bottom(count)
+    local chat_winid = self:_get_chat_winid()
+    if not chat_winid then
+        return
+    end
+
+    if count and count > 0 then
+        vim.api.nvim_win_call(chat_winid, function()
+            vim.cmd("normal! " .. count .. "G")
+        end)
+        return
+    end
+
+    BufHelpers.scroll_window_to_bottom(chat_winid)
+end
+
 --- Navigate to the next agent message start in the chat buffer
 function ChatWidget:navigate_last_agent_message_chunk()
     local chat_winid = self:_get_chat_winid()
@@ -796,6 +813,10 @@ function ChatWidget:_bind_keymaps()
     BufHelpers.keymap_set(self.buf_nrs.chat, "n", "x", function()
         self:_toggle_full_width()
     end, { desc = "Agentic: Toggle maximize" })
+
+    BufHelpers.keymap_set(self.buf_nrs.chat, "n", "G", function()
+        self:go_to_chat_bottom(vim.v.count)
+    end, { desc = "Agentic: Go to chat bottom" })
 
     -- Add prompt navigation keymaps to chat buffer
     BufHelpers.keymap_set(
