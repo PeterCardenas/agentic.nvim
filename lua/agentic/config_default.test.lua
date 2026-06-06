@@ -37,7 +37,7 @@ describe("config_default", function()
         it("accepts partial nested sub-window config", function()
             --- @type agentic.PartialUserConfig.Windows
             local windows = {
-                input = { height = 20 },
+                input = { win_opts = { wrap = false } },
                 todos = { display = false },
             }
 
@@ -49,7 +49,7 @@ describe("config_default", function()
             local resolved_windows = assert.not_nil(cfg.windows)
             local input = assert.not_nil(resolved_windows.input)
             local todos = assert.not_nil(resolved_windows.todos)
-            assert.equal(20, input.height)
+            assert.equal(false, input.win_opts.wrap)
             assert.equal(false, todos.display)
         end)
 

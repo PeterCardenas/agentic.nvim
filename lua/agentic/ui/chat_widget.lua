@@ -438,8 +438,7 @@ function ChatWidget:_schedule_hide_if_primary_window_closed()
 end
 
 function ChatWidget:_resize_input_window()
-    local max_height =
-        math.max(3, Config.windows.input.height --[[@as integer]])
+    local max_height = WidgetLayout.calculate_input_max_height(3)
     WidgetLayout.resize_input(self.win_nrs, self.current_position, max_height)
 end
 

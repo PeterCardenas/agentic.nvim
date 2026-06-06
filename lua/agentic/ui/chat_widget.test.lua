@@ -4,6 +4,7 @@ local spy = require("tests.helpers.spy")
 local Config = require("agentic.config")
 local BufHelpers = require("agentic.utils.buf_helpers")
 local Logger = require("agentic.utils.logger")
+local WidgetLayout = require("agentic.ui.widget_layout")
 
 describe("agentic.ui.ChatWidget", function()
     --- @type agentic.ui.ChatWidget
@@ -527,7 +528,7 @@ describe("agentic.ui.ChatWidget", function()
                 local width = vim.api.nvim_win_get_width(input_win)
                 local long_line = string.rep("x", math.floor(width * 4))
                 local max_input_height =
-                    math.max(2, Config.windows.input.height --[[@as integer]])
+                    WidgetLayout.calculate_input_max_height(3)
 
                 fill_buffer(widget, "input", { long_line })
                 vim.api.nvim_exec_autocmds("TextChanged", {

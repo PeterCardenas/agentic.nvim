@@ -4,6 +4,8 @@ local BufHelpers = require("agentic.utils.buf_helpers")
 local WindowDecoration = require("agentic.ui.window_decoration")
 local Logger = require("agentic.utils.logger")
 
+local INPUT_MAX_HEIGHT_RATIO = 0.6
+
 --- @class agentic.ui.WidgetLayout.Params
 --- @field tab_page_id integer
 --- @field buf_nrs agentic.ui.ChatWidget.BufNrs
@@ -59,6 +61,15 @@ end
 --- @return integer
 function WidgetLayout.calculate_height(size)
     return calculate_dimension(size, vim.o.lines, DefaultConfig.windows.height)
+end
+
+--- @param min_height integer
+--- @return integer max_height
+function WidgetLayout.calculate_input_max_height(min_height)
+    return math.max(
+        min_height,
+        math.floor(vim.o.lines * INPUT_MAX_HEIGHT_RATIO)
+    )
 end
 
 --- @param position agentic.UserConfig.Windows.Position
@@ -276,8 +287,7 @@ local function show_layout(params, position)
         winfixheight = not is_bottom,
     })
 
-    local input_max_height =
-        math.max(2, Config.windows.input.height --[[@as integer]])
+    local input_max_height = WidgetLayout.calculate_input_max_height(3)
     WidgetLayout.resize_input(win_nrs, position, input_max_height)
 
     local code_max_height = Config.windows.code.max_height --[[@as integer]]

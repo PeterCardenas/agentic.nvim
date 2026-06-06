@@ -68,7 +68,6 @@
 --- @class (partial) agentic.PartialUserConfig.Windows.Chat: agentic.UserConfig.Windows.Chat
 --- @field win_opts? agentic.UserConfig.WinOpts
 --- @class (partial) agentic.PartialUserConfig.Windows.Input: agentic.UserConfig.Windows.Input
---- @field height? number
 --- @field win_opts? agentic.UserConfig.WinOpts
 --- @class (partial) agentic.PartialUserConfig.Windows.Code: agentic.UserConfig.Windows.Code
 --- @field max_height? number
@@ -223,7 +222,6 @@ local ConfigDefault = {
     --- @field win_opts? agentic.UserConfig.WinOpts
 
     --- @class agentic.UserConfig.Windows.Input
-    --- @field height number
     --- @field win_opts? agentic.UserConfig.WinOpts
 
     --- @class agentic.UserConfig.Windows.Code
@@ -262,7 +260,7 @@ local ConfigDefault = {
         height = "30%",
         stack_width_ratio = 0.4,
         chat = { win_opts = {} },
-        input = { height = 10, win_opts = {} },
+        input = { win_opts = {} },
         code = { max_height = 15, win_opts = {} },
         files = { max_height = 10, win_opts = {} },
         diagnostics = { max_height = 10, win_opts = {} },

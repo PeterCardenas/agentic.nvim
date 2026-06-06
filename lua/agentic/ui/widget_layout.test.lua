@@ -96,6 +96,21 @@ describe("WidgetLayout", function()
         end)
     end)
 
+    describe("calculate_input_max_height", function()
+        it("caps prompt height at sixty percent of Vim height", function()
+            local max_height = WidgetLayout.calculate_input_max_height(3)
+            local expected = math.max(3, math.floor(vim.o.lines * 0.6))
+
+            assert.are.equal(expected, max_height)
+        end)
+
+        it("does not return less than the minimum height", function()
+            local max_height = WidgetLayout.calculate_input_max_height(999)
+
+            assert.are.equal(999, max_height)
+        end)
+    end)
+
     describe("close", function()
         it("should close all valid windows", function()
             local bufnr = vim.api.nvim_create_buf(false, true)

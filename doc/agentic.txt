@@ -284,11 +284,11 @@ windows ~
   `height`             Height when position is `"bottom"`. String
                        percentage or number. Default: `"30%"`.
   `stack_width_ratio`  Ratio for stacked panels. Default: `0.4`.
+  Prompt input         Auto-resizes to content up to 60% of Vim height.
 
   Sub-panel options (each accepts `win_opts` table):
 
   `chat.win_opts`          Window options for the chat panel.
-  `input.height`           Prompt input height. Default: `10`.
   `code.max_height`        Code block max height. Default: `15`.
   `files.max_height`       File list max height. Default: `10`.
   `diagnostics.max_height` Diagnostics max height. Default: `10`.
