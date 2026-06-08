@@ -144,6 +144,7 @@ local function load_session_from_disk_sync(session_id)
     --- @type table
     local combined = {
         session_id = metadata and metadata.session_id or session_id,
+        acp_session_id = metadata and metadata.acp_session_id or nil,
         title = metadata and metadata.title or "",
         timestamp = metadata and metadata.timestamp or 0,
         messages = parsed.messages or {},

@@ -1541,6 +1541,7 @@ function SessionManager:new_session(opts)
 
         self.session_id = response.sessionId
         self.chat_history.session_id = response.sessionId
+        self.chat_history.acp_session_id = response.sessionId
         self.chat_history.timestamp = os.time()
 
         if response.configOptions then
@@ -1588,6 +1589,12 @@ function SessionManager:new_session(opts)
             if on_created then
                 on_created()
             end
+
+            self.chat_history:save(function(save_err)
+                if save_err then
+                    Logger.debug("Chat history save error:", save_err)
+                end
+            end)
 
             -- Flush prompt that was queued while session was initializing
             if self._pending_input then

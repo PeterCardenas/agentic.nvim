@@ -28,6 +28,7 @@ local FileSystem = require("agentic.utils.file_system")
 
 --- @class agentic.ui.ChatHistory.SessionMeta
 --- @field session_id string
+--- @field acp_session_id? string
 --- @field title string
 --- @field timestamp integer
 
@@ -44,6 +45,7 @@ local FileSystem = require("agentic.utils.file_system")
 
 --- @class agentic.ui.ChatHistory
 --- @field session_id? string
+--- @field acp_session_id? string
 --- @field timestamp integer Unix timestamp when session was created
 --- @field messages agentic.ui.ChatHistory.Message[]
 --- @field title string
@@ -54,6 +56,7 @@ ChatHistory.__index = ChatHistory
 function ChatHistory:new()
     local instance = setmetatable({
         session_id = nil,
+        acp_session_id = nil,
         timestamp = os.time(),
         messages = {},
         title = "",
@@ -168,6 +171,7 @@ end
 local function build_history(session_id, messages_data, metadata)
     local instance = ChatHistory:new()
     instance.session_id = metadata and metadata.session_id or session_id
+    instance.acp_session_id = metadata and metadata.acp_session_id or nil
     instance.timestamp = metadata and metadata.timestamp or 0
     instance.messages = messages_data.messages or {}
     instance.title = metadata and metadata.title or ""
@@ -186,6 +190,7 @@ local function read_metadata_sync(session_id, metadata_path)
     --- @type agentic.ui.ChatHistory.SessionMeta
     local metadata = {
         session_id = parsed.session_id or session_id,
+        acp_session_id = parsed.acp_session_id,
         title = parsed.title or "",
         timestamp = parsed.timestamp or 0,
     }
@@ -303,6 +308,7 @@ function ChatHistory:save(callback)
     --- @type agentic.ui.ChatHistory.SessionMeta
     local metadata = {
         session_id = self.session_id,
+        acp_session_id = self.acp_session_id,
         title = self.title,
         timestamp = self.timestamp,
     }
@@ -378,6 +384,7 @@ function ChatHistory.load(session_id, callback)
             --- @cast parsed agentic.ui.ChatHistory.LegacyStorageData
             local instance = build_history(session_id, parsed, {
                 session_id = parsed.session_id or session_id,
+                acp_session_id = parsed.acp_session_id,
                 title = parsed.title or "",
                 timestamp = parsed.timestamp or 0,
             })
@@ -460,6 +467,7 @@ function ChatHistory.list_sessions(callback)
                 --- @type agentic.ui.ChatHistory.SessionMeta
                 local session = {
                     session_id = parsed.session_id or session_id,
+                    acp_session_id = parsed.acp_session_id,
                     title = parsed.title or "",
                     timestamp = parsed.timestamp or 0,
                 }
@@ -492,6 +500,7 @@ function ChatHistory.list_sessions(callback)
                 --- @type agentic.ui.ChatHistory.SessionMeta
                 local session = {
                     session_id = parsed.session_id or session_id,
+                    acp_session_id = parsed.acp_session_id,
                     title = parsed.title or "",
                     timestamp = parsed.timestamp or 0,
                 }
@@ -579,6 +588,7 @@ function ChatHistory.migrate_all_legacy_sessions()
                                 local metadata_json = vim.json.encode({
                                     session_id = parsed.session_id
                                         or session_id,
+                                    acp_session_id = parsed.acp_session_id,
                                     title = parsed.title or "",
                                     timestamp = parsed.timestamp or 0,
                                 })

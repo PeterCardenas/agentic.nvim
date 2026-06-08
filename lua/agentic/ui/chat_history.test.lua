@@ -337,6 +337,48 @@ describe("ChatHistory", function()
             assert.equal("Test message", loaded_first_message.text)
         end)
 
+        it("persists optional ACP session ID in metadata", function()
+            local original = ChatHistory:new()
+            original.session_id = "history-session"
+            original.acp_session_id = "provider-session"
+
+            local save_done = false
+            local save_err = nil
+            original:save(function(err)
+                save_err = err
+                save_done = true
+            end)
+
+            vim.wait(1000, function()
+                return save_done
+            end)
+            assert.is_nil(save_err)
+
+            local metadata_path =
+                ChatHistory.get_metadata_file_path(original.session_id)
+            local saved_metadata = assert.not_nil(mock_files[metadata_path])
+            local parsed_metadata = vim.json.decode(saved_metadata)
+            assert.equal("provider-session", parsed_metadata.acp_session_id)
+
+            local loaded = nil
+            local load_err = nil
+            local load_done = false
+            ChatHistory.load(original.session_id, function(history, err)
+                loaded = history
+                load_err = err
+                load_done = true
+            end)
+
+            vim.wait(1000, function()
+                return load_done
+            end)
+
+            assert.is_nil(load_err)
+            assert.is_not_nil(loaded)
+            --- @cast loaded agentic.ui.ChatHistory
+            assert.equal("provider-session", loaded.acp_session_id)
+        end)
+
         it("loads legacy monolithic session files", function()
             local path = ChatHistory.get_file_path("legacy-session")
             mock_files[path] = vim.json.encode({

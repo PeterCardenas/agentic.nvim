@@ -698,6 +698,70 @@ describe("agentic.SessionManager", function()
             assert.spy(session.status_animation.start).was.called(0)
             assert.spy(session.agent.create_session).was.called(0)
         end)
+
+        it("defers saving ACP session ID from provider response", function()
+            local scheduled_callbacks = {}
+            local schedule_stub = spy.stub(vim, "schedule")
+            schedule_stub:invokes(function(callback)
+                table.insert(scheduled_callbacks, callback)
+            end)
+
+            local save_spy = spy.new(function(_self, callback)
+                if callback then
+                    callback(nil)
+                end
+            end)
+            local create_session_spy = spy.new(
+                function(_self, _handlers, callback)
+                    callback({
+                        sessionId = "provider-session",
+                    }, nil)
+                end
+            )
+
+            local session = {
+                agent = {
+                    provider_config = {
+                        name = "Test Provider",
+                    },
+                    create_session = create_session_spy,
+                },
+                status_animation = {
+                    start = spy.new(function() end),
+                    stop = spy.new(function() end),
+                },
+                _is_creating_session = false,
+                session_id = nil,
+                chat_history = {
+                    messages = {},
+                    save = save_spy,
+                },
+                config_options = {
+                    set_initial_mode = function() end,
+                },
+                message_writer = {
+                    write_message = function() end,
+                },
+                _cancel_session = spy.new(function() end),
+            }
+            setmetatable(session, { __index = SessionManager })
+
+            SessionManager.new_session(session)
+
+            assert.equal("provider-session", session.session_id)
+            assert.equal("provider-session", session.chat_history.session_id)
+            assert.equal(
+                "provider-session",
+                session.chat_history.acp_session_id
+            )
+            assert.spy(save_spy).was.called(0)
+
+            assert.equal(1, #scheduled_callbacks)
+            scheduled_callbacks[1]()
+            assert.spy(save_spy).was.called(1)
+
+            schedule_stub:revert()
+        end)
     end)
 
     describe("FileChangedShell autocommand", function()
