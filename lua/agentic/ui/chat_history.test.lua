@@ -139,6 +139,35 @@ describe("ChatHistory", function()
         )
     end)
 
+    describe("save", function()
+        it("does not persist empty sessions", function()
+            stub_cwd()
+
+            local empty = ChatHistory:new()
+            empty.session_id = "empty-session"
+            empty.acp_session_id = "provider-session"
+
+            local save_done = false
+            --- @type string|nil
+            local save_err = "not-called"
+            empty:save(function(err)
+                save_err = err
+                save_done = true
+            end)
+
+            assert.is_true(save_done)
+            assert.is_nil(save_err)
+            assert.equal(mkdirp_stub.call_count, 0)
+            assert.equal(write_file_stub.call_count, 0)
+            assert.is_nil(
+                mock_files[ChatHistory.get_file_path("empty-session")]
+            )
+            assert.is_nil(
+                mock_files[ChatHistory.get_metadata_file_path("empty-session")]
+            )
+        end)
+    end)
+
     describe("message operations", function()
         it("add_message preserves insertion order", function()
             local history = ChatHistory:new()
@@ -341,6 +370,12 @@ describe("ChatHistory", function()
             local original = ChatHistory:new()
             original.session_id = "history-session"
             original.acp_session_id = "provider-session"
+            original:add_message({
+                type = "user",
+                text = "Persist provider session",
+                timestamp = os.time(),
+                provider_name = "test-provider",
+            })
 
             local save_done = false
             local save_err = nil

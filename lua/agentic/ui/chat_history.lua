@@ -285,6 +285,13 @@ function ChatHistory:save(callback)
         return
     end
 
+    if #self.messages == 0 then
+        if callback then
+            callback(nil)
+        end
+        return
+    end
+
     local messages_path = ChatHistory.get_file_path(self.session_id)
     local metadata_path = ChatHistory.get_metadata_file_path(self.session_id)
     local dir = vim.fn.fnamemodify(messages_path, ":h")
