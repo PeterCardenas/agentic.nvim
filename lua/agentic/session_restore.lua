@@ -134,6 +134,8 @@ local function load_session_from_disk_sync(session_id)
     if
         parsed.title ~= nil
         or parsed.timestamp ~= nil
+        or parsed.created_at ~= nil
+        or parsed.updated_at ~= nil
         or parsed.session_id ~= nil
     then
         return parsed
@@ -141,12 +143,18 @@ local function load_session_from_disk_sync(session_id)
 
     local metadata =
         read_json_file_sync(ChatHistory.get_metadata_file_path(session_id))
+    local created_at, updated_at = 0, 0
+    if metadata then
+        created_at = metadata.created_at or metadata.timestamp or 0
+        updated_at = metadata.updated_at or metadata.timestamp or created_at
+    end
     --- @type table
     local combined = {
         session_id = metadata and metadata.session_id or session_id,
         acp_session_id = metadata and metadata.acp_session_id or nil,
         title = metadata and metadata.title or "",
-        timestamp = metadata and metadata.timestamp or 0,
+        created_at = created_at,
+        updated_at = updated_at,
         messages = parsed.messages or {},
     }
     return combined
@@ -335,7 +343,7 @@ local function build_session_items()
     local items = {}
     ChatHistory.list_sessions(function(sessions)
         for _, s in ipairs(sessions) do
-            local date = os.date("%Y-%m-%d %H:%M", s.timestamp or 0)
+            local date = os.date("%Y-%m-%d %H:%M", s.updated_at or 0)
             local title = (s.title or "(no title)"):gsub("\n", " ")
 
             table.insert(items, {

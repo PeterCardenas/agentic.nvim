@@ -1558,7 +1558,9 @@ function SessionManager:new_session(opts)
         self.session_id = response.sessionId
         self.chat_history.session_id = response.sessionId
         self.chat_history.acp_session_id = response.sessionId
-        self.chat_history.timestamp = os.time()
+        local now = os.time()
+        self.chat_history.created_at = now
+        self.chat_history.updated_at = now
 
         if response.configOptions then
             Logger.debug("Provider announce configOptions")
@@ -1723,12 +1725,14 @@ function SessionManager:switch_provider(provider_name)
                     local new_history = self.chat_history
                     -- Capture new session metadata before overwriting
                     local new_session_id = new_history.session_id
-                    local new_timestamp = new_history.timestamp
+                    local new_created_at = new_history.created_at
+                    local new_updated_at = new_history.updated_at
 
                     -- Restore saved messages (new_session created a fresh one)
                     self.chat_history = saved_history
                     self.chat_history.session_id = new_session_id
-                    self.chat_history.timestamp = new_timestamp
+                    self.chat_history.created_at = new_created_at
+                    self.chat_history.updated_at = new_updated_at
                     self._history_to_send = saved_history.messages
                     self._is_first_message = true
                     self._is_switching_provider = false
@@ -1991,7 +1995,10 @@ function SessionManager:restore_from_history(history, opts)
     -- In continue mode, remember original identity to restore after new_session
     local original_session_id = opts.replace_session and history.session_id
         or nil
-    local original_timestamp = opts.replace_session and history.timestamp or nil
+    local original_created_at = opts.replace_session and history.created_at
+        or nil
+    local original_updated_at = opts.replace_session and history.updated_at
+        or nil
 
     -- Always reset this flag per restore operation so previous mode
     -- does not leak into the next restore.
@@ -2007,8 +2014,11 @@ function SessionManager:restore_from_history(history, opts)
             if original_session_id then
                 self.chat_history.session_id = original_session_id
             end
-            if original_timestamp then
-                self.chat_history.timestamp = original_timestamp
+            if original_created_at then
+                self.chat_history.created_at = original_created_at
+            end
+            if original_updated_at then
+                self.chat_history.updated_at = original_updated_at
             end
 
             self._restoring = false

@@ -468,17 +468,20 @@ describe("agentic.SessionManager", function()
 
                 assert.is_not_nil(captured_on_created)
 
-                local new_timestamp = os.time()
+                local new_created_at = os.time()
+                local new_updated_at = os.time()
                 session.chat_history = {
                     messages = {},
                     session_id = "new",
-                    timestamp = new_timestamp,
+                    created_at = new_created_at,
+                    updated_at = new_updated_at,
                 }
                 captured_on_created()
 
                 assert.same(original_messages, session.chat_history.messages)
                 assert.equal("new", session.chat_history.session_id)
-                assert.equal(new_timestamp, session.chat_history.timestamp)
+                assert.equal(new_created_at, session.chat_history.created_at)
+                assert.equal(new_updated_at, session.chat_history.updated_at)
                 assert.same(original_messages, session._history_to_send)
                 assert.is_true(session._is_first_message)
             end

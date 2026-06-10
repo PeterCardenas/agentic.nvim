@@ -30,12 +30,19 @@ local FileSystem = require("agentic.utils.file_system")
 --- @field session_id string
 --- @field acp_session_id? string
 --- @field title string
---- @field timestamp integer
+--- @field created_at integer
+--- @field updated_at integer
 
 --- @class agentic.ui.ChatHistory.MessagesData
 --- @field messages agentic.ui.ChatHistory.Message[]
 
---- @class agentic.ui.ChatHistory.LegacyStorageData : agentic.ui.ChatHistory.SessionMeta
+--- @class agentic.ui.ChatHistory.LegacyStorageData
+--- @field session_id? string
+--- @field acp_session_id? string
+--- @field title? string
+--- @field timestamp? integer
+--- @field created_at? integer
+--- @field updated_at? integer
 --- @field messages agentic.ui.ChatHistory.Message[]
 
 --- @class agentic.ui.ChatHistory.MigrationResult
@@ -46,18 +53,44 @@ local FileSystem = require("agentic.utils.file_system")
 --- @class agentic.ui.ChatHistory
 --- @field session_id? string
 --- @field acp_session_id? string
---- @field timestamp integer Unix timestamp when session was created
+--- @field created_at integer Unix timestamp when session was first created
+--- @field updated_at integer Unix timestamp when session was last saved
 --- @field messages agentic.ui.ChatHistory.Message[]
 --- @field title string
 local ChatHistory = {}
 ChatHistory.__index = ChatHistory
 
+--- @param parsed table|nil
+--- @return integer created_at
+--- @return integer updated_at
+local function normalize_session_times(parsed)
+    if type(parsed) ~= "table" then
+        return 0, 0
+    end
+
+    local created_at = parsed.created_at or parsed.timestamp or 0
+    local updated_at = parsed.updated_at or parsed.timestamp or created_at
+    return created_at, updated_at
+end
+
+--- @param parsed table
+--- @param fallback_id string
+--- @return string session_id
+local function resolve_session_id(parsed, fallback_id)
+    if type(parsed.session_id) == "string" and parsed.session_id ~= "" then
+        return parsed.session_id
+    end
+    return fallback_id
+end
+
 --- @return agentic.ui.ChatHistory
 function ChatHistory:new()
+    local now = os.time()
     local instance = setmetatable({
         session_id = nil,
         acp_session_id = nil,
-        timestamp = os.time(),
+        created_at = now,
+        updated_at = now,
         messages = {},
         title = "",
     }, self)
@@ -125,6 +158,8 @@ local function is_legacy_storage_data(parsed)
             parsed.session_id ~= nil
             or parsed.title ~= nil
             or parsed.timestamp ~= nil
+            or parsed.created_at ~= nil
+            or parsed.updated_at ~= nil
         )
 end
 
@@ -172,7 +207,9 @@ local function build_history(session_id, messages_data, metadata)
     local instance = ChatHistory:new()
     instance.session_id = metadata and metadata.session_id or session_id
     instance.acp_session_id = metadata and metadata.acp_session_id or nil
-    instance.timestamp = metadata and metadata.timestamp or 0
+    local created_at, updated_at = normalize_session_times(metadata)
+    instance.created_at = created_at
+    instance.updated_at = updated_at
     instance.messages = messages_data.messages or {}
     instance.title = metadata and metadata.title or ""
     return instance
@@ -187,12 +224,15 @@ local function read_metadata_sync(session_id, metadata_path)
         return nil
     end
 
+    local created_at, updated_at = normalize_session_times(parsed)
+
     --- @type agentic.ui.ChatHistory.SessionMeta
     local metadata = {
-        session_id = parsed.session_id or session_id,
+        session_id = resolve_session_id(parsed, session_id),
         acp_session_id = parsed.acp_session_id,
         title = parsed.title or "",
-        timestamp = parsed.timestamp or 0,
+        created_at = created_at,
+        updated_at = updated_at,
     }
     return metadata
 end
@@ -312,12 +352,19 @@ function ChatHistory:save(callback)
         messages = self.messages,
     }
 
+    local now = os.time()
+    if now <= self.updated_at then
+        now = self.updated_at + 1
+    end
+    self.updated_at = now
+
     --- @type agentic.ui.ChatHistory.SessionMeta
     local metadata = {
         session_id = self.session_id,
         acp_session_id = self.acp_session_id,
         title = self.title,
-        timestamp = self.timestamp,
+        created_at = self.created_at,
+        updated_at = self.updated_at,
     }
 
     local messages_ok, messages_json = pcall(vim.json.encode, messages_data)
@@ -389,12 +436,16 @@ function ChatHistory.load(session_id, callback)
             is_legacy_storage_data(parsed) and is_messages_storage_data(parsed)
         then
             --- @cast parsed agentic.ui.ChatHistory.LegacyStorageData
-            local instance = build_history(session_id, parsed, {
-                session_id = parsed.session_id or session_id,
+            local created_at, updated_at = normalize_session_times(parsed)
+            --- @type agentic.ui.ChatHistory.SessionMeta
+            local legacy_metadata = {
+                session_id = resolve_session_id(parsed, session_id),
                 acp_session_id = parsed.acp_session_id,
                 title = parsed.title or "",
-                timestamp = parsed.timestamp or 0,
-            })
+                created_at = created_at,
+                updated_at = updated_at,
+            }
+            local instance = build_history(session_id, parsed, legacy_metadata)
             vim.schedule(function()
                 callback(instance, nil)
             end)
@@ -452,7 +503,7 @@ function ChatHistory.delete_session(session_id, callback)
     end
 end
 
---- List all sessions for the current project, sorted by timestamp descending
+--- List all sessions for the current project, sorted by updated_at descending
 --- @param callback fun(sessions: agentic.ui.ChatHistory.SessionMeta[])
 function ChatHistory.list_sessions(callback)
     local folder = ChatHistory.get_sessions_folder()
@@ -471,12 +522,15 @@ function ChatHistory.list_sessions(callback)
             local file_path = vim.fs.joinpath(folder, filename)
             local parsed, err = read_json_file_sync(file_path)
             if err == nil and type(parsed) == "table" then
+                local created_at, updated_at = normalize_session_times(parsed)
+
                 --- @type agentic.ui.ChatHistory.SessionMeta
                 local session = {
-                    session_id = parsed.session_id or session_id,
+                    session_id = resolve_session_id(parsed, session_id),
                     acp_session_id = parsed.acp_session_id,
                     title = parsed.title or "",
-                    timestamp = parsed.timestamp or 0,
+                    created_at = created_at,
+                    updated_at = updated_at,
                 }
                 sessions_by_id[session.session_id] = session
             else
@@ -504,12 +558,15 @@ function ChatHistory.list_sessions(callback)
                 and is_messages_storage_data(parsed)
             then
                 --- @cast parsed agentic.ui.ChatHistory.LegacyStorageData
+                local created_at, updated_at = normalize_session_times(parsed)
+
                 --- @type agentic.ui.ChatHistory.SessionMeta
                 local session = {
-                    session_id = parsed.session_id or session_id,
+                    session_id = resolve_session_id(parsed, session_id),
                     acp_session_id = parsed.acp_session_id,
                     title = parsed.title or "",
-                    timestamp = parsed.timestamp or 0,
+                    created_at = created_at,
+                    updated_at = updated_at,
                 }
                 sessions_by_id[session.session_id] = session
             end
@@ -521,7 +578,7 @@ function ChatHistory.list_sessions(callback)
     end
 
     table.sort(sessions, function(a, b)
-        return a.timestamp > b.timestamp
+        return a.updated_at > b.updated_at
     end)
 
     callback(sessions)
@@ -592,12 +649,17 @@ function ChatHistory.migrate_all_legacy_sessions()
                                 local messages_json = vim.json.encode({
                                     messages = parsed.messages,
                                 })
+                                local created_at, updated_at =
+                                    normalize_session_times(parsed)
                                 local metadata_json = vim.json.encode({
-                                    session_id = parsed.session_id
-                                        or session_id,
+                                    session_id = resolve_session_id(
+                                        parsed,
+                                        session_id
+                                    ),
                                     acp_session_id = parsed.acp_session_id,
                                     title = parsed.title or "",
-                                    timestamp = parsed.timestamp or 0,
+                                    created_at = created_at,
+                                    updated_at = updated_at,
                                 })
 
                                 local messages_ok, messages_err =

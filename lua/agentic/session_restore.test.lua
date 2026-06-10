@@ -23,18 +23,21 @@ describe("SessionRestore", function()
         {
             session_id = "session-1",
             title = "First chat",
-            timestamp = 1704067200,
+            created_at = 1704067200,
+            updated_at = 1704067200,
         },
         {
             session_id = "session-2",
             title = "Second chat",
-            timestamp = 1704153600,
+            created_at = 1704153600,
+            updated_at = 1704153600,
         },
     }
 
     local mock_history = {
         session_id = "restored-session",
-        timestamp = 1704067200,
+        created_at = 1704067200,
+        updated_at = 1704067200,
         messages = { { type = "user", text = "Previous chat" } },
     }
 

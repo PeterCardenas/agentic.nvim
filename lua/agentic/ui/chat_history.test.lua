@@ -341,7 +341,8 @@ describe("ChatHistory", function()
             assert.equal("Test message", saved_first_message.text)
             assert.equal(original.session_id, parsed_metadata.session_id)
             assert.equal("Test message", parsed_metadata.title)
-            assert.is_not_nil(parsed_metadata.timestamp)
+            assert.is_not_nil(parsed_metadata.created_at)
+            assert.is_not_nil(parsed_metadata.updated_at)
 
             local loaded = nil
             local load_err = nil
@@ -360,11 +361,64 @@ describe("ChatHistory", function()
             assert.is_not_nil(loaded)
             --- @cast loaded agentic.ui.ChatHistory
             assert.equal(original.session_id, loaded.session_id)
-            assert.equal(original.timestamp, loaded.timestamp)
+            assert.equal(original.created_at, loaded.created_at)
+            assert.equal(original.updated_at, loaded.updated_at)
             assert.equal(1, #loaded.messages)
             local loaded_first_message = assert.not_nil(loaded.messages[1])
             assert.equal("Test message", loaded_first_message.text)
         end)
+
+        it(
+            "bumps updated_at but preserves created_at on subsequent saves",
+            function()
+                local original = ChatHistory:new()
+                original.session_id = "timestamp-bump-test"
+                original.created_at = 1704067200
+                original.updated_at = 1704067200
+                original:add_message({
+                    type = "user",
+                    text = "First save",
+                    timestamp = 1704067200,
+                    provider_name = "test-provider",
+                })
+
+                local first_save_done = false
+                original:save(function()
+                    first_save_done = true
+                end)
+                vim.wait(1000, function()
+                    return first_save_done
+                end)
+
+                local metadata_path =
+                    ChatHistory.get_metadata_file_path(original.session_id)
+                local first_saved_metadata =
+                    assert.not_nil(mock_files[metadata_path])
+                local first_parsed_metadata =
+                    vim.json.decode(first_saved_metadata)
+                local first_updated_at = first_parsed_metadata.updated_at
+
+                original:add_message({
+                    type = "user",
+                    text = "Second save",
+                    timestamp = 1704153600,
+                    provider_name = "test-provider",
+                })
+
+                local second_save_done = false
+                original:save(function()
+                    second_save_done = true
+                end)
+                vim.wait(1000, function()
+                    return second_save_done
+                end)
+
+                local saved_metadata = assert.not_nil(mock_files[metadata_path])
+                local parsed_metadata = vim.json.decode(saved_metadata)
+                assert.equal(1704067200, parsed_metadata.created_at)
+                assert.is_true(parsed_metadata.updated_at > first_updated_at)
+            end
+        )
 
         it("persists optional ACP session ID in metadata", function()
             local original = ChatHistory:new()
@@ -449,7 +503,8 @@ describe("ChatHistory", function()
             --- @cast loaded agentic.ui.ChatHistory
             assert.equal("legacy-session", loaded.session_id)
             assert.equal("Legacy title", loaded.title)
-            assert.equal(1704067200, loaded.timestamp)
+            assert.equal(1704067200, loaded.created_at)
+            assert.equal(1704067200, loaded.updated_at)
             assert.equal(1, #loaded.messages)
             local first_message = assert.not_nil(loaded.messages[1])
             assert.equal("Legacy message", first_message.text)
@@ -717,7 +772,8 @@ describe("ChatHistory", function()
             metadata_file:write(vim.json.encode({
                 session_id = "split-session",
                 title = "Metadata title",
-                timestamp = 1704067200,
+                created_at = 1704067200,
+                updated_at = 1704153600,
             }))
             metadata_file:close()
 
