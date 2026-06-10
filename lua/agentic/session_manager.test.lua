@@ -519,6 +519,52 @@ describe("agentic.SessionManager", function()
             assert.spy(session.todo_list.clear).was.called(1)
             assert.spy(session.new_session).was.called(1)
         end)
+
+        it(
+            "ignores stale on_ready callbacks from earlier provider switches",
+            function()
+                local AgentInstance = require("agentic.acp.agent_instance")
+                local ready_callbacks = {}
+                local provider_agents = {
+                    ["first-provider"] = {
+                        provider_config = { name = "First Provider" },
+                        cancel_session = spy.new(function() end),
+                    },
+                    ["second-provider"] = {
+                        provider_config = { name = "Second Provider" },
+                        cancel_session = spy.new(function() end),
+                    },
+                }
+                get_instance_stub = spy.stub(AgentInstance, "get_instance")
+                get_instance_stub:invokes(function(provider, on_ready)
+                    ready_callbacks[provider] = on_ready
+                    return provider_agents[provider]
+                end)
+
+                local new_session_spy = spy.new(function() end)
+                local session = {
+                    is_generating = false,
+                    session_id = nil,
+                    agent = {
+                        provider_config = { name = "Original Provider" },
+                    },
+                    permission_manager = { clear = function() end },
+                    todo_list = { clear = function() end },
+                    chat_history = { messages = {} },
+                    new_session = new_session_spy,
+                }
+
+                SessionManager.switch_provider(session, "first-provider")
+                SessionManager.switch_provider(session, "second-provider")
+                ready_callbacks["first-provider"](
+                    provider_agents["first-provider"]
+                )
+
+                assert.equal(provider_agents["second-provider"], session.agent)
+                assert.equal("second-provider", session.provider_name)
+                assert.spy(new_session_spy).was.called(0)
+            end
+        )
     end)
 
     describe("get_new_session_reuse_reason", function()
@@ -762,6 +808,67 @@ describe("agentic.SessionManager", function()
 
             schedule_stub:revert()
         end)
+
+        it("ignores stale session creation callbacks", function()
+            local scheduled_callbacks = {}
+            local schedule_stub = spy.stub(vim, "schedule")
+            schedule_stub:invokes(function(callback)
+                table.insert(scheduled_callbacks, callback)
+            end)
+
+            local create_session_callback
+            local create_session_spy = spy.new(
+                function(_self, _handlers, callback)
+                    create_session_callback = callback
+                end
+            )
+            local save_spy = spy.new(function() end)
+            local pending_prompt_spy = spy.new(function() end)
+
+            local session = {
+                _session_create_id = 0,
+                agent = {
+                    provider_config = {
+                        name = "Stale Provider",
+                    },
+                    create_session = create_session_spy,
+                },
+                status_animation = {
+                    start = spy.new(function() end),
+                    stop = spy.new(function() end),
+                },
+                _is_creating_session = false,
+                session_id = nil,
+                chat_history = {
+                    messages = {},
+                    save = save_spy,
+                },
+                config_options = {
+                    set_initial_mode = function() end,
+                },
+                message_writer = {
+                    write_message = function() end,
+                },
+                _cancel_session = spy.new(function() end),
+                _handle_input_submit = pending_prompt_spy,
+                _pending_input = "queued prompt",
+            }
+            setmetatable(session, { __index = SessionManager })
+
+            SessionManager.new_session(session)
+            session._session_create_id = session._session_create_id + 1
+            create_session_callback({
+                sessionId = "stale-session",
+            }, nil)
+
+            assert.is_nil(session.session_id)
+            assert.equal("queued prompt", session._pending_input)
+            assert.spy(save_spy).was.called(0)
+            assert.spy(pending_prompt_spy).was.called(0)
+            assert.equal(0, #scheduled_callbacks)
+
+            schedule_stub:revert()
+        end)
     end)
 
     describe("FileChangedShell autocommand", function()
@@ -950,6 +1057,29 @@ describe("agentic.SessionManager", function()
             SessionManager._handle_input_submit(session, "/new")
 
             assert.spy(new_session_spy).was.called(1)
+        end)
+
+        it("queues prompts while provider switch initializes", function()
+            local notify_stub = spy.stub(Logger, "notify")
+            local status_start_spy = spy.new(function() end)
+
+            local session = {
+                _is_switching_provider = true,
+                _pending_input = nil,
+                session_id = nil,
+                status_animation = {
+                    start = status_start_spy,
+                },
+                todo_list = { close_if_all_completed = function() end },
+            }
+
+            SessionManager._handle_input_submit(session, "hello")
+
+            assert.equal("hello", session._pending_input)
+            assert.spy(status_start_spy).was.called(1)
+            assert.spy(notify_stub).was.called(0)
+
+            notify_stub:revert()
         end)
     end)
 end)

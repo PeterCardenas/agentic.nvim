@@ -103,6 +103,9 @@ end
 --- @field _restoring boolean
 --- @field _replace_session boolean
 --- @field _is_creating_session boolean
+--- @field _is_switching_provider boolean
+--- @field _provider_switch_id integer
+--- @field _session_create_id integer
 
 --- @class agentic.SessionManager : agentic.SessionManagerData
 --- @field session_id? string
@@ -129,6 +132,9 @@ end
 --- @field _restoring boolean Flag to prevent auto-new_session during restore
 --- @field _replace_session boolean When true, preserve loaded session identity on next submit (continue mode)
 --- @field _is_creating_session boolean True once session startup is requested, until session/new resolves
+--- @field _is_switching_provider boolean True while a provider switch is waiting for the replacement session
+--- @field _provider_switch_id integer Monotonic token used to ignore stale provider switch callbacks
+--- @field _session_create_id integer Monotonic token used to ignore stale session creation callbacks
 local SessionManager = {}
 SessionManager.__index = SessionManager
 
@@ -171,6 +177,9 @@ function SessionManager:new(tab_page_id, provider_name)
         _restoring = false,
         _replace_session = false,
         _is_creating_session = false,
+        _is_switching_provider = false,
+        _provider_switch_id = 0,
+        _session_create_id = 0,
     }
     self = setmetatable(instance, self)
 
@@ -1459,6 +1468,8 @@ function SessionManager:new_session(opts)
 
     self.status_animation:start("busy")
     self._is_creating_session = true
+    self._session_create_id = (self._session_create_id or 0) + 1
+    local session_create_id = self._session_create_id
 
     --- @type agentic.acp.ClientHandlers
     local handlers = {
@@ -1530,12 +1541,17 @@ function SessionManager:new_session(opts)
     }
 
     self.agent:create_session(handlers, function(response, err)
+        if self._session_create_id ~= session_create_id then
+            return
+        end
+
         self.status_animation:stop()
         self._is_creating_session = false
 
         if err or not response then
             -- no log here, already logged in create_session
             self.session_id = nil
+            self._is_switching_provider = false
             return
         end
 
@@ -1624,6 +1640,7 @@ function SessionManager:_cancel_session()
     self.is_generating = false
     self.status_animation:stop()
     self._is_creating_session = false
+    self._session_create_id = (self._session_create_id or 0) + 1
 
     if self.session_id then
         -- only cancel and clear content if there was an session
@@ -1685,10 +1702,18 @@ function SessionManager:switch_provider(provider_name)
     local saved_history = self.chat_history
     local old_agent = self.agent
     local old_session_id = self.session_id
+    self._provider_switch_id = (self._provider_switch_id or 0) + 1
+    local provider_switch_id = self._provider_switch_id
+    self._is_switching_provider = true
+    self._session_create_id = (self._session_create_id or 0) + 1
 
     -- Get new agent instance BEFORE tearing down the current session
     local new_agent = AgentInstance.get_instance(provider_name, function(client)
         vim.schedule(function()
+            if self._provider_switch_id ~= provider_switch_id then
+                return
+            end
+
             self.agent = client
             self.provider_name = provider_name
 
@@ -1706,12 +1731,14 @@ function SessionManager:switch_provider(provider_name)
                     self.chat_history.timestamp = new_timestamp
                     self._history_to_send = saved_history.messages
                     self._is_first_message = true
+                    self._is_switching_provider = false
                 end,
             })
         end)
     end)
 
     if not new_agent then
+        self._is_switching_provider = false
         return
     end
 
