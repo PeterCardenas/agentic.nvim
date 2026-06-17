@@ -918,6 +918,41 @@ describe("agentic.ui.MessageWriter", function()
     end)
 
     describe("tool call body display truncation", function()
+        it("shows multiline execute arguments in the body", function()
+            writer:write_tool_call_block({
+                tool_call_id = "heredoc-exec",
+                status = "completed",
+                kind = "execute",
+                argument = table.concat({
+                    "python3 - <<'PY'",
+                    "from pathlib import Path",
+                    "Path('/tmp/example').write_text('value')",
+                    "PY",
+                }, "\n"),
+                body = { "done" },
+            })
+
+            local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+            local header
+            for _, line in ipairs(lines) do
+                if line:match("^ execute%(") then
+                    header = line
+                    break
+                end
+            end
+
+            header = assert.not_nil(header)
+            assert.equal(" execute(python3 - <<'PY') ", header)
+            assert.same({
+                "python3 - <<'PY'",
+                "from pathlib import Path",
+                "Path('/tmp/example').write_text('value')",
+                "PY",
+                "",
+                "done",
+            }, vim.list_slice(lines, 2, 7))
+        end)
+
         it("truncates large execute bodies in the chat buffer", function()
             Config.folding = {
                 tool_calls = {

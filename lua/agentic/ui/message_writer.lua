@@ -172,6 +172,48 @@ local function is_cmdline_active()
     return vim.fn.win_gettype() == "command"
 end
 
+--- @param lines string[]
+--- @return string line
+local function first_non_empty_trimmed_line(lines)
+    for _, line in ipairs(lines) do
+        local trimmed = vim.trim(line)
+        if trimmed ~= "" then
+            return trimmed
+        end
+    end
+
+    return ""
+end
+
+--- @param argument string
+--- @return string argument
+local function format_tool_call_header_argument(argument)
+    local lines = vim.split(argument, "\n", { plain = true })
+    if #lines <= 2 then
+        local escaped = argument:gsub("\n", "\\n")
+        return escaped
+    end
+
+    local first = first_non_empty_trimmed_line(lines)
+    if first == "" then
+        local escaped = argument:gsub("\n", "\\n")
+        return escaped
+    end
+
+    return first
+end
+
+--- @param argument string
+--- @return string[]|nil lines
+local function multiline_tool_call_argument_lines(argument)
+    local lines = vim.split(argument, "\n", { plain = true })
+    if #lines <= 1 then
+        return nil
+    end
+
+    return lines
+end
+
 --- @param bufnr integer
 --- @return agentic.ui.MessageWriter
 function MessageWriter:new(bufnr)
@@ -886,13 +928,10 @@ function MessageWriter:_prepare_block_lines(tool_call_block)
     local _ = self
     local kind = tool_call_block.kind
     local argument = tool_call_block.argument
-
-    -- Sanitize argument to prevent newlines in the header line
-    -- nvim_buf_set_lines doesn't accept array items with embedded newlines
-    argument = argument:gsub("\n", "\\n")
+    local display_argument = format_tool_call_header_argument(argument)
 
     local lines = {
-        string.format(" %s(%s) ", kind, argument),
+        string.format(" %s(%s) ", kind, display_argument),
     }
 
     --- @type agentic.ui.MessageWriter.HighlightRange[]
@@ -1005,6 +1044,14 @@ function MessageWriter:_prepare_block_lines(tool_call_block)
 
         table.insert(lines, "````")
     else
+        local argument_lines = multiline_tool_call_argument_lines(argument)
+        if kind == "execute" and argument_lines then
+            vim.list_extend(lines, argument_lines)
+            if tool_call_block.body and #tool_call_block.body > 0 then
+                table.insert(lines, "")
+            end
+        end
+
         if tool_call_block.body then
             local display_body = ToolCallBody.truncate_for_display(
                 tool_call_block.body,
@@ -1035,8 +1082,8 @@ function MessageWriter:display_permission_buttons(tool_call_id, options)
     local tracker = self.tool_call_blocks[tool_call_id]
 
     if tracker then
-        -- Sanitize argument to prevent newlines in the permission request, neovim throws error
-        local sanitized_argument = tracker.argument:gsub("\n", "\\n")
+        local display_argument =
+            format_tool_call_header_argument(tracker.argument)
 
         -- Get buffer width and limit the display line
         local winid = vim.fn.bufwinid(self.bufnr)
@@ -1047,7 +1094,7 @@ function MessageWriter:display_permission_buttons(tool_call_id, options)
         end
 
         local tool_line =
-            string.format(" %s(%s)", tracker.kind, sanitized_argument)
+            string.format(" %s(%s)", tracker.kind, display_argument)
 
         -- Truncate if longer than buffer width, leaving space for "...)"
         if #tool_line > buf_width then
