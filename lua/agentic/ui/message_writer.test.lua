@@ -918,6 +918,25 @@ describe("agentic.ui.MessageWriter", function()
     end)
 
     describe("tool call body display truncation", function()
+        it("wraps execute output in a console code fence", function()
+            writer:write_tool_call_block({
+                tool_call_id = "console-output",
+                status = "completed",
+                kind = "execute",
+                argument = "printf 'hello\\n'",
+                body = { "hello" },
+            })
+
+            local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+            assert.same({
+                " execute(printf 'hello\\n') ",
+                "````console",
+                "hello",
+                "````",
+                "",
+            }, vim.list_slice(lines, 1, 5))
+        end)
+
         it("shows multiline execute arguments in the body", function()
             writer:write_tool_call_block({
                 tool_call_id = "heredoc-exec",
@@ -949,8 +968,10 @@ describe("agentic.ui.MessageWriter", function()
                 "Path('/tmp/example').write_text('value')",
                 "PY",
                 "",
+                "````console",
                 "done",
-            }, vim.list_slice(lines, 2, 7))
+                "````",
+            }, vim.list_slice(lines, 2, 9))
         end)
 
         it("truncates large execute bodies in the chat buffer", function()
@@ -977,7 +998,14 @@ describe("agentic.ui.MessageWriter", function()
                 end
             end
             assert.is_true(found_footer)
-            assert.is_true(#lines < #body + 5)
+            assert.same({
+                " execute(ls) ",
+                "````console",
+                "line 1",
+                "line 2",
+                "... (2 more lines omitted from display; full output kept in session history)",
+                "````",
+            }, vim.list_slice(lines, 1, 6))
         end)
     end)
 

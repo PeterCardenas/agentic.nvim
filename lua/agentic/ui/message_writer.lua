@@ -1057,7 +1057,13 @@ function MessageWriter:_prepare_block_lines(tool_call_block)
                 tool_call_block.body,
                 ToolCallBody.get_max_display_lines()
             )
-            vim.list_extend(lines, display_body)
+            if kind == "execute" and #display_body > 0 then
+                table.insert(lines, "````console")
+                vim.list_extend(lines, display_body)
+                table.insert(lines, "````")
+            else
+                vim.list_extend(lines, display_body)
+            end
         end
     end
 
