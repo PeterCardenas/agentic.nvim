@@ -1085,4 +1085,83 @@ describe("agentic.SessionManager", function()
             notify_stub:revert()
         end)
     end)
+
+    describe("_handle_input_submit selected code chat formatting", function()
+        it(
+            "uses four-backtick fences for selected code in the chat message",
+            function()
+                --- @type agentic.acp.UserMessageChunk|nil
+                local written_message = nil
+
+                local session = {
+                    session_id = "test-session",
+                    tab_page_id = 1,
+                    _is_first_message = false,
+                    _history_to_send = nil,
+                    _replace_session = false,
+                    todo_list = {
+                        close_if_all_completed = function() end,
+                    },
+                    chat_history = {
+                        title = "",
+                        add_message = function() end,
+                    },
+                    code_selection = {
+                        is_empty = function()
+                            return false
+                        end,
+                        get_selections = function()
+                            return {
+                                {
+                                    file_type = "lua",
+                                    file_path = "lua/example.lua",
+                                    start_line = 3,
+                                    end_line = 4,
+                                    lines = {
+                                        "local value = 1",
+                                        "return value",
+                                    },
+                                },
+                            }
+                        end,
+                        clear = function() end,
+                    },
+                    file_list = {
+                        is_empty = function()
+                            return true
+                        end,
+                    },
+                    diagnostics_list = {
+                        is_empty = function()
+                            return true
+                        end,
+                    },
+                    agent = {
+                        provider_config = { name = "Test Provider" },
+                        send_prompt = function() end,
+                    },
+                    message_writer = {
+                        record_prompt_position = function() end,
+                        write_message = function(_, message)
+                            written_message = message
+                        end,
+                        enable_auto_scroll = function() end,
+                    },
+                    status_animation = {
+                        start = function() end,
+                    },
+                }
+
+                SessionManager._handle_input_submit(session, "review this")
+
+                assert.not_nil(written_message)
+                assert.equal(
+                    "````lua lua/example.lua#L3-L4\nlocal value = 1\nreturn value\n````",
+                    written_message.content.text:match(
+                        "````lua lua/example%.lua#L3%-L4\nlocal value = 1\nreturn value\n````"
+                    )
+                )
+            end
+        )
+    end)
 end)

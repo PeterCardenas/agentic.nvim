@@ -1299,7 +1299,7 @@ function SessionManager:_handle_input_submit(input_text)
                 table.insert(
                     message_lines,
                     string.format(
-                        "```%s %s#L%d-L%d\n%s\n```",
+                        "````%s %s#L%d-L%d\n%s\n````",
                         selection.file_type,
                         selection.file_path,
                         selection.start_line,
