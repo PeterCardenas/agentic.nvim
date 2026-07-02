@@ -11,8 +11,9 @@ describe("agentic.acp.AgentInstance", function()
     end)
 
     after_each(function()
-        local AgentInstance = package.loaded["agentic.acp.agent_instance"]
-        if AgentInstance and AgentInstance._instances then
+        local AgentInstance =
+            rawget(package.loaded, "agentic.acp.agent_instance")
+        if type(AgentInstance) == "table" and AgentInstance._instances then
             AgentInstance._instances = {}
         end
     end)
@@ -59,11 +60,12 @@ describe("agentic.acp.AgentInstance", function()
         local AgentInstance = require("agentic.acp.agent_instance")
         local ready_client
 
-        local client = AgentInstance.get_instance("pi-acp", function(new_client)
-            ready_client = new_client
-        end)
+        local client = assert.not_nil(
+            AgentInstance.get_instance("pi-acp", function(new_client)
+                ready_client = new_client
+            end)
+        )
 
-        assert.not_nil(client)
         assert.equal(client, ready_client)
         assert.equal("pi-acp", client.provider_config.command)
     end)
