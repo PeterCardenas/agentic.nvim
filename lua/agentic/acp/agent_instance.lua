@@ -70,6 +70,9 @@ function AgentInstance.get_instance(provider_name, on_ready)
         local MistralVibeACPAdapter =
             require("agentic.acp.adapters.mistral_vibe_acp_adapter")
         client = MistralVibeACPAdapter:new(config, ready_callback)
+    elseif provider_name == "pi-acp" then
+        local ACPClient = require("agentic.acp.acp_client")
+        client = ACPClient:new(config, ready_callback)
     else
         error("Unsupported ACP provider: " .. provider_name)
     end
