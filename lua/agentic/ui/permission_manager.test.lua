@@ -164,6 +164,33 @@ describe("agentic.ui.PermissionManager", function()
                 assert.is_nil(pm.current_request)
             end
         )
+
+        it("can be disabled for a single request", function()
+            pm = PermissionManager:new(writer, function()
+                --- @type agentic.acp.ACPProviderConfig
+                local provider_config = {
+                    name = "Auto",
+                    command = "auto",
+                    auto_approve = true,
+                }
+                return provider_config
+            end)
+
+            local callback_spy = spy.new(function() end)
+            schedule_stub:invokes(function(fn)
+                fn()
+            end)
+
+            pm:add_request(
+                make_request("tc-auto-disabled"),
+                callback_spy --[[@as function]],
+                { disable_auto_approve = true }
+            )
+
+            assert.spy(callback_spy).was.called(0)
+            assert.equal(0, #pm.queue)
+            assert.is_not_nil(pm.current_request)
+        end)
     end)
 
     describe("reanchor permission prompt", function()

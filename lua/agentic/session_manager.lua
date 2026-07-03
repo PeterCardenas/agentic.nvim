@@ -693,6 +693,8 @@ function SessionManager:_handle_cursor_create_plan(ctx)
 
     --- @type agentic.acp.PermissionOption[]
     local options = {}
+    --- @type table<string, "accepted"|"rejected">
+    local option_outcomes = {}
 
     local raw_opts = ctx.params.options
 
@@ -722,6 +724,11 @@ function SessionManager:_handle_cursor_create_plan(ctx)
                         kind = kind,
                     }
                     table.insert(options, opt)
+                    option_outcomes[opt.optionId] = (
+                        kind == "reject_once" or kind == "reject_always"
+                    )
+                            and "rejected"
+                        or "accepted"
                 end
             end
         end
@@ -744,6 +751,8 @@ function SessionManager:_handle_cursor_create_plan(ctx)
 
         table.insert(options, approve)
         table.insert(options, reject)
+        option_outcomes[approve.optionId] = "accepted"
+        option_outcomes[reject.optionId] = "rejected"
     end
 
     local tool_call_id = "cursor_ext_plan_" .. tostring(ctx.message_id or 0)
@@ -767,8 +776,7 @@ function SessionManager:_handle_cursor_create_plan(ctx)
         else
             ctx.respond({
                 outcome = {
-                    outcome = "selected",
-                    optionId = option_id,
+                    outcome = option_outcomes[option_id] or "accepted",
                 },
             })
         end
@@ -784,7 +792,11 @@ function SessionManager:_handle_cursor_create_plan(ctx)
     end
 
     self:_show_diff_in_buffer(request.toolCall.toolCallId)
-    self.permission_manager:add_request(request, wrapped_callback)
+    self.permission_manager:add_request(
+        request,
+        wrapped_callback,
+        { disable_auto_approve = true }
+    )
 end
 
 --- Handle tool call update: update UI, history, diff preview, permissions, and reload buffers

@@ -64,7 +64,8 @@ end
 --- Add a new permission request to the queue to be processed sequentially
 --- @param request agentic.acp.RequestPermission
 --- @param callback fun(option_id: string|nil)
-function PermissionManager:add_request(request, callback)
+--- @param opts? { disable_auto_approve?: boolean }
+function PermissionManager:add_request(request, callback, opts)
     if not request.toolCall or not request.toolCall.toolCallId then
         Logger.debug(
             "PermissionManager: Invalid request - missing toolCall.toolCallId"
@@ -75,7 +76,11 @@ function PermissionManager:add_request(request, callback)
     local toolCallId = request.toolCall.toolCallId
 
     local provider_config = self._get_provider_config()
-    if provider_config and provider_config.auto_approve then
+    if
+        provider_config
+        and provider_config.auto_approve
+        and not (opts and opts.disable_auto_approve)
+    then
         local allow_option = self._find_allow_option(request.options)
         if allow_option then
             Logger.debug(

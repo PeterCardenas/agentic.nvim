@@ -897,6 +897,87 @@ describe("agentic.SessionManager", function()
         end)
     end)
 
+    describe("_handle_cursor_create_plan", function()
+        --- @return table, table
+        local function make_session()
+            local captured = {}
+            local session = {
+                session_id = "session-1",
+                message_writer = {
+                    write_message = spy.new(function() end),
+                },
+                status_animation = {
+                    stop = spy.new(function() end),
+                    start = spy.new(function() end),
+                },
+                permission_manager = {
+                    current_request = nil,
+                    queue = {},
+                    add_request = spy.new(function(_, request, callback, opts)
+                        captured.request = request
+                        captured.callback = callback
+                        captured.opts = opts
+                    end),
+                },
+                _show_diff_in_buffer = spy.new(function() end),
+                _clear_diff_in_buffer = spy.new(function() end),
+            }
+            setmetatable(session, { __index = SessionManager })
+            return session, captured
+        end
+
+        --- @return agentic.acp.CursorExtensionContext, TestSpy
+        local function make_ctx()
+            local respond_spy = spy.new(function() end)
+            return {
+                message_id = 7,
+                method = "cursor/create_plan",
+                params = {
+                    plan = "Plan body",
+                    todos = {},
+                },
+                respond = respond_spy,
+            },
+                respond_spy
+        end
+
+        it("queues plan options without provider auto approval", function()
+            local session, captured = make_session()
+            local ctx = make_ctx()
+
+            SessionManager._handle_cursor_create_plan(session, ctx)
+
+            assert.spy(session.permission_manager.add_request).was.called(1)
+            assert.equal(
+                "cursor_ext_plan_7",
+                captured.request.toolCall.toolCallId
+            )
+            assert.same({ disable_auto_approve = true }, captured.opts)
+        end)
+
+        it("returns accepted when the approve option is selected", function()
+            local session, captured = make_session()
+            local ctx, respond_spy = make_ctx()
+
+            SessionManager._handle_cursor_create_plan(session, ctx)
+            captured.callback("approve")
+
+            assert.spy(respond_spy).was.called(1)
+            assert.equal("accepted", respond_spy.calls[1][1].outcome.outcome)
+        end)
+
+        it("returns rejected when the reject option is selected", function()
+            local session, captured = make_session()
+            local ctx, respond_spy = make_ctx()
+
+            SessionManager._handle_cursor_create_plan(session, ctx)
+            captured.callback("reject")
+
+            assert.spy(respond_spy).was.called(1)
+            assert.equal("rejected", respond_spy.calls[1][1].outcome.outcome)
+        end)
+    end)
+
     describe("on_tool_call_update: buffer reload", function()
         --- @type TestStub
         local checktime_stub
