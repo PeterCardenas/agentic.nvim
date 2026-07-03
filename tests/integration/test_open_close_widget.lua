@@ -199,4 +199,100 @@ end)()
             child.flush()
         end)
     end)
+
+    it(
+        "restores a hidden terminal buffer when toggling from only widget windows",
+        function()
+            local result = child.lua([[
+            vim.cmd("terminal sh -c 'printf preserved; sleep 10'")
+            vim.cmd("sleep 300m")
+            local terminal_bufnr = vim.api.nvim_get_current_buf()
+            local terminal_job_id = vim.b[terminal_bufnr].terminal_job_id
+
+            -- Some terminal integrations set filetype=terminal in addition to
+            -- buftype=terminal. The fallback should still preserve the buffer.
+            vim.bo[terminal_bufnr].filetype = "terminal"
+            vim.bo[terminal_bufnr].bufhidden = "wipe"
+
+            vim.cmd("enew")
+            require("agentic").toggle({ auto_add_to_context = false, focus_prompt = false })
+
+            vim.cmd("buffer " .. terminal_bufnr)
+            vim.cmd("close")
+            require("agentic").toggle({ auto_add_to_context = false, focus_prompt = false })
+
+            local lines = table.concat(vim.api.nvim_buf_get_lines(terminal_bufnr, 0, -1, false), "\n")
+            local current_bufnr = vim.api.nvim_get_current_buf()
+            local current_buftype = vim.bo[current_bufnr].buftype
+            local window_count = #vim.api.nvim_tabpage_list_wins(0)
+            local terminal_valid = vim.api.nvim_buf_is_valid(terminal_bufnr)
+
+            if terminal_job_id then
+                vim.fn.jobstop(terminal_job_id)
+            end
+
+            return {
+                terminal_bufnr = terminal_bufnr,
+                current_bufnr = current_bufnr,
+                current_buftype = current_buftype,
+                terminal_valid = terminal_valid,
+                lines = lines,
+                window_count = window_count,
+            }
+        ]])
+
+            assert.is_true(result.terminal_valid)
+            assert.equal(result.terminal_bufnr, result.current_bufnr)
+            assert.equal("terminal", result.current_buftype)
+            assert.is_true(result.lines:find("preserved", 1, true) ~= nil)
+            assert.equal(1, result.window_count)
+        end
+    )
+
+    it(
+        "creates a scratch fallback instead of using an unrelated alternate terminal",
+        function()
+            local result = child.lua([[
+            local ChatWidget = require("agentic.ui.chat_widget")
+            local widget = ChatWidget:new(vim.api.nvim_get_current_tabpage(), function() end)
+
+            vim.cmd("terminal sh -c 'printf unrelated; sleep 10'")
+            vim.cmd("sleep 300m")
+            local terminal_bufnr = vim.api.nvim_get_current_buf()
+            local terminal_job_id = vim.b[terminal_bufnr].terminal_job_id
+            vim.bo[terminal_bufnr].filetype = "terminal"
+
+            vim.cmd("enew")
+            local alt_bufnr = vim.fn.bufnr("#")
+            local fallback_winid = widget:open_left_window()
+            local fallback_bufnr = fallback_winid
+                and vim.api.nvim_win_get_buf(fallback_winid)
+                or nil
+            local fallback_buftype = fallback_bufnr and vim.bo[fallback_bufnr].buftype
+                or nil
+            local terminal_win_count = #vim.fn.win_findbuf(terminal_bufnr)
+
+            widget:destroy()
+            if terminal_job_id then
+                vim.fn.jobstop(terminal_job_id)
+            end
+            if vim.api.nvim_buf_is_valid(terminal_bufnr) then
+                pcall(vim.api.nvim_buf_delete, terminal_bufnr, { force = true })
+            end
+
+            return {
+                terminal_bufnr = terminal_bufnr,
+                alt_bufnr = alt_bufnr,
+                fallback_bufnr = fallback_bufnr,
+                fallback_buftype = fallback_buftype,
+                terminal_win_count = terminal_win_count,
+            }
+        ]])
+
+            assert.equal(result.terminal_bufnr, result.alt_bufnr)
+            assert.is_not.equal(result.terminal_bufnr, result.fallback_bufnr)
+            assert.equal("nofile", result.fallback_buftype)
+            assert.equal(0, result.terminal_win_count)
+        end
+    )
 end)

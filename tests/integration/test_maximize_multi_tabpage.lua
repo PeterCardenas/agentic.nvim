@@ -594,6 +594,63 @@ describe("Maximize toggle with multiple tabpages", function()
     )
 
     it(
+        "round-trips a wipe-on-close terminal window through maximize",
+        function()
+            local result = child.lua([[
+            vim.cmd("terminal sh -c 'printf preserved; sleep 10'")
+            vim.cmd("sleep 300m")
+            local terminal_bufnr = vim.api.nvim_get_current_buf()
+            local terminal_job_id = vim.b[terminal_bufnr].terminal_job_id
+            vim.bo[terminal_bufnr].filetype = "terminal"
+            vim.bo[terminal_bufnr].bufhidden = "wipe"
+
+            require("agentic").toggle({ auto_add_to_context = false, focus_prompt = false })
+            local tab_id = vim.api.nvim_get_current_tabpage()
+            local session = require("agentic.session_registry").sessions[tab_id]
+
+            session.widget:_toggle_full_width()
+            local maximized = session.widget._maximize_state ~= nil
+            local valid_while_maximized = vim.api.nvim_buf_is_valid(terminal_bufnr)
+            local visible_while_maximized = #vim.fn.win_findbuf(terminal_bufnr)
+
+            session.widget:_toggle_full_width()
+            local restored_win_count = #vim.fn.win_findbuf(terminal_bufnr)
+            local current_bufnr = vim.api.nvim_get_current_buf()
+            local lines = table.concat(vim.api.nvim_buf_get_lines(terminal_bufnr, 0, -1, false), "\n")
+
+            require("agentic").toggle({ auto_add_to_context = false, focus_prompt = false })
+            local final_win_count = #vim.fn.win_findbuf(terminal_bufnr)
+            local final_bufhidden = vim.bo[terminal_bufnr].bufhidden
+
+            if terminal_job_id then
+                vim.fn.jobstop(terminal_job_id)
+            end
+
+            return {
+                maximized = maximized,
+                valid_while_maximized = valid_while_maximized,
+                visible_while_maximized = visible_while_maximized,
+                restored_win_count = restored_win_count,
+                final_win_count = final_win_count,
+                final_bufhidden = final_bufhidden,
+                terminal_bufnr = terminal_bufnr,
+                current_bufnr = current_bufnr,
+                lines = lines,
+            }
+        ]])
+
+            assert.is_true(result.maximized)
+            assert.is_true(result.valid_while_maximized)
+            assert.equal(0, result.visible_while_maximized)
+            assert.equal(1, result.restored_win_count)
+            assert.equal(1, result.final_win_count)
+            assert.equal("wipe", result.final_bufhidden)
+            assert.equal(result.terminal_bufnr, result.current_bufnr)
+            assert.is_true(result.lines:find("preserved", 1, true) ~= nil)
+        end
+    )
+
+    it(
         "restores bufhidden=wipe and bufhidden=delete after maximize + hide",
         function()
             local buffers = create_bufhidden_editor_layout()

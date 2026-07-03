@@ -94,6 +94,8 @@ local CYCLE_ORDER = { "chat", "todos", "code", "files", "diagnostics", "input" }
 --- @field _on_after_show? fun(chat_winid: integer|nil)
 --- @field _is_hiding? boolean
 --- @field _maximize_state? agentic.ui.ChatWidget.MaximizeState
+--- @field _fallback_terminal_bufnr? integer
+--- @field _fallback_terminal_bufhidden? string
 --- @field _hide_if_primary_window_closed fun(self: agentic.ui.ChatWidget)
 --- @field _schedule_hide_if_primary_window_closed fun(self: agentic.ui.ChatWidget)
 --- @field _is_owner_tab fun(self: agentic.ui.ChatWidget): boolean
@@ -116,6 +118,8 @@ function ChatWidget:new(tab_page_id, on_submit_input)
     self.win_nrs = {}
     self.current_position = Config.windows.position
     self._maximize_state = nil
+    self._fallback_terminal_bufnr = nil
+    self._fallback_terminal_bufhidden = nil
 
     self.on_submit_input = on_submit_input
     self.tab_page_id = tab_page_id
@@ -154,6 +158,10 @@ end
 --- @param opts agentic.ui.ChatWidget.ShowOpts|agentic.ui.ChatWidget.AddToContextOpts|nil
 function ChatWidget:show(opts)
     opts = opts or {}
+
+    if not self:is_open() then
+        self:_capture_fallback_terminal_buffer()
+    end
 
     WidgetLayout.open({
         tab_page_id = self.tab_page_id,
@@ -228,6 +236,7 @@ function ChatWidget:hide()
             restore_layout = false,
             keep_widget = false,
         })
+        self:_clear_fallback_terminal_buffer()
         return
     end
 
@@ -271,6 +280,7 @@ function ChatWidget:hide()
         WidgetLayout.close(self.win_nrs)
     end, debug.traceback)
 
+    self:_clear_fallback_terminal_buffer()
     self._is_hiding = false
 
     if not ok then
@@ -1119,10 +1129,72 @@ function ChatWidget:_is_widget_buffer(bufnr)
     return false
 end
 
+function ChatWidget:_clear_fallback_terminal_buffer()
+    local terminal_bufnr = self._fallback_terminal_bufnr
+    local original_bufhidden = self._fallback_terminal_bufhidden
+
+    self._fallback_terminal_bufnr = nil
+    self._fallback_terminal_bufhidden = nil
+
+    if
+        terminal_bufnr
+        and original_bufhidden
+        and vim.api.nvim_buf_is_valid(terminal_bufnr)
+    then
+        vim.bo[terminal_bufnr].bufhidden = original_bufhidden
+    end
+end
+
+--- @param bufnr integer
+function ChatWidget:_set_fallback_terminal_buffer(bufnr)
+    self._fallback_terminal_bufnr = bufnr
+
+    local bufhidden = vim.bo[bufnr].bufhidden
+    if bufhidden == "wipe" or bufhidden == "delete" then
+        self._fallback_terminal_bufhidden = bufhidden
+        vim.bo[bufnr].bufhidden = "hide"
+    end
+end
+
+function ChatWidget:_capture_fallback_terminal_buffer()
+    self:_clear_fallback_terminal_buffer()
+
+    local current_bufnr = vim.api.nvim_get_current_buf()
+    if
+        not self:_is_widget_buffer(current_bufnr)
+        and vim.bo[current_bufnr].buftype == "terminal"
+    then
+        self:_set_fallback_terminal_buffer(current_bufnr)
+        return
+    end
+
+    local alt_bufnr = vim.fn.bufnr("#")
+    if
+        alt_bufnr ~= -1
+        and vim.api.nvim_buf_is_valid(alt_bufnr)
+        and not self:_is_widget_buffer(alt_bufnr)
+        and vim.bo[alt_bufnr].buftype == "terminal"
+    then
+        self:_set_fallback_terminal_buffer(alt_bufnr)
+    end
+end
+
 --- Opens a new window on the left side with full height
 --- @param bufnr number|nil The buffer to display in the new window
 --- @return number|nil winid The newly created window ID or nil on failure
 function ChatWidget:open_left_window(bufnr)
+    if bufnr == nil then
+        local terminal_bufnr = self._fallback_terminal_bufnr
+        if
+            terminal_bufnr
+            and vim.api.nvim_buf_is_valid(terminal_bufnr)
+            and vim.api.nvim_buf_is_loaded(terminal_bufnr)
+            and #vim.fn.win_findbuf(terminal_bufnr) == 0
+        then
+            bufnr = terminal_bufnr
+        end
+    end
+
     if bufnr == nil then
         -- Try alternate buffer first, but skip if it's a widget buffer or excluded filetype.
         -- Also skip cross-tabpage widget buffers via filetype check (since

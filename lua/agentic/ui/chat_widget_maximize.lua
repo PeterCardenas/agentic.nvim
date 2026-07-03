@@ -167,8 +167,7 @@ function M.attach(ChatWidget, opts)
             return false
         end
 
-        local buftype = vim.bo[bufnr].buftype
-        if buftype == "terminal" or filetype == "help" or filetype == "man" then
+        if filetype == "help" or filetype == "man" then
             return false
         end
 
