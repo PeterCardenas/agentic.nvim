@@ -73,30 +73,56 @@ local function run_in_fast_event(fn)
 end
 
 describe("agentic.acp.adapters.CursorACPAdapter", function()
-    it("separates a text stream resumed after a usage update", function()
+    it("preserves markdown across interleaved usage updates", function()
         local adapter = new_adapter()
         local handlers = new_handlers()
         adapter.subscribers["session-1"] = handlers
 
-        local resumed_update = {
-            sessionUpdate = "agent_message_chunk",
-            content = { type = "text", text = "Key references:" },
-        }
-        for _, update in ipairs({
-            {
-                sessionUpdate = "agent_message_chunk",
-                content = { type = "text", text = "variable." },
-            },
-            { sessionUpdate = "usage_update" },
-            resumed_update,
+        local rendered_chunks = {}
+        for _, text in ipairs({
+            "\n\nHere is the Lua code.",
+            "\n",
+            "\n",
+            "```",
+            "lua",
+            "\n",
+            "local x = 1",
+            "\n",
+            "print(x)",
+            "\n",
+            "```",
+            "\n",
+            "\n",
+            "It prints the value of x.",
         }) do
+            local chunk = {
+                sessionUpdate = "agent_message_chunk",
+                content = { type = "text", text = text },
+            }
             adapter:__handle_session_update({
                 sessionId = "session-1",
-                update = update,
+                update = chunk,
+            })
+            table.insert(rendered_chunks, chunk.content.text)
+            adapter:__handle_session_update({
+                sessionId = "session-1",
+                update = { sessionUpdate = "usage_update" },
             })
         end
 
-        assert.equal("\n\nKey references:", resumed_update.content.text)
+        assert.equal(
+            table.concat({
+                "Here is the Lua code.",
+                "",
+                "```lua",
+                "local x = 1",
+                "print(x)",
+                "```",
+                "",
+                "It prints the value of x.",
+            }, "\n"),
+            table.concat(rendered_chunks)
+        )
     end)
 
     it("formats read arguments with line ranges", function()

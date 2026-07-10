@@ -457,20 +457,13 @@ function CursorACPAdapter:__handle_session_update(params)
         local content = update.content
         local by_session = self._chunk_stream_started[session_id] or {}
         local stream_started = by_session[update_type] == true
-        local stream_seen = by_session[update_type] ~= nil
         if
             content
             and content.type == "text"
             and type(content.text) == "string"
         then
             if not stream_started then
-                if stream_seen then
-                    if not vim.startswith(content.text, "\n") then
-                        content.text = "\n\n" .. content.text
-                    end
-                else
-                    content.text = content.text:gsub("^\n+", "")
-                end
+                content.text = content.text:gsub("^\n+", "")
                 if content.text == "" then
                     by_session[update_type] = true
                     self._chunk_stream_started[session_id] = by_session
@@ -480,12 +473,14 @@ function CursorACPAdapter:__handle_session_update(params)
         end
         by_session[update_type] = true
         self._chunk_stream_started[session_id] = by_session
-    elseif session_id and rawget(self._chunk_stream_started, session_id) then
-        -- Preserve whether each chunk type has streamed before so a resumed
-        -- stream can be separated from the preceding text.
-        for chunk_type, _ in pairs(self._chunk_stream_started[session_id]) do
-            self._chunk_stream_started[session_id][chunk_type] = false
-        end
+    elseif
+        update_type ~= "usage_update"
+        and session_id
+        and rawget(self._chunk_stream_started, session_id)
+    then
+        -- Telemetry can be interleaved between individual text chunks. Only
+        -- actual content updates end the current stream.
+        self._chunk_stream_started[session_id] = nil
     end
 
     ACPClient.__handle_session_update(self, params)
