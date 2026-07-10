@@ -73,6 +73,32 @@ local function run_in_fast_event(fn)
 end
 
 describe("agentic.acp.adapters.CursorACPAdapter", function()
+    it("separates a text stream resumed after a usage update", function()
+        local adapter = new_adapter()
+        local handlers = new_handlers()
+        adapter.subscribers["session-1"] = handlers
+
+        local resumed_update = {
+            sessionUpdate = "agent_message_chunk",
+            content = { type = "text", text = "Key references:" },
+        }
+        for _, update in ipairs({
+            {
+                sessionUpdate = "agent_message_chunk",
+                content = { type = "text", text = "variable." },
+            },
+            { sessionUpdate = "usage_update" },
+            resumed_update,
+        }) do
+            adapter:__handle_session_update({
+                sessionId = "session-1",
+                update = update,
+            })
+        end
+
+        assert.equal("\n\nKey references:", resumed_update.content.text)
+    end)
+
     it("formats read arguments with line ranges", function()
         local adapter = new_adapter()
         local argument
