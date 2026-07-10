@@ -159,6 +159,7 @@ end
 --- @field _pending_newline? boolean
 --- @field _chat_folds? agentic.ui.ChatFolds
 --- @field _cmdline_leave_scroll_pending? boolean
+--- @field _scroll_input_ns integer
 local MessageWriter = {}
 MessageWriter.__index = MessageWriter
 
@@ -170,53 +171,6 @@ local function is_cmdline_active()
     end
 
     return vim.fn.win_gettype() == "command"
-end
-
---- @class agentic.ui.MessageWriter.ScrollState
---- @field cursor integer[]
---- @field topline integer
---- @field leftcol integer
---- @field skipcol integer
-
---- @param winid integer
---- @return agentic.ui.MessageWriter.ScrollState|nil state
-local function capture_scroll_state(winid)
-    if not vim.api.nvim_win_is_valid(winid) then
-        return nil
-    end
-
-    local view = vim.api.nvim_win_call(winid, function()
-        return vim.fn.winsaveview()
-    end)
-
-    --- @type agentic.ui.MessageWriter.ScrollState
-    local state = {
-        cursor = vim.api.nvim_win_get_cursor(winid),
-        topline = math.floor(view.topline or 0),
-        leftcol = math.floor(view.leftcol or 0),
-        skipcol = math.floor(view.skipcol or 0),
-    }
-    return state
-end
-
---- @param winid integer
---- @param state agentic.ui.MessageWriter.ScrollState|nil
---- @return boolean is_unchanged
-local function scroll_state_is_unchanged(winid, state)
-    if not state then
-        return true
-    end
-
-    local current = capture_scroll_state(winid)
-    if not current then
-        return false
-    end
-
-    return current.cursor[1] == state.cursor[1]
-        and current.cursor[2] == state.cursor[2]
-        and current.topline == state.topline
-        and current.leftcol == state.leftcol
-        and current.skipcol == state.skipcol
 end
 
 --- @param lines string[]
@@ -275,7 +229,29 @@ function MessageWriter:new(bufnr)
         _should_auto_scroll = nil,
         _scroll_scheduled = false,
         _cmdline_leave_scroll_pending = false,
+        _scroll_input_ns = vim.api.nvim_create_namespace(
+            "agentic_auto_scroll_input_" .. bufnr
+        ),
     }, self)
+
+    vim.on_key(function(_, typed)
+        local current_win = vim.api.nvim_get_current_win()
+        if
+            typed ~= ""
+            and vim.api.nvim_win_is_valid(current_win)
+            and vim.api.nvim_win_get_buf(current_win) == bufnr
+        then
+            instance._should_auto_scroll = nil
+        end
+    end, instance._scroll_input_ns)
+
+    vim.api.nvim_create_autocmd("BufWipeout", {
+        buffer = bufnr,
+        once = true,
+        callback = function()
+            vim.on_key(nil, instance._scroll_input_ns)
+        end,
+    })
 
     return instance
 end
@@ -631,6 +607,10 @@ function MessageWriter:_check_auto_scroll(bufnr)
         return false
     end
 
+    if BufHelpers.is_window_bottom_visible(winid) then
+        return true
+    end
+
     local cursor_line = vim.api.nvim_win_get_cursor(winid)[1]
     local total_lines = vim.api.nvim_buf_line_count(bufnr)
     local distance_from_bottom = total_lines - cursor_line
@@ -715,15 +695,6 @@ function MessageWriter:_auto_scroll(bufnr)
     end
     self._scroll_scheduled = true
 
-    --- @type agentic.ui.MessageWriter.ScrollState|nil
-    local scheduled_scroll_state = nil
-    if self._should_auto_scroll then
-        local wins = vim.fn.win_findbuf(bufnr)
-        if #wins > 0 then
-            scheduled_scroll_state = capture_scroll_state(wins[1])
-        end
-    end
-
     vim.schedule(function()
         self._scroll_scheduled = false
 
@@ -731,20 +702,12 @@ function MessageWriter:_auto_scroll(bufnr)
             if self._should_auto_scroll then
                 local wins = vim.fn.win_findbuf(bufnr)
                 if #wins > 0 then
-                    if
-                        not BufHelpers.is_window_bottom_visible(wins[1])
-                        and scroll_state_is_unchanged(
-                            wins[1],
-                            scheduled_scroll_state
-                        )
-                    then
+                    if not BufHelpers.is_window_bottom_visible(wins[1]) then
                         BufHelpers.scroll_window_to_bottom(wins[1])
                     end
                 end
             end
         end
-
-        self._should_auto_scroll = nil
     end)
 end
 

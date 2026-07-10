@@ -96,6 +96,11 @@ describe("agentic.ui.MessageWriter", function()
             assert.is_false(writer:_check_auto_scroll(bufnr))
         end)
 
+        it("returns true when the buffer bottom is visible", function()
+            setup_buffer(20, 1)
+            assert.is_true(writer:_check_auto_scroll(bufnr))
+        end)
+
         it("returns false when threshold is disabled (zero or nil)", function()
             setup_buffer(1, 1)
 
@@ -166,7 +171,10 @@ describe("agentic.ui.MessageWriter", function()
                     new_lines[i] = "streamed line " .. i
                 end
                 vim.api.nvim_buf_set_lines(bufnr, -1, -1, false, new_lines)
-                vim.api.nvim_win_set_cursor(winid, { 10, 0 })
+                vim.api.nvim_input("10G")
+                assert.is_true(vim.wait(100, function()
+                    return vim.api.nvim_win_get_cursor(winid)[1] == 10
+                end))
 
                 scheduled[1]()
 
@@ -175,6 +183,100 @@ describe("agentic.ui.MessageWriter", function()
                 schedule_stub:revert()
             end
         )
+
+        it("keeps auto-scrolling after the chat window is resized", function()
+            local scheduled = {}
+            local schedule_stub = spy.stub(vim, "schedule")
+            schedule_stub:invokes(function(fn)
+                table.insert(scheduled, fn)
+            end)
+
+            vim.api.nvim_win_set_height(winid, 10)
+            setup_buffer(100, 100)
+            require("agentic.utils.buf_helpers").scroll_window_to_bottom(winid)
+            writer:_auto_scroll(bufnr)
+
+            local new_lines = {}
+            for i = 1, 30 do
+                new_lines[i] = "streamed line " .. i
+            end
+            vim.api.nvim_buf_set_lines(bufnr, -1, -1, false, new_lines)
+            vim.api.nvim_win_set_height(winid, 20)
+            vim.api.nvim_win_call(winid, function()
+                vim.fn.winrestview({ topline = 90 })
+            end)
+
+            scheduled[1]()
+
+            assert.equal(130, vim.api.nvim_win_get_cursor(winid)[1])
+
+            schedule_stub:revert()
+        end)
+
+        it(
+            "keeps auto-scrolling after an automatic viewport relayout",
+            function()
+                local scheduled = {}
+                local schedule_stub = spy.stub(vim, "schedule")
+                schedule_stub:invokes(function(fn)
+                    table.insert(scheduled, fn)
+                end)
+
+                setup_buffer(100, 100)
+                require("agentic.utils.buf_helpers").scroll_window_to_bottom(
+                    winid
+                )
+                writer:_auto_scroll(bufnr)
+
+                local new_lines = {}
+                for i = 1, 30 do
+                    new_lines[i] = "streamed line " .. i
+                end
+                vim.api.nvim_buf_set_lines(bufnr, -1, -1, false, new_lines)
+                vim.api.nvim_win_call(winid, function()
+                    vim.fn.winrestview({ lnum = 95, topline = 90 })
+                end)
+
+                scheduled[1]()
+
+                assert.equal(130, vim.api.nvim_win_get_cursor(winid)[1])
+
+                schedule_stub:revert()
+            end
+        )
+
+        it("does not auto-scroll after resize when the user moved", function()
+            local scheduled = {}
+            local schedule_stub = spy.stub(vim, "schedule")
+            schedule_stub:invokes(function(fn)
+                table.insert(scheduled, fn)
+            end)
+
+            vim.api.nvim_win_set_height(winid, 10)
+            setup_buffer(100, 100)
+            require("agentic.utils.buf_helpers").scroll_window_to_bottom(winid)
+            writer:_auto_scroll(bufnr)
+
+            local new_lines = {}
+            for i = 1, 30 do
+                new_lines[i] = "streamed line " .. i
+            end
+            vim.api.nvim_buf_set_lines(bufnr, -1, -1, false, new_lines)
+            vim.api.nvim_win_set_height(winid, 20)
+            vim.api.nvim_win_call(winid, function()
+                vim.fn.winrestview({ topline = 45 })
+            end)
+            vim.api.nvim_input("50G")
+            assert.is_true(vim.wait(100, function()
+                return vim.api.nvim_win_get_cursor(winid)[1] == 50
+            end))
+
+            scheduled[1]()
+
+            assert.equal(50, vim.api.nvim_win_get_cursor(winid)[1])
+
+            schedule_stub:revert()
+        end)
 
         it("defers scrolling while command line is active", function()
             local current_mode = "c"
@@ -244,7 +346,7 @@ describe("agentic.ui.MessageWriter", function()
             callback()
 
             assert.is_false(writer._cmdline_leave_scroll_pending)
-            assert.is_nil(writer._should_auto_scroll)
+            assert.is_true(writer._should_auto_scroll)
             assert.equal(50, vim.api.nvim_win_get_cursor(winid)[1])
 
             schedule_stub:revert()
@@ -277,7 +379,7 @@ describe("agentic.ui.MessageWriter", function()
         )
 
         it(
-            "scheduled callback resets field and moves cursor to last line",
+            "scheduled callback keeps following and moves to the last line",
             function()
                 local schedule_stub = spy.stub(vim, "schedule")
                 schedule_stub:invokes(function(fn)
@@ -288,7 +390,7 @@ describe("agentic.ui.MessageWriter", function()
                 writer._should_auto_scroll = true
                 writer:_auto_scroll(bufnr)
 
-                assert.is_nil(writer._should_auto_scroll)
+                assert.is_true(writer._should_auto_scroll)
                 assert.equal(50, vim.api.nvim_win_get_cursor(winid)[1])
 
                 schedule_stub:revert()
@@ -361,31 +463,31 @@ describe("agentic.ui.MessageWriter", function()
             end
         )
 
-        it(
-            "after reset, re-evaluates and returns false when user scrolled up",
-            function()
-                local schedule_stub = spy.stub(vim, "schedule")
-                schedule_stub:invokes(function(fn)
-                    fn()
-                end)
+        it("re-evaluates and stops after the user scrolls up", function()
+            local schedule_stub = spy.stub(vim, "schedule")
+            schedule_stub:invokes(function(fn)
+                fn()
+            end)
 
-                setup_buffer(50, 50)
-                writer:_auto_scroll(bufnr)
-                assert.is_nil(writer._should_auto_scroll)
-                assert.is_false(writer._scroll_scheduled)
+            setup_buffer(50, 50)
+            writer:_auto_scroll(bufnr)
+            assert.is_true(writer._should_auto_scroll)
+            assert.is_false(writer._scroll_scheduled)
 
-                schedule_stub:revert()
+            schedule_stub:revert()
 
-                schedule_stub = spy.stub(vim, "schedule")
+            schedule_stub = spy.stub(vim, "schedule")
 
-                vim.api.nvim_win_set_cursor(winid, { 1, 0 })
+            vim.api.nvim_input("1G")
+            assert.is_true(vim.wait(100, function()
+                return vim.api.nvim_win_get_cursor(winid)[1] == 1
+            end))
 
-                writer:_auto_scroll(bufnr)
-                assert.is_false(writer._should_auto_scroll)
+            writer:_auto_scroll(bufnr)
+            assert.is_false(writer._should_auto_scroll)
 
-                schedule_stub:revert()
-            end
-        )
+            schedule_stub:revert()
+        end)
     end)
 
     describe("auto-scroll with public write methods", function()
