@@ -172,6 +172,53 @@ local function is_cmdline_active()
     return vim.fn.win_gettype() == "command"
 end
 
+--- @class agentic.ui.MessageWriter.ScrollState
+--- @field cursor integer[]
+--- @field topline integer
+--- @field leftcol integer
+--- @field skipcol integer
+
+--- @param winid integer
+--- @return agentic.ui.MessageWriter.ScrollState|nil state
+local function capture_scroll_state(winid)
+    if not vim.api.nvim_win_is_valid(winid) then
+        return nil
+    end
+
+    local view = vim.api.nvim_win_call(winid, function()
+        return vim.fn.winsaveview()
+    end)
+
+    --- @type agentic.ui.MessageWriter.ScrollState
+    local state = {
+        cursor = vim.api.nvim_win_get_cursor(winid),
+        topline = math.floor(view.topline or 0),
+        leftcol = math.floor(view.leftcol or 0),
+        skipcol = math.floor(view.skipcol or 0),
+    }
+    return state
+end
+
+--- @param winid integer
+--- @param state agentic.ui.MessageWriter.ScrollState|nil
+--- @return boolean is_unchanged
+local function scroll_state_is_unchanged(winid, state)
+    if not state then
+        return true
+    end
+
+    local current = capture_scroll_state(winid)
+    if not current then
+        return false
+    end
+
+    return current.cursor[1] == state.cursor[1]
+        and current.cursor[2] == state.cursor[2]
+        and current.topline == state.topline
+        and current.leftcol == state.leftcol
+        and current.skipcol == state.skipcol
+end
+
 --- @param lines string[]
 --- @return string line
 local function first_non_empty_trimmed_line(lines)
@@ -668,6 +715,15 @@ function MessageWriter:_auto_scroll(bufnr)
     end
     self._scroll_scheduled = true
 
+    --- @type agentic.ui.MessageWriter.ScrollState|nil
+    local scheduled_scroll_state = nil
+    if self._should_auto_scroll then
+        local wins = vim.fn.win_findbuf(bufnr)
+        if #wins > 0 then
+            scheduled_scroll_state = capture_scroll_state(wins[1])
+        end
+    end
+
     vim.schedule(function()
         self._scroll_scheduled = false
 
@@ -675,7 +731,13 @@ function MessageWriter:_auto_scroll(bufnr)
             if self._should_auto_scroll then
                 local wins = vim.fn.win_findbuf(bufnr)
                 if #wins > 0 then
-                    if not BufHelpers.is_window_bottom_visible(wins[1]) then
+                    if
+                        not BufHelpers.is_window_bottom_visible(wins[1])
+                        and scroll_state_is_unchanged(
+                            wins[1],
+                            scheduled_scroll_state
+                        )
+                    then
                         BufHelpers.scroll_window_to_bottom(wins[1])
                     end
                 end

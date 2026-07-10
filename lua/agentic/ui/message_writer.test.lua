@@ -149,6 +149,33 @@ describe("agentic.ui.MessageWriter", function()
             check_spy:revert()
         end)
 
+        it(
+            "does not run a stale scheduled scroll after user scrolls up",
+            function()
+                local scheduled = {}
+                local schedule_stub = spy.stub(vim, "schedule")
+                schedule_stub:invokes(function(fn)
+                    table.insert(scheduled, fn)
+                end)
+
+                setup_buffer(50, 50)
+                writer:_auto_scroll(bufnr)
+
+                local new_lines = {}
+                for i = 1, 30 do
+                    new_lines[i] = "streamed line " .. i
+                end
+                vim.api.nvim_buf_set_lines(bufnr, -1, -1, false, new_lines)
+                vim.api.nvim_win_set_cursor(winid, { 10, 0 })
+
+                scheduled[1]()
+
+                assert.equal(10, vim.api.nvim_win_get_cursor(winid)[1])
+
+                schedule_stub:revert()
+            end
+        )
+
         it("defers scrolling while command line is active", function()
             local current_mode = "c"
             local get_mode_stub = spy.stub(vim.api, "nvim_get_mode")
