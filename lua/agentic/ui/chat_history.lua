@@ -20,11 +20,17 @@ local FileSystem = require("agentic.utils.file_system")
 --- @field tool_call_id? string
 --- @field type "tool_call"
 
+--- @class agentic.ui.ChatHistory.TurnEndMessage
+--- @field type "turn_end"
+--- @field timestamp integer
+--- @field duration string
+
 --- @alias agentic.ui.ChatHistory.Message
 --- | agentic.ui.ChatHistory.UserMessage
 --- | agentic.ui.ChatHistory.AgentMessage
 --- | agentic.ui.ChatHistory.ThoughtMessage
 --- | agentic.ui.ChatHistory.ToolCall
+--- | agentic.ui.ChatHistory.TurnEndMessage
 
 --- @class agentic.ui.ChatHistory.SessionMeta
 --- @field session_id string
@@ -59,6 +65,17 @@ local FileSystem = require("agentic.utils.file_system")
 --- @field title string
 local ChatHistory = {}
 ChatHistory.__index = ChatHistory
+
+--- @param timestamp integer
+--- @param duration string
+--- @return string message
+function ChatHistory.format_turn_end(timestamp, duration)
+    return string.format(
+        "\n### 🏁 %s (%s)\n-----",
+        os.date("%Y-%m-%d %H:%M:%S", timestamp),
+        duration
+    )
+end
 
 --- @param parsed table|nil
 --- @return integer created_at

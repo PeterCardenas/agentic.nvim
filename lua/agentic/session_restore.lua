@@ -98,6 +98,12 @@ local function build_preview_lines(parsed, fallback_title)
         elseif msg.type == "agent" then
             append_text_lines(lines, msg.text)
             table.insert(lines, "")
+        elseif msg.type == "turn_end" then
+            append_text_lines(
+                lines,
+                ChatHistory.format_turn_end(msg.timestamp, msg.duration)
+            )
+            table.insert(lines, "")
         end
     end
 
@@ -443,6 +449,13 @@ function SessionRestore.replay_messages(writer, messages)
                 diff = msg.diff,
             }
             writer:write_tool_call_block(tool_block)
+        elseif msg.type == "turn_end" then
+            --- @cast msg agentic.ui.ChatHistory.TurnEndMessage
+            writer:write_message(
+                ACPPayloads.generate_agent_message(
+                    ChatHistory.format_turn_end(msg.timestamp, msg.duration)
+                )
+            )
         end
     end
 

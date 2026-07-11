@@ -1245,4 +1245,75 @@ describe("agentic.SessionManager", function()
             end
         )
     end)
+
+    describe("_handle_input_submit turn completion history", function()
+        it("stores the timestamp shown when a turn ends", function()
+            local ChatHistory = require("agentic.ui.chat_history")
+            local history = ChatHistory:new()
+            local save_stub = spy.stub(history, "save")
+            save_stub:invokes(function(_, callback)
+                callback(nil)
+            end)
+            local prompt_callback
+            local schedule_stub = spy.stub(vim, "schedule")
+            schedule_stub:invokes(function(fn)
+                fn()
+            end)
+
+            local session = {
+                session_id = "test-session",
+                tab_page_id = 1,
+                _is_first_message = false,
+                _history_to_send = nil,
+                _replace_session = false,
+                todo_list = {
+                    close_if_all_completed = function() end,
+                },
+                chat_history = history,
+                code_selection = {
+                    is_empty = function()
+                        return true
+                    end,
+                    clear = function() end,
+                },
+                file_list = {
+                    is_empty = function()
+                        return true
+                    end,
+                },
+                diagnostics_list = {
+                    is_empty = function()
+                        return true
+                    end,
+                },
+                agent = {
+                    provider_config = { name = "Test Provider" },
+                    send_prompt = function(_, _, _, callback)
+                        prompt_callback = callback
+                    end,
+                },
+                message_writer = {
+                    record_prompt_position = function() end,
+                    write_message = function() end,
+                    enable_auto_scroll = function() end,
+                },
+                status_animation = {
+                    start = function() end,
+                    stop = function() end,
+                },
+            }
+
+            SessionManager._handle_input_submit(session, "hello")
+            assert.not_nil(prompt_callback)
+            prompt_callback({}, nil)
+
+            schedule_stub:revert()
+            save_stub:revert()
+            assert.equal(2, #history.messages)
+            local turn_end = assert.not_nil(history.messages[2])
+            assert.equal("turn_end", turn_end.type)
+            assert.equal("number", type(turn_end.timestamp))
+            assert.equal("string", type(turn_end.duration))
+        end)
+    end)
 end)

@@ -714,5 +714,42 @@ describe("SessionRestore", function()
             assert.equal("First answer", first_line)
             assert.equal("Second answer", second_line)
         end)
+
+        it("renders saved turn completion timestamps", function()
+            local completed_at = 1704067202
+
+            SessionRestore.replay_messages(writer, {
+                {
+                    type = "user",
+                    text = "Question",
+                    timestamp = 1704067200,
+                    provider_name = "Claude Agent ACP",
+                },
+                {
+                    type = "agent",
+                    text = "Answer",
+                    provider_name = "Claude Agent ACP",
+                },
+                {
+                    type = "turn_end",
+                    timestamp = completed_at,
+                    duration = "2.0s",
+                },
+            })
+
+            local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+            assert.equal(
+                1,
+                vim.tbl_count(vim.iter(lines)
+                    :filter(function(line)
+                        return line
+                            == string.format(
+                                "### 🏁 %s (2.0s)",
+                                os.date("%Y-%m-%d %H:%M:%S", completed_at)
+                            )
+                    end)
+                    :totable())
+            )
+        end)
     end)
 end)

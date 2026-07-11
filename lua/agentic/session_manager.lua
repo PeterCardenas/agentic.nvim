@@ -1416,11 +1416,9 @@ function SessionManager:_handle_input_submit(input_text)
             local duration_str = P.format_duration(self._turn_start_time)
             self._turn_start_time = nil
 
-            local finish_message = string.format(
-                "\n### 🏁 %s (%s)\n-----",
-                os.date("%Y-%m-%d %H:%M:%S"),
-                duration_str
-            )
+            local completed_at = os.time()
+            local finish_message =
+                ChatHistory.format_turn_end(completed_at, duration_str)
 
             if err then
                 finish_message = string.format(
@@ -1440,6 +1438,14 @@ function SessionManager:_handle_input_submit(input_text)
             self.message_writer:write_message(
                 ACPPayloads.generate_agent_message(finish_message)
             )
+
+            --- @type agentic.ui.ChatHistory.TurnEndMessage
+            local turn_end = {
+                type = "turn_end",
+                timestamp = completed_at,
+                duration = duration_str,
+            }
+            chat_history:add_message(turn_end)
 
             self.status_animation:stop()
 
