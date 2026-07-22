@@ -6,6 +6,8 @@ local uv = vim.uv or vim.loop
 --- @class agentic.acp.ACPTransportModule
 local M = {}
 
+local STDERR_TAIL_LIMIT = 50
+
 --- @class agentic.acp.TransportCallbacks
 --- @field on_state_change fun(state: agentic.acp.ClientConnectionState): nil The transport state like "connecting", "connected", "disconnected", "error"
 --- @field on_message fun(message: agentic.acp.ResponseRaw): nil
@@ -31,6 +33,15 @@ local IGNORE_STDERR_PATTERNS = {
     "Spawning Claude Code:",
     "[PreToolUseHook]",
 }
+
+--- @param stderr_buffer string[]
+--- @param chunk string
+function M._append_stderr_tail(stderr_buffer, chunk)
+    table.insert(stderr_buffer, chunk)
+    while #stderr_buffer > STDERR_TAIL_LIMIT do
+        table.remove(stderr_buffer, 1)
+    end
+end
 
 --- Read child PIDs recursively from /proc/<pid>/task/<pid>/children.
 --- Returns PIDs in bottom-up order (deepest children first, root last)
@@ -242,7 +253,7 @@ function M.create_stdio_transport(config, callbacks)
                 -- Always capture stderr for error reporting
                 local trimmed = vim.trim(data)
                 if trimmed ~= "" then
-                    table.insert(stderr_buffer, trimmed)
+                    M._append_stderr_tail(stderr_buffer, trimmed)
                 end
 
                 -- Only skip logging if matches ignore patterns

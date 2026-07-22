@@ -21,7 +21,23 @@ end
 --- @param session_id string
 --- @param tab_page_id integer
 local function do_restore(session_id, tab_page_id)
+    if not vim.api.nvim_tabpage_is_valid(tab_page_id) then
+        return
+    end
+    local tab_state = vim.t[tab_page_id]
+    tab_state.agentic_restore_generation = (
+        tab_state.agentic_restore_generation or 0
+    ) + 1
+    local restore_generation = tab_state.agentic_restore_generation
+
     ChatHistory.load(session_id, function(history, err)
+        if
+            not vim.api.nvim_tabpage_is_valid(tab_page_id)
+            or vim.t[tab_page_id].agentic_restore_generation
+                ~= restore_generation
+        then
+            return
+        end
         if err or not history then
             Logger.notify(
                 "Failed to load session: " .. (err or "unknown error"),
@@ -31,6 +47,13 @@ local function do_restore(session_id, tab_page_id)
         end
 
         SessionRegistry.get_session_for_tab_page(tab_page_id, function(session)
+            if
+                not vim.api.nvim_tabpage_is_valid(tab_page_id)
+                or vim.t[tab_page_id].agentic_restore_generation
+                    ~= restore_generation
+            then
+                return
+            end
             -- Always cancel current session
             if session.session_id then
                 session.agent:cancel_session(session.session_id)
@@ -111,61 +134,6 @@ local function build_preview_lines(parsed, fallback_title)
     return lines, title
 end
 
---- @param session_id string
---- @return table|nil
-local function load_session_from_disk_sync(session_id)
-    local function read_json_file_sync(path)
-        if vim.fn.filereadable(path) == 0 then
-            return nil
-        end
-
-        local content = vim.fn.readfile(path)
-        if #content == 0 then
-            return nil
-        end
-
-        local ok, parsed = pcall(vim.json.decode, table.concat(content, "\n"))
-        if not ok or type(parsed) ~= "table" then
-            return nil
-        end
-
-        return parsed
-    end
-
-    local parsed = read_json_file_sync(ChatHistory.get_file_path(session_id))
-    if not parsed then
-        return nil
-    end
-
-    if
-        parsed.title ~= nil
-        or parsed.timestamp ~= nil
-        or parsed.created_at ~= nil
-        or parsed.updated_at ~= nil
-        or parsed.session_id ~= nil
-    then
-        return parsed
-    end
-
-    local metadata =
-        read_json_file_sync(ChatHistory.get_metadata_file_path(session_id))
-    local created_at, updated_at = 0, 0
-    if metadata then
-        created_at = metadata.created_at or metadata.timestamp or 0
-        updated_at = metadata.updated_at or metadata.timestamp or created_at
-    end
-    --- @type table
-    local combined = {
-        session_id = metadata and metadata.session_id or session_id,
-        acp_session_id = metadata and metadata.acp_session_id or nil,
-        title = metadata and metadata.title or "",
-        created_at = created_at,
-        updated_at = updated_at,
-        messages = parsed.messages or {},
-    }
-    return combined
-end
-
 --- @param fixed_session_id string|nil
 --- @return table
 local function create_session_previewer(fixed_session_id)
@@ -179,6 +147,33 @@ local function create_session_previewer(fixed_session_id)
         vim.bo[buf].modifiable = true
         vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
         vim.bo[buf].modifiable = false
+    end
+
+    local function preview_target_is_valid(instance, buf)
+        if not vim.api.nvim_buf_is_valid(buf) then
+            return false
+        end
+
+        local preview_tabpage = instance._preview_tabpage
+        if
+            preview_tabpage
+            and not vim.api.nvim_tabpage_is_valid(preview_tabpage)
+        then
+            return false
+        end
+
+        local win = instance.win
+        local winid = instance._preview_winid or (win and (win.winid or win.id))
+        if winid and not vim.api.nvim_win_is_valid(winid) then
+            return false
+        end
+
+        local tabpage = win and (win.tabpage or win.tab_page_id)
+        if tabpage and not vim.api.nvim_tabpage_is_valid(tabpage) then
+            return false
+        end
+
+        return true
     end
 
     function previewer:new(o, opts, fzf_win)
@@ -195,6 +190,9 @@ local function create_session_previewer(fixed_session_id)
 
         local buf = self:get_tmp_buffer()
         vim.bo[buf].filetype = "markdown"
+        self._preview_tabpage = vim.api.nvim_get_current_tabpage()
+        self._preview_generation = (self._preview_generation or 0) + 1
+        local preview_generation = self._preview_generation
 
         if not session_id or session_id == "" then
             set_preview_lines(buf, {
@@ -208,21 +206,33 @@ local function create_session_previewer(fixed_session_id)
         end
 
         --- @cast session_id string
-        local parsed = load_session_from_disk_sync(session_id)
-        local lines, title =
-            build_preview_lines(parsed, "Session " .. session_id)
-        set_preview_lines(buf, lines)
+        set_preview_lines(buf, {
+            "# Session Preview",
+            "",
+            "_Loading session preview..._",
+        })
         self:set_preview_buf(buf)
-        if self.win and self.win.update_preview_title then
-            self.win:update_preview_title(title)
-        end
+        ChatHistory.load(session_id, function(parsed)
+            if
+                preview_generation ~= self._preview_generation
+                or not preview_target_is_valid(self, buf)
+            then
+                return
+            end
+            local lines, title =
+                build_preview_lines(parsed, "Session " .. session_id)
+            set_preview_lines(buf, lines)
+            if self.win and self.win.update_preview_title then
+                self.win:update_preview_title(title)
+            end
+        end)
     end
 
     return previewer
 end
 
 --- Show session picker using fzf-lua (with fallback to vim.ui.select)
---- @param build_items fun(): table[] Function that returns current session items
+--- @param build_items fun(callback: fun(items: table[])) Function that builds current session items
 --- @param on_choice fun(choice: table|nil) Callback when user selects an item
 --- @param on_delete fun(choice: table)|nil Callback when user requests deletion
 --- @param initial_items table[]|nil Items already loaded for the first render
@@ -233,34 +243,52 @@ local function show_fzf_picker(build_items, on_choice, on_delete, initial_items)
 
     if not fzf then
         -- Fallback to vim.ui.select if fzf-lua is not available
-        local items = first_items or build_items()
-        vim.ui.select(items, {
-            prompt = "Select session to restore:",
-            format_item = function(item)
-                return item.display
-            end,
-        }, on_choice)
+        local function select(items)
+            vim.ui.select(items, {
+                prompt = "Select session to restore:",
+                format_item = function(item)
+                    return item.display
+                end,
+            }, on_choice)
+        end
+        if first_items then
+            return select(first_items)
+        else
+            build_items(select)
+        end
         return
     end
 
     -- Shared state: rebuilt each time the content function runs (initial + reload)
     local current_items_by_session_id = {}
+    local contents_generation = 0
 
     --- @param fzf_cb fun(entry: string|nil)
     local function contents(fzf_cb)
-        local current_items
         if first_items and not has_used_initial_items then
-            current_items = first_items
             has_used_initial_items = true
-        else
-            current_items = build_items()
+            current_items_by_session_id = {}
+            for _, item in ipairs(first_items) do
+                current_items_by_session_id[item.session_id] = item
+                fzf_cb(string.format("%s\t%s", item.session_id, item.display))
+            end
+            fzf_cb() -- EOF
+            return
         end
-        current_items_by_session_id = {}
-        for _, item in ipairs(current_items) do
-            current_items_by_session_id[item.session_id] = item
-            fzf_cb(string.format("%s\t%s", item.session_id, item.display))
-        end
-        fzf_cb() -- EOF
+
+        contents_generation = contents_generation + 1
+        local generation = contents_generation
+        build_items(function(current_items)
+            if generation ~= contents_generation then
+                return
+            end
+            current_items_by_session_id = {}
+            for _, item in ipairs(current_items) do
+                current_items_by_session_id[item.session_id] = item
+                fzf_cb(string.format("%s\t%s", item.session_id, item.display))
+            end
+            fzf_cb() -- EOF
+        end)
     end
 
     --- @param selected string[]|nil
@@ -342,10 +370,9 @@ local function show_fzf_picker(build_items, on_choice, on_delete, initial_items)
     })
 end
 
---- Build session items from disk. list_sessions is synchronous despite
---- the callback API, so the returned table is populated before this returns.
---- @return table[] items
-local function build_session_items()
+--- Build session items from disk.
+--- @param callback fun(items: table[])
+local function build_session_items(callback)
     local items = {}
     ChatHistory.list_sessions(function(sessions)
         for _, s in ipairs(sessions) do
@@ -357,37 +384,40 @@ local function build_session_items()
                 session_id = s.session_id,
             })
         end
+        callback(items)
     end)
-    return items
 end
 
 --- Show session picker and restore selected session
 --- @param tab_page_id integer
 function SessionRestore.show_picker(tab_page_id)
-    local initial_items = build_session_items()
-    if #initial_items == 0 then
-        Logger.notify("No saved sessions found", vim.log.levels.INFO)
-        return
-    end
-
-    show_fzf_picker(build_session_items, function(choice)
-        if not choice then
+    build_session_items(function(initial_items)
+        if #initial_items == 0 then
+            Logger.notify("No saved sessions found", vim.log.levels.INFO)
             return
         end
 
-        do_restore(choice.session_id, tab_page_id)
-    end, function(choice)
-        ChatHistory.delete_session(choice.session_id, function(err)
-            if err then
-                Logger.notify(
-                    "Failed to delete session: " .. err,
-                    vim.log.levels.WARN
-                )
+        show_fzf_picker(function(callback)
+            build_session_items(callback)
+        end, function(choice)
+            if not choice then
                 return
             end
-            Logger.notify("Session deleted", vim.log.levels.INFO)
-        end)
-    end, initial_items)
+
+            do_restore(choice.session_id, tab_page_id)
+        end, function(choice)
+            ChatHistory.delete_session(choice.session_id, function(err)
+                if err then
+                    Logger.notify(
+                        "Failed to delete session: " .. err,
+                        vim.log.levels.WARN
+                    )
+                    return
+                end
+                Logger.notify("Session deleted", vim.log.levels.INFO)
+            end)
+        end, initial_items)
+    end)
 end
 
 --- Replay stored messages to the UI
@@ -464,6 +494,13 @@ function SessionRestore.replay_messages(writer, messages)
     if treesitter_was_active and vim.api.nvim_buf_is_valid(bufnr) then
         pcall(vim.treesitter.start, bufnr)
     end
+end
+
+--- Replay stored messages to the UI from a JSONL replay source.
+--- @param writer agentic.ui.MessageWriter
+--- @param source agentic.ui.ChatHistory.ReplaySource|agentic.ui.ChatHistory.Message[]
+function SessionRestore.replay_messages_from_source(writer, source)
+    SessionRestore.replay_messages(writer, ChatHistory.collect_messages(source))
 end
 
 return SessionRestore

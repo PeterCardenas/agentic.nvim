@@ -444,6 +444,12 @@ describe("agentic.SessionManager", function()
                 local saved_history = {
                     messages = original_messages,
                     session_id = "old",
+                    get_replay_source = function()
+                        return {
+                            kind = "messages",
+                            messages = original_messages,
+                        }
+                    end,
                 }
 
                 Config.provider = "new-provider"
@@ -470,20 +476,245 @@ describe("agentic.SessionManager", function()
 
                 local new_created_at = os.time()
                 local new_updated_at = os.time()
-                session.chat_history = {
-                    messages = {},
-                    session_id = "new",
-                    created_at = new_created_at,
-                    updated_at = new_updated_at,
-                }
+                local ChatHistory = require("agentic.ui.chat_history")
+                session.chat_history = ChatHistory:new()
+                session.chat_history.session_id = "new"
+                session.chat_history.created_at = new_created_at
+                session.chat_history.updated_at = new_updated_at
                 captured_on_created()
 
-                assert.same(original_messages, session.chat_history.messages)
+                assert.equal(0, #session.chat_history.messages)
+                assert.equal(1, session.chat_history.message_count)
                 assert.equal("new", session.chat_history.session_id)
                 assert.equal(new_created_at, session.chat_history.created_at)
-                assert.equal(new_updated_at, session.chat_history.updated_at)
-                assert.same(original_messages, session._history_to_send)
+                assert.is_true(
+                    session.chat_history.updated_at >= new_updated_at
+                )
+                assert.is_nil(session._history_to_send)
+                assert.same(
+                    { kind = "messages", messages = original_messages },
+                    session._history_replay_source
+                )
                 assert.is_true(session._is_first_message)
+            end
+        )
+
+        it(
+            "stores a replay source instead of a whole history array on provider switch",
+            function()
+                local AgentInstance = require("agentic.acp.agent_instance")
+                local mock_new_agent = {
+                    provider_config = { name = "New Provider" },
+                    create_session = spy.new(function() end),
+                }
+                get_instance_stub = spy.stub(AgentInstance, "get_instance")
+                get_instance_stub:invokes(function(_provider, on_ready)
+                    on_ready(mock_new_agent)
+                    return mock_new_agent
+                end)
+
+                local captured_on_created
+                local new_session_spy = spy.new(function(_self, opts)
+                    captured_on_created = opts.on_created
+                end)
+
+                local saved_history = {
+                    messages = {},
+                    message_count = 2,
+                    session_id = "old",
+                    get_replay_source = function()
+                        return { kind = "jsonl", session_id = "old" }
+                    end,
+                }
+
+                Config.provider = "new-provider"
+
+                local session = {
+                    is_generating = false,
+                    session_id = "old-session",
+                    agent = {
+                        cancel_session = spy.new(function() end),
+                        provider_config = { name = "Old" },
+                    },
+                    permission_manager = { clear = function() end },
+                    todo_list = { clear = function() end },
+                    chat_history = saved_history,
+                    _is_first_message = false,
+                    _history_to_send = nil,
+                    _history_replay_source = nil,
+                    new_session = new_session_spy,
+                }
+
+                SessionManager.switch_provider(session, "new-provider")
+                assert.is_not_nil(captured_on_created)
+
+                local ChatHistory = require("agentic.ui.chat_history")
+                session.chat_history = ChatHistory:new()
+                session.chat_history.session_id = "new"
+                session.chat_history.created_at = 1704067200
+                session.chat_history.updated_at = 1704067200
+                captured_on_created()
+
+                assert.is_nil(session._history_to_send)
+                assert.same(
+                    { kind = "messages", messages = {} },
+                    session._history_replay_source
+                )
+                assert.is_true(session._is_first_message)
+            end
+        )
+
+        it(
+            "captures old replay source before assigning new provider session id",
+            function()
+                local ChatHistory = require("agentic.ui.chat_history")
+                local FileSystem = require("agentic.utils.file_system")
+                local original_storage_path =
+                    Config.session_restore.storage_path
+                local temp_dir = vim.fn.tempname()
+                vim.fn.mkdir(temp_dir, "p")
+                Config.session_restore.storage_path = temp_dir
+                local git_root_stub = spy.stub(FileSystem, "get_git_root")
+                git_root_stub:returns("/test/project")
+
+                local old_history = ChatHistory:new()
+                old_history.session_id = "old-jsonl-session"
+                old_history:add_message({
+                    type = "user",
+                    text = "old prompt",
+                    timestamp = 1704067200,
+                    provider_name = "Old",
+                })
+
+                local AgentInstance = require("agentic.acp.agent_instance")
+                local mock_new_agent = {
+                    provider_config = { name = "New Provider" },
+                    create_session = spy.new(function() end),
+                }
+                get_instance_stub = spy.stub(AgentInstance, "get_instance")
+                get_instance_stub:invokes(function(_provider, on_ready)
+                    on_ready(mock_new_agent)
+                    return mock_new_agent
+                end)
+
+                local captured_on_created
+                local new_session_spy = spy.new(function(_self, opts)
+                    captured_on_created = opts.on_created
+                end)
+
+                Config.provider = "new-provider"
+
+                local session = {
+                    is_generating = false,
+                    session_id = "old-jsonl-session",
+                    agent = {
+                        cancel_session = spy.new(function() end),
+                        provider_config = { name = "Old" },
+                    },
+                    permission_manager = { clear = function() end },
+                    todo_list = { clear = function() end },
+                    chat_history = old_history,
+                    _is_first_message = false,
+                    new_session = new_session_spy,
+                }
+
+                SessionManager.switch_provider(session, "new-provider")
+                assert.is_not_nil(captured_on_created)
+
+                session.chat_history = ChatHistory:new()
+                session.chat_history.session_id = "new-jsonl-session"
+                captured_on_created()
+
+                assert.same({
+                    kind = "messages",
+                    messages = {
+                        {
+                            type = "user",
+                            text = "old prompt",
+                            timestamp = 1704067200,
+                            provider_name = "Old",
+                        },
+                    },
+                }, session._history_replay_source)
+
+                git_root_stub:revert()
+                Config.session_restore.storage_path = original_storage_path
+                vim.fn.delete(temp_dir, "rf")
+            end
+        )
+
+        it(
+            "copies old replay history into new provider session JSONL",
+            function()
+                local ChatHistory = require("agentic.ui.chat_history")
+                local FileSystem = require("agentic.utils.file_system")
+                local original_storage_path =
+                    Config.session_restore.storage_path
+                local temp_dir = vim.fn.tempname()
+                vim.fn.mkdir(temp_dir, "p")
+                Config.session_restore.storage_path = temp_dir
+                local git_root_stub = spy.stub(FileSystem, "get_git_root")
+                git_root_stub:returns("/test/project")
+
+                local old_history = ChatHistory:new()
+                old_history.session_id = "old-provider-session"
+                old_history:add_message({
+                    type = "user",
+                    text = "provider old prompt",
+                    timestamp = 1704067200,
+                    provider_name = "Old",
+                })
+
+                local AgentInstance = require("agentic.acp.agent_instance")
+                local mock_new_agent = {
+                    provider_config = { name = "New Provider" },
+                    create_session = spy.new(function() end),
+                }
+                get_instance_stub = spy.stub(AgentInstance, "get_instance")
+                get_instance_stub:invokes(function(_provider, on_ready)
+                    on_ready(mock_new_agent)
+                    return mock_new_agent
+                end)
+
+                local captured_on_created
+                local new_session_spy = spy.new(function(_self, opts)
+                    captured_on_created = opts.on_created
+                end)
+
+                Config.provider = "new-provider"
+
+                local session = {
+                    is_generating = false,
+                    session_id = "old-provider-session",
+                    agent = {
+                        cancel_session = spy.new(function() end),
+                        provider_config = { name = "Old" },
+                    },
+                    permission_manager = { clear = function() end },
+                    todo_list = { clear = function() end },
+                    chat_history = old_history,
+                    _is_first_message = false,
+                    new_session = new_session_spy,
+                }
+
+                SessionManager.switch_provider(session, "new-provider")
+                assert.is_not_nil(captured_on_created)
+
+                session.chat_history = ChatHistory:new()
+                session.chat_history.session_id = "new-provider-session"
+                captured_on_created()
+
+                local new_history =
+                    ChatHistory.load_sync("new-provider-session")
+                assert.is_not_nil(new_history)
+                --- @cast new_history agentic.ui.ChatHistory
+                assert.equal(1, #new_history.messages)
+                local first_message = assert.not_nil(new_history.messages[1])
+                assert.equal("provider old prompt", first_message.text)
+
+                git_root_stub:revert()
+                Config.session_restore.storage_path = original_storage_path
+                vim.fn.delete(temp_dir, "rf")
             end
         )
 
@@ -571,6 +802,27 @@ describe("agentic.SessionManager", function()
     end)
 
     describe("get_new_session_reuse_reason", function()
+        it("uses message_count when live messages are not retained", function()
+            local session = {
+                session_id = "session-1",
+                agent = {
+                    provider_config = Config.acp_providers["claude-acp"],
+                },
+                chat_history = {
+                    messages = {},
+                    message_count = 1,
+                },
+                _is_creating_session = false,
+            }
+
+            assert.is_nil(
+                SessionManager.get_new_session_reuse_reason(
+                    session,
+                    "claude-acp"
+                )
+            )
+        end)
+
         it("reuses blank sessions for the same provider", function()
             local session = {
                 session_id = "session-1",
@@ -672,6 +924,174 @@ describe("agentic.SessionManager", function()
                 )
             )
         end)
+    end)
+
+    describe("restore_from_history", function()
+        --- @type string|nil
+        local original_storage_path
+        --- @type string|nil
+        local temp_dir
+        --- @type TestStub|nil
+        local git_root_stub
+        --- @type TestStub|nil
+        local replay_stub
+
+        before_each(function()
+            local FileSystem = require("agentic.utils.file_system")
+            original_storage_path = Config.session_restore.storage_path
+            temp_dir = vim.fn.tempname()
+            vim.fn.mkdir(temp_dir, "p")
+            Config.session_restore.storage_path = temp_dir
+            git_root_stub = spy.stub(FileSystem, "get_git_root")
+            git_root_stub:returns("/test/project")
+
+            local SessionRestore = require("agentic.session_restore")
+            replay_stub =
+                spy.stub(SessionRestore, "replay_messages_from_source")
+        end)
+
+        after_each(function()
+            if replay_stub then
+                replay_stub:revert()
+                replay_stub = nil
+            end
+            if git_root_stub then
+                git_root_stub:revert()
+                git_root_stub = nil
+            end
+            if temp_dir then
+                vim.fn.delete(temp_dir, "rf")
+            end
+            Config.session_restore.storage_path = original_storage_path
+        end)
+
+        local function create_loaded_history()
+            local ChatHistory = require("agentic.ui.chat_history")
+            local old_history = ChatHistory:new()
+            old_history.session_id = "old-restore-session"
+            old_history.title = "Old title"
+            old_history.created_at = 1704067200
+            old_history.updated_at = 1704067201
+            old_history:add_message({
+                type = "user",
+                text = "old prompt",
+                timestamp = 1704067200,
+                provider_name = "Old Provider",
+            })
+            local loaded = ChatHistory.load_sync("old-restore-session")
+            assert.is_not_nil(loaded)
+            --- @cast loaded agentic.ui.ChatHistory
+            assert.equal(1, #loaded.messages)
+            return loaded
+        end
+
+        it(
+            "does not retain loaded transcript in live chat history after restore setup",
+            function()
+                local ChatHistory = require("agentic.ui.chat_history")
+                local loaded = create_loaded_history()
+
+                local session = {
+                    _restoring = false,
+                    _replace_session = false,
+                    _history_replay_source = nil,
+                    _history_to_send = nil,
+                    _is_first_message = true,
+                    chat_history = ChatHistory:new(),
+                    message_writer = {},
+                    new_session = function(self, opts)
+                        self.chat_history.session_id = "new-restore-session"
+                        opts.on_created()
+                    end,
+                }
+                setmetatable(session, { __index = SessionManager })
+
+                SessionManager.restore_from_history(session, loaded, {
+                    replace_session = false,
+                })
+
+                assert.equal(0, #session.chat_history.messages)
+                assert.equal(1, session.chat_history.message_count)
+                assert.same({
+                    kind = "messages",
+                    messages = loaded.messages,
+                }, session._history_replay_source)
+                assert.spy(assert.not_nil(replay_stub)).was.called(1)
+            end
+        )
+
+        it(
+            "copies replayed history into forked session JSONL without retaining it live",
+            function()
+                local ChatHistory = require("agentic.ui.chat_history")
+                local loaded = create_loaded_history()
+
+                local session = {
+                    _restoring = false,
+                    _replace_session = false,
+                    _history_replay_source = nil,
+                    _history_to_send = nil,
+                    _is_first_message = true,
+                    chat_history = ChatHistory:new(),
+                    message_writer = {},
+                    new_session = function(self, opts)
+                        self.chat_history.session_id = "forked-session"
+                        opts.on_created()
+                    end,
+                }
+                setmetatable(session, { __index = SessionManager })
+
+                SessionManager.restore_from_history(session, loaded, {
+                    replace_session = false,
+                })
+
+                local forked = ChatHistory.load_sync("forked-session")
+                assert.is_not_nil(forked)
+                --- @cast forked agentic.ui.ChatHistory
+                assert.equal(1, #forked.messages)
+                local first_message = assert.not_nil(forked.messages[1])
+                assert.equal("old prompt", first_message.text)
+                assert.equal(0, #session.chat_history.messages)
+            end
+        )
+
+        it(
+            "keeps continue-mode restored live history non-blank without retaining transcript",
+            function()
+                local ChatHistory = require("agentic.ui.chat_history")
+                local loaded = create_loaded_history()
+
+                local session = {
+                    _restoring = false,
+                    _replace_session = false,
+                    _history_replay_source = nil,
+                    _history_to_send = nil,
+                    _is_first_message = true,
+                    chat_history = ChatHistory:new(),
+                    message_writer = {},
+                    new_session = function(self, opts)
+                        self.chat_history.session_id = "temporary-new-session"
+                        opts.on_created()
+                    end,
+                }
+                setmetatable(session, { __index = SessionManager })
+
+                SessionManager.restore_from_history(session, loaded, {
+                    replace_session = true,
+                })
+
+                assert.equal(
+                    "old-restore-session",
+                    session.chat_history.session_id
+                )
+                assert.equal(0, #session.chat_history.messages)
+                assert.equal(
+                    loaded.message_count,
+                    session.chat_history.message_count
+                )
+                assert.is_true(SessionManager.has_messages(session))
+            end
+        )
     end)
 
     describe("new_session", function()
@@ -872,6 +1292,83 @@ describe("agentic.SessionManager", function()
 
             schedule_stub:revert()
         end)
+
+        it(
+            "stores terminal initial tool call payload before writer releases it",
+            function()
+                local schedule_stub = spy.stub(vim, "schedule")
+                schedule_stub:invokes(function(callback)
+                    callback()
+                end)
+
+                local write_tool_call_spy = spy.new(function(_, tool_call)
+                    tool_call.body = nil
+                    tool_call.diff = nil
+                end)
+
+                local create_session_spy = spy.new(
+                    function(_self, handlers, callback)
+                        handlers.on_tool_call({
+                            tool_call_id = "terminal-initial",
+                            kind = "execute",
+                            status = "completed",
+                            argument = "cmd",
+                            body = { "line 1", "line 2" },
+                        })
+                        callback({
+                            sessionId = "provider-session",
+                        }, nil)
+                    end
+                )
+
+                local history = {
+                    messages = {},
+                    save = function(_self, callback)
+                        if callback then
+                            callback(nil)
+                        end
+                    end,
+                }
+                function history:add_message(msg)
+                    table.insert(self.messages, msg)
+                end
+
+                local session = {
+                    _session_create_id = 0,
+                    agent = {
+                        provider_config = {
+                            name = "Test Provider",
+                        },
+                        create_session = create_session_spy,
+                    },
+                    status_animation = {
+                        start = spy.new(function() end),
+                        stop = spy.new(function() end),
+                    },
+                    _is_creating_session = false,
+                    session_id = nil,
+                    chat_history = history,
+                    config_options = {
+                        set_initial_mode = function() end,
+                    },
+                    message_writer = {
+                        write_tool_call_block = write_tool_call_spy,
+                        write_message = function() end,
+                    },
+                    _cancel_session = spy.new(function() end),
+                }
+                setmetatable(session, { __index = SessionManager })
+
+                SessionManager.new_session(session)
+
+                local tool_msg = assert.not_nil(history.messages[1])
+                assert.equal("tool_call", tool_msg.type)
+                assert.same({ "line 1", "line 2" }, tool_msg.body)
+                assert.spy(write_tool_call_spy).was.called(1)
+
+                schedule_stub:revert()
+            end
+        )
     end)
 
     describe("FileChangedShell autocommand", function()
@@ -975,6 +1472,164 @@ describe("agentic.SessionManager", function()
 
             assert.spy(respond_spy).was.called(1)
             assert.equal("rejected", respond_spy.calls[1][1].outcome.outcome)
+        end)
+    end)
+
+    describe("_handle_cursor_ask_question", function()
+        --- @return table, table
+        local function make_session()
+            local captured = {}
+            local session = {
+                session_id = "session-1",
+                message_writer = {
+                    write_message = spy.new(function() end),
+                },
+                status_animation = {
+                    stop = spy.new(function() end),
+                    start = spy.new(function() end),
+                },
+                permission_manager = {
+                    current_request = nil,
+                    queue = {},
+                    add_request = spy.new(function(_, request, callback)
+                        table.insert(captured, {
+                            request = request,
+                            callback = callback,
+                        })
+                    end),
+                },
+                _show_diff_in_buffer = spy.new(function() end),
+                _clear_diff_in_buffer = spy.new(function() end),
+            }
+            setmetatable(session, { __index = SessionManager })
+            return session, captured
+        end
+
+        it(
+            "answers a structured question with the selected option id",
+            function()
+                local session, captured = make_session()
+                local respond_spy = spy.new(function() end)
+                local ctx = {
+                    message_id = 8,
+                    params = {
+                        toolCallId = "call-1",
+                        questions = {
+                            {
+                                id = "mode",
+                                prompt = "Which mode?",
+                                options = {
+                                    { id = "agent", label = "Agent" },
+                                    { id = "plan", label = "Plan" },
+                                },
+                            },
+                        },
+                    },
+                    respond = respond_spy,
+                }
+
+                SessionManager._handle_cursor_ask_question(session, ctx)
+                captured[1].callback("plan")
+
+                assert.same({
+                    outcome = {
+                        outcome = "answered",
+                        answers = {
+                            {
+                                questionId = "mode",
+                                selectedOptionIds = { "plan" },
+                            },
+                        },
+                    },
+                }, respond_spy.calls[1][1])
+            end
+        )
+
+        it("cancels payloads without structured questions", function()
+            local session = make_session()
+            local respond_spy = spy.new(function() end)
+            local ctx = {
+                params = {
+                    question = "What should I do?",
+                },
+                respond = respond_spy,
+            }
+
+            SessionManager._handle_cursor_ask_question(session, ctx)
+
+            assert.spy(session.message_writer.write_message).was.called(0)
+            assert.same({
+                outcome = { outcome = "cancelled" },
+            }, respond_spy.calls[1][1])
+        end)
+
+        it("queues multiple structured questions sequentially", function()
+            local session, captured = make_session()
+            local respond_spy = spy.new(function() end)
+            local ctx = {
+                message_id = 9,
+                params = {
+                    toolCallId = "call-2",
+                    questions = {
+                        {
+                            id = "first",
+                            prompt = "First?",
+                            options = { { id = "a", label = "A" } },
+                        },
+                        {
+                            id = "second",
+                            prompt = "Second?",
+                            options = { { id = "b", label = "B" } },
+                        },
+                    },
+                },
+                respond = respond_spy,
+            }
+
+            SessionManager._handle_cursor_ask_question(session, ctx)
+            captured[1].callback("a")
+            captured[2].callback("b")
+
+            assert.equal(2, #captured)
+            assert.same({
+                outcome = {
+                    outcome = "answered",
+                    answers = {
+                        {
+                            questionId = "first",
+                            selectedOptionIds = { "a" },
+                        },
+                        {
+                            questionId = "second",
+                            selectedOptionIds = { "b" },
+                        },
+                    },
+                },
+            }, respond_spy.calls[1][1])
+        end)
+
+        it("cancels structured questions that require multi-select", function()
+            local session = make_session()
+            local respond_spy = spy.new(function() end)
+            local ctx = {
+                params = {
+                    questions = {
+                        {
+                            id = "many",
+                            prompt = "Choose all?",
+                            allowMultiple = true,
+                            options = { { id = "a", label = "A" } },
+                        },
+                    },
+                },
+                respond = respond_spy,
+            }
+
+            SessionManager._handle_cursor_ask_question(session, ctx)
+
+            assert.same({
+                outcome = { outcome = "cancelled" },
+            }, respond_spy.calls[1][1])
         end)
     end)
 
@@ -1126,6 +1781,53 @@ describe("agentic.SessionManager", function()
             assert.is_false(session.is_generating)
             assert.spy(session.status_animation.stop).was.called(1)
         end)
+
+        it(
+            "clears retained tool call blocks when cancelling an active session",
+            function()
+                local ChatHistory = require("agentic.ui.chat_history")
+                local session = {
+                    is_generating = true,
+                    session_id = "session-1",
+                    permission_manager = {
+                        clear = spy.new(function() end),
+                    },
+                    agent = {
+                        cancel_session = spy.new(function() end),
+                    },
+                    widget = {
+                        clear = spy.new(function() end),
+                        buf_nrs = { input = 1 },
+                    },
+                    todo_list = { clear = function() end },
+                    file_list = { clear = function() end },
+                    code_selection = { clear = function() end },
+                    diagnostics_list = { clear = function() end },
+                    config_options = { clear = function() end },
+                    status_animation = { stop = spy.new(function() end) },
+                    chat_folds = { reset = function() end },
+                    chat_history = ChatHistory:new(),
+                    message_writer = {
+                        clear_navigation_positions = function() end,
+                        tool_call_blocks = {
+                            ["tool-1"] = {
+                                tool_call_id = "tool-1",
+                                kind = "execute",
+                                argument = "cmd",
+                                body = { "large output" },
+                            },
+                        },
+                    },
+                }
+
+                SessionManager._cancel_session(session)
+
+                assert.equal(
+                    0,
+                    vim.tbl_count(session.message_writer.tool_call_blocks)
+                )
+            end
+        )
     end)
 
     describe("_handle_input_submit /new while generating", function()
@@ -1309,8 +2011,10 @@ describe("agentic.SessionManager", function()
 
             schedule_stub:revert()
             save_stub:revert()
-            assert.equal(2, #history.messages)
-            local turn_end = assert.not_nil(history.messages[2])
+            assert.equal(0, #history.messages)
+            assert.equal(2, history.message_count)
+            local turn_end_record = assert.not_nil(history._pending_records[2])
+            local turn_end = assert.not_nil(turn_end_record.message)
             assert.equal("turn_end", turn_end.type)
             assert.equal("number", type(turn_end.timestamp))
             assert.equal("string", type(turn_end.duration))

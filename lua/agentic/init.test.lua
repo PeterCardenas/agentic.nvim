@@ -400,5 +400,24 @@ describe("agentic", function()
             )
             assert.equal(true, resolved_provider_call[4].silent)
         end)
+
+        it("does not run JSONL session migration during setup", function()
+            local agentic = assert.not_nil(Agentic)
+            local ChatHistory = require("agentic.ui.chat_history")
+            local migrate_stub =
+                spy.stub(ChatHistory, "migrate_all_sessions_to_jsonl")
+            migrate_stub:returns({
+                backup_dir = "/tmp/backups",
+                migrated = 0,
+                skipped = 0,
+                failed = 0,
+                errors = {},
+            })
+
+            agentic.setup({})
+
+            assert.spy(migrate_stub).was.called(0)
+            migrate_stub:revert()
+        end)
     end)
 end)

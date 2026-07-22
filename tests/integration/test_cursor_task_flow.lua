@@ -213,7 +213,7 @@ describe("Cursor task flow", function()
         local restored_content = child.lua([[
                 local tab_id = vim.api.nvim_get_current_tabpage()
                 local session = require("agentic.session_registry").sessions[tab_id]
-                local messages = session.chat_history.messages
+                local source = session.chat_history:get_replay_source()
 
                 local MessageWriter = require("agentic.ui.message_writer")
                 local fresh_buf = vim.api.nvim_create_buf(false, true)
@@ -221,7 +221,7 @@ describe("Cursor task flow", function()
                 local writer = MessageWriter:new(fresh_buf)
 
                 local SessionRestore = require("agentic.session_restore")
-                SessionRestore.replay_messages(writer, messages)
+                SessionRestore.replay_messages_from_source(writer, source)
 
                 local lines = vim.api.nvim_buf_get_lines(fresh_buf, 0, -1, false)
                 vim.api.nvim_buf_delete(fresh_buf, { force = true })

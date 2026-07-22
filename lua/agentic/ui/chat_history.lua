@@ -1,17 +1,18 @@
 local Config = require("agentic.config")
 local Logger = require("agentic.utils.logger")
 local FileSystem = require("agentic.utils.file_system")
+local ToolCallBody = require("agentic.utils.tool_call_body")
 
 --- @class agentic.ui.ChatHistory.UserMessage
 --- @field type "user"
---- @field text string Raw user input text, not the buffer formatted content
---- @field timestamp integer Unix timestamp when message was sent
+--- @field text string
+--- @field timestamp integer
 --- @field provider_name string
 
 --- @class agentic.ui.ChatHistory.AgentMessage
 --- @field type "agent"
 --- @field provider_name string
---- @field text string Agent response text (concatenated chunks)
+--- @field text string
 
 --- @class agentic.ui.ChatHistory.ThoughtMessage : agentic.ui.ChatHistory.AgentMessage
 --- @field type "thought"
@@ -38,33 +39,37 @@ local FileSystem = require("agentic.utils.file_system")
 --- @field title string
 --- @field created_at integer
 --- @field updated_at integer
+--- @field message_count? integer
 
---- @class agentic.ui.ChatHistory.MessagesData
---- @field messages agentic.ui.ChatHistory.Message[]
-
---- @class agentic.ui.ChatHistory.LegacyStorageData
+--- @class agentic.ui.ChatHistory.ReplaySource
+--- @field kind "jsonl"|"messages"
 --- @field session_id? string
---- @field acp_session_id? string
---- @field title? string
---- @field timestamp? integer
---- @field created_at? integer
---- @field updated_at? integer
---- @field messages agentic.ui.ChatHistory.Message[]
+--- @field messages? agentic.ui.ChatHistory.Message[]
 
 --- @class agentic.ui.ChatHistory.MigrationResult
 --- @field backup_dir string
 --- @field migrated integer
+--- @field recovered integer
 --- @field skipped integer
+--- @field failed integer
+--- @field errors string[]
 
 --- @class agentic.ui.ChatHistory
 --- @field session_id? string
 --- @field acp_session_id? string
---- @field created_at integer Unix timestamp when session was first created
---- @field updated_at integer Unix timestamp when session was last saved
---- @field messages agentic.ui.ChatHistory.Message[]
+--- @field created_at integer
+--- @field updated_at integer
+--- @field messages agentic.ui.ChatHistory.Message[] Compatibility field; live sessions keep this empty.
+--- @field message_count integer
 --- @field title string
+--- @field _pending_records table[]
+--- @field _meta_written boolean
+--- @field _loaded_from_disk boolean
+--- @field _event_write_error? string
 local ChatHistory = {}
 ChatHistory.__index = ChatHistory
+
+local BACKUP_DIR_NAME = "_jsonl_migration_backups"
 
 --- @param timestamp integer
 --- @param duration string
@@ -77,6 +82,83 @@ function ChatHistory.format_turn_end(timestamp, duration)
     )
 end
 
+--- @return agentic.ui.ChatHistory history
+function ChatHistory:new()
+    local now = os.time()
+    --- @type agentic.ui.ChatHistory
+    local instance = setmetatable({
+        session_id = nil,
+        acp_session_id = nil,
+        created_at = now,
+        updated_at = now,
+        messages = {},
+        message_count = 0,
+        title = "",
+        _pending_records = {},
+        _meta_written = false,
+        _loaded_from_disk = false,
+        _event_write_error = nil,
+    }, self)
+    return instance
+end
+
+function ChatHistory.get_project_folder()
+    local cwd = FileSystem.get_git_root()
+    local normalized = cwd:gsub("[/\\%s:]", "_"):gsub("^_+", "")
+    local hash = vim.fn.sha256(cwd):sub(1, 8)
+    return normalized .. "_" .. hash
+end
+
+--- @return string folder_path
+function ChatHistory.get_sessions_folder()
+    local session_restore = Config.session_restore or {}
+    local base = session_restore.storage_path
+        or vim.fs.joinpath(vim.fn.stdpath("cache"), "agentic", "sessions")
+    return vim.fs.joinpath(base, ChatHistory.get_project_folder())
+end
+
+--- @return string folder_path
+function ChatHistory.get_sessions_root()
+    local session_restore = Config.session_restore or {}
+    local folder_path = session_restore.storage_path
+        or vim.fs.joinpath(vim.fn.stdpath("cache"), "agentic", "sessions")
+    --- @cast folder_path string
+    return folder_path
+end
+
+--- @param session_id string
+--- @return string file_path
+function ChatHistory.get_jsonl_file_path(session_id)
+    return vim.fs.joinpath(
+        ChatHistory.get_sessions_folder(),
+        session_id .. ".jsonl"
+    )
+end
+
+--- @param session_id string
+--- @return string file_path
+function ChatHistory.get_file_path(session_id)
+    return ChatHistory.get_jsonl_file_path(session_id)
+end
+
+--- @param session_id string
+--- @return string file_path
+function ChatHistory.get_legacy_file_path(session_id)
+    return vim.fs.joinpath(
+        ChatHistory.get_sessions_folder(),
+        session_id .. ".json"
+    )
+end
+
+--- @param session_id string
+--- @return string file_path
+function ChatHistory.get_metadata_file_path(session_id)
+    return vim.fs.joinpath(
+        ChatHistory.get_sessions_folder(),
+        session_id .. ".meta.json"
+    )
+end
+
 --- @param parsed table|nil
 --- @return integer created_at
 --- @return integer updated_at
@@ -84,7 +166,6 @@ local function normalize_session_times(parsed)
     if type(parsed) ~= "table" then
         return 0, 0
     end
-
     local created_at = parsed.created_at or parsed.timestamp or 0
     local updated_at = parsed.updated_at or parsed.timestamp or created_at
     return created_at, updated_at
@@ -100,236 +181,550 @@ local function resolve_session_id(parsed, fallback_id)
     return fallback_id
 end
 
---- @return agentic.ui.ChatHistory
-function ChatHistory:new()
-    local now = os.time()
-    local instance = setmetatable({
-        session_id = nil,
-        acp_session_id = nil,
-        created_at = now,
-        updated_at = now,
-        messages = {},
-        title = "",
-    }, self)
-    return instance
-end
-
---- Generate the project folder name from CWD
---- Normalizes path by replacing slashes, spaces, and colons with underscores
---- Appends first 8 chars of SHA256 hash for collision resistance
-function ChatHistory.get_project_folder()
-    local cwd = FileSystem.get_git_root()
-
-    local normalized = cwd:gsub("[/\\%s:]", "_"):gsub("^_+", "")
-    local hash = vim.fn.sha256(cwd):sub(1, 8)
-
-    return normalized .. "_" .. hash
-end
-
---- Get the folder path for storing sessions for the current project
---- @return string folder_path
-function ChatHistory.get_sessions_folder()
-    local base = Config.session_restore.storage_path
-        or vim.fs.joinpath(vim.fn.stdpath("cache"), "agentic", "sessions")
-    local project_folder = ChatHistory.get_project_folder()
-    return vim.fs.joinpath(base, project_folder)
-end
-
---- Get the base folder for storing all projects' sessions
---- @return string folder_path
-function ChatHistory.get_sessions_root()
-    local folder_path = Config.session_restore.storage_path
-    if folder_path == nil then
-        folder_path =
-            vim.fs.joinpath(vim.fn.stdpath("cache"), "agentic", "sessions")
+--- @param msg agentic.ui.ChatHistory.Message
+--- @return agentic.ui.ChatHistory.Message compacted
+local function compact_message(msg)
+    if msg.type ~= "tool_call" or not msg.body then
+        return msg
     end
-    --- @cast folder_path string
-    return folder_path
-end
-
---- Generate the full file path for this session's messages JSON file
---- @param session_id string
---- @return string file_path
-function ChatHistory.get_file_path(session_id)
-    return vim.fs.joinpath(
-        ChatHistory.get_sessions_folder(),
-        session_id .. ".json"
+    local compacted = vim.tbl_deep_extend("force", {}, msg)
+    compacted.body = ToolCallBody.truncate_for_display(
+        msg.body,
+        ToolCallBody.get_max_display_lines()
     )
+    return compacted
 end
 
---- Generate the full file path for this session's metadata JSON file
---- @param session_id string
---- @return string file_path
-function ChatHistory.get_metadata_file_path(session_id)
-    return vim.fs.joinpath(
-        ChatHistory.get_sessions_folder(),
-        session_id .. ".meta.json"
-    )
-end
-
---- @param parsed table|nil
---- @return boolean is_legacy
-local function is_legacy_storage_data(parsed)
-    return type(parsed) == "table"
-        and (
-            parsed.session_id ~= nil
-            or parsed.title ~= nil
-            or parsed.timestamp ~= nil
-            or parsed.created_at ~= nil
-            or parsed.updated_at ~= nil
-        )
-end
-
---- @param parsed table|nil
---- @return boolean is_messages_data
-local function is_messages_storage_data(parsed)
-    return type(parsed) == "table" and type(parsed.messages) == "table"
-end
-
---- @param lines string[]|nil
+--- @param path string
 --- @return string|nil content
-local function join_file_lines(lines)
-    if not lines or #lines == 0 then
+local function read_file_sync(path)
+    if vim.fn.filereadable(path) == 0 then
         return nil
     end
+    local lines = vim.fn.readfile(path)
+    if not lines then
+        return nil
+    end
+    if #lines == 0 then
+        return ""
+    end
     return table.concat(lines, "\n")
+end
+
+--- @param path string
+--- @param callback fun(content: string|nil)
+local function read_file_async(path, callback)
+    vim.uv.fs_open(path, "r", 438, function(open_err, fd)
+        if open_err or not fd then
+            vim.schedule(function()
+                callback(nil)
+            end)
+            return
+        end
+
+        vim.uv.fs_fstat(fd, function(stat_err, stat)
+            if stat_err or not stat then
+                vim.uv.fs_close(fd)
+                vim.schedule(function()
+                    callback(nil)
+                end)
+                return
+            end
+
+            vim.uv.fs_read(fd, stat.size, 0, function(read_err, content)
+                vim.uv.fs_close(fd)
+                vim.schedule(function()
+                    callback(read_err and nil or content)
+                end)
+            end)
+        end)
+    end)
+end
+
+--- @type fun(path: string, content: string): boolean, string|nil
+local write_file_atomic_sync = function(_path, _content)
+    error("metadata writer not initialized")
+end
+local function read_session_metadata(session_id, callback)
+    local metadata_path = ChatHistory.get_metadata_file_path(session_id)
+    local function decode_metadata(content)
+        local ok, record = pcall(vim.json.decode, content or "")
+        if not ok or type(record) ~= "table" then
+            return nil, false
+        end
+        if record.type == "meta" then
+            record.type = nil
+        end
+        if
+            type(record.session_id) == "string"
+            and record.session_id ~= ""
+            and record.session_id ~= session_id
+        then
+            return nil, true
+        end
+        if
+            type(record.title) ~= "string"
+            or type(record.created_at) ~= "number"
+            or type(record.updated_at) ~= "number"
+        then
+            return nil, false
+        end
+        local created_at, updated_at = normalize_session_times(record)
+        --- @type agentic.ui.ChatHistory.SessionMeta
+        local metadata = {
+            session_id = resolve_session_id(record, session_id),
+            acp_session_id = record.acp_session_id,
+            title = record.title,
+            created_at = created_at,
+            updated_at = updated_at,
+            message_count = record.message_count,
+        }
+        return metadata, false
+    end
+
+    local metadata_file = vim.uv.fs_stat(metadata_path)
+    if metadata_file then
+        read_file_async(metadata_path, function(content)
+            local metadata, mismatched = decode_metadata(content)
+            if metadata ~= nil then
+                callback(metadata)
+                return
+            end
+            read_file_async(
+                ChatHistory.get_jsonl_file_path(session_id),
+                function(jsonl_content)
+                    --- @type agentic.ui.ChatHistory.SessionMeta|nil
+                    local fallback = nil
+                    for _, line in
+                        ipairs(
+                            vim.split(
+                                jsonl_content or "",
+                                "\n",
+                                { plain = true }
+                            )
+                        )
+                    do
+                        if line ~= "" then
+                            local candidate = decode_metadata(line)
+                            if candidate then
+                                fallback = candidate
+                            end
+                        end
+                    end
+                    if fallback and not mismatched then
+                        local ok, encoded = pcall(vim.json.encode, fallback)
+                        if ok then
+                            --- @diagnostic disable-next-line: need-check-nil
+                            write_file_atomic_sync(metadata_path, encoded)
+                        end
+                    end
+                    callback(fallback)
+                end
+            )
+        end)
+        return
+    end
+
+    read_file_async(
+        ChatHistory.get_jsonl_file_path(session_id),
+        function(content)
+            --- @type agentic.ui.ChatHistory.SessionMeta|nil
+            local metadata = nil
+            for _, line in
+                ipairs(vim.split(content or "", "\n", { plain = true }))
+            do
+                if line:match('"type"%s*:%s*"meta"') then
+                    metadata = decode_metadata(line)
+                end
+            end
+            if metadata then
+                local ok, encoded = pcall(vim.json.encode, metadata)
+                if ok then
+                    --- @diagnostic disable-next-line: need-check-nil
+                    write_file_atomic_sync(metadata_path, encoded)
+                end
+            end
+            callback(metadata)
+        end
+    )
 end
 
 --- @param path string
 --- @return table|nil parsed
 --- @return string|nil err
 local function read_json_file_sync(path)
-    if vim.fn.filereadable(path) == 0 then
+    local content = read_file_sync(path)
+    if not content then
         return nil, "File not found"
     end
-
-    local content = join_file_lines(vim.fn.readfile(path))
-    if not content then
-        return nil, "File is empty"
-    end
-
     local ok, parsed = pcall(vim.json.decode, content)
     if not ok or type(parsed) ~= "table" then
         return nil, "JSON decode error"
     end
-
     return parsed, nil
-end
-
---- @param session_id string
---- @param messages_data agentic.ui.ChatHistory.MessagesData|agentic.ui.ChatHistory.LegacyStorageData
---- @param metadata agentic.ui.ChatHistory.SessionMeta|nil
---- @return agentic.ui.ChatHistory history
-local function build_history(session_id, messages_data, metadata)
-    local instance = ChatHistory:new()
-    instance.session_id = metadata and metadata.session_id or session_id
-    instance.acp_session_id = metadata and metadata.acp_session_id or nil
-    local created_at, updated_at = normalize_session_times(metadata)
-    instance.created_at = created_at
-    instance.updated_at = updated_at
-    instance.messages = messages_data.messages or {}
-    instance.title = metadata and metadata.title or ""
-    return instance
-end
-
---- @param session_id string
---- @param metadata_path string
---- @return agentic.ui.ChatHistory.SessionMeta|nil metadata
-local function read_metadata_sync(session_id, metadata_path)
-    local parsed, err = read_json_file_sync(metadata_path)
-    if err ~= nil or type(parsed) ~= "table" then
-        return nil
-    end
-
-    local created_at, updated_at = normalize_session_times(parsed)
-
-    --- @type agentic.ui.ChatHistory.SessionMeta
-    local metadata = {
-        session_id = resolve_session_id(parsed, session_id),
-        acp_session_id = parsed.acp_session_id,
-        title = parsed.title or "",
-        created_at = created_at,
-        updated_at = updated_at,
-    }
-    return metadata
 end
 
 --- @param path string
 --- @param content string
 --- @return boolean success
 --- @return string|nil err
-local function write_json_sync(path, content)
+local function write_file_sync(path, content)
     local dir = vim.fn.fnamemodify(path, ":h")
-    local ok, err = FileSystem.mkdirp(dir)
+    if vim.fn.isdirectory(dir) == 0 then
+        local ok, err = FileSystem.mkdirp(dir)
+        if not ok then
+            return false, err
+        end
+    end
+    return FileSystem.save_to_disk(path, content)
+end
+
+--- @param path string
+--- @param content string
+--- @return boolean success
+--- @return string|nil err
+write_file_atomic_sync = function(path, content)
+    local tmp_path = path .. ".tmp." .. tostring(vim.uv.hrtime())
+    local ok, err = write_file_sync(tmp_path, content)
     if not ok then
-        return false, err or "Failed to create directory"
+        os.remove(tmp_path)
+        return false, err
+    end
+    local renamed, rename_err = os.rename(tmp_path, path)
+    if not renamed then
+        os.remove(tmp_path)
+        return false, tostring(rename_err or "rename failed")
+    end
+    return true, nil
+end
+
+--- @param path string
+--- @param line string
+--- @return boolean success
+--- @return string|nil err
+local function append_line_sync(path, line)
+    local dir = vim.fn.fnamemodify(path, ":h")
+    if vim.fn.isdirectory(dir) == 0 then
+        local ok, err = FileSystem.mkdirp(dir)
+        if not ok then
+            return false, err
+        end
     end
 
-    return FileSystem.save_to_disk(path, content)
+    local file, open_err = io.open(path, "a")
+    if not file then
+        return false, tostring(open_err)
+    end
+
+    local stat = vim.uv.fs_stat(path)
+    if stat and stat.size > 0 then
+        file:write("\n")
+    end
+    file:write(line)
+    file:close()
+    return true, nil
+end
+
+--- @param record table
+--- @return boolean success
+--- @return string|nil err
+function ChatHistory:_append_record(record)
+    if not self.session_id then
+        table.insert(self._pending_records, record)
+        return true, nil
+    end
+
+    local ok, encoded = pcall(vim.json.encode, record)
+    if not ok then
+        return false, "JSON encoding error"
+    end
+
+    return append_line_sync(
+        ChatHistory.get_jsonl_file_path(self.session_id),
+        encoded
+    )
+end
+
+--- @return table record
+function ChatHistory:_meta_record()
+    --- @type table
+    local record = {
+        session_id = self.session_id,
+        acp_session_id = self.acp_session_id,
+        title = self.title,
+        created_at = self.created_at,
+        updated_at = self.updated_at,
+        message_count = self.message_count,
+    }
+    return record
+end
+
+--- @return boolean success
+--- @return string|nil err
+function ChatHistory:_write_meta_record()
+    if not self.session_id then
+        return true, nil
+    end
+    local ok, encoded = pcall(vim.json.encode, self:_meta_record())
+    if not ok then
+        return false, "JSON encoding error"
+    end
+    local success, err = write_file_atomic_sync(
+        ChatHistory.get_metadata_file_path(self.session_id),
+        encoded
+    )
+    if success then
+        self._meta_written = true
+    end
+    return success, err
+end
+
+--- @return boolean success
+--- @return string|nil err
+function ChatHistory:_flush_pending_records()
+    if not self.session_id then
+        return false, "No session_id set"
+    end
+    for _, record in ipairs(self._pending_records) do
+        local ok, err = self:_append_record(record)
+        if not ok then
+            return false, err
+        end
+    end
+    self._pending_records = {}
+    if not self._meta_written then
+        local meta_ok, meta_err = self:_write_meta_record()
+        if not meta_ok then
+            return false, meta_err
+        end
+    end
+    return true, nil
 end
 
 --- @param msg agentic.ui.ChatHistory.Message
 function ChatHistory:add_message(msg)
-    table.insert(self.messages, msg)
-end
-
---- Append text to the last agent or thought message, or create a new one
---- @param msg { type: "agent"|"thought", text: string, provider_name: string  }
-function ChatHistory:append_agent_text(msg)
-    local last = self.messages[#self.messages]
-    if last and last.type == msg.type then
-        last.text = last.text .. msg.text
-    else
-        table.insert(self.messages, msg)
+    self.message_count = self.message_count + 1
+    self.updated_at = math.max(os.time(), self.updated_at + 1)
+    local record = {
+        type = "message",
+        message = msg,
+    }
+    local ok, err = self:_append_record(record)
+    if not ok then
+        self._event_write_error = err or "Failed to append chat history"
+        table.insert(self._pending_records, record)
+        Logger.debug("Failed to append chat history message:", err)
     end
 end
 
---- Update an existing tool_call by merging update data
+--- @param msg { type: "agent"|"thought", text: string, provider_name: string }
+function ChatHistory:append_agent_text(msg)
+    self:add_message(msg --[[@as agentic.ui.ChatHistory.Message]])
+end
+
 --- @param tool_call_id string
 --- @param update agentic.ui.ChatHistory.ToolCall
 function ChatHistory:update_tool_call(tool_call_id, update)
-    for i = #self.messages, 1, -1 do
-        local msg = self.messages[i]
+    local record = {
+        type = "tool_call_update",
+        tool_call_id = tool_call_id,
+        update = update,
+    }
+    local ok, err = self:_append_record(record)
+    if not ok then
+        self._event_write_error = err or "Failed to append chat history update"
+        table.insert(self._pending_records, record)
+        Logger.debug("Failed to append chat history tool update:", err)
+    end
+end
+
+--- @param messages agentic.ui.ChatHistory.Message[]
+--- @param msg agentic.ui.ChatHistory.Message
+local function append_replayed_message(messages, msg)
+    local last = messages[#messages]
+    if
+        last
+        and (msg.type == "agent" or msg.type == "thought")
+        and last.type == msg.type
+    then
+        last.text = (last.text or "") .. (msg.text or "")
+        return
+    end
+    table.insert(messages, msg)
+end
+
+--- @param messages agentic.ui.ChatHistory.Message[]
+--- @param tool_call_id string
+--- @param update agentic.ui.ChatHistory.ToolCall
+local function apply_tool_call_update(messages, tool_call_id, update)
+    for i = #messages, 1, -1 do
+        local msg = messages[i]
         if msg.type == "tool_call" and msg.tool_call_id == tool_call_id then
-            self.messages[i] = vim.tbl_deep_extend("force", msg, update)
+            messages[i] = vim.tbl_deep_extend("force", msg, update)
             return
         end
     end
 end
 
---- Prepend restored messages to prompt in ACP Content format
---- @param messages agentic.ui.ChatHistory.Message[]
---- @param prompt agentic.acp.Content[] The prompt array to prepend to
-function ChatHistory.prepend_restored_messages(messages, prompt)
-    for _, msg in ipairs(messages) do
-        -- Convert stored messages to ACP Content format
-        if msg.type == "user" then
-            table.insert(prompt, { type = "text", text = "User: " .. msg.text })
-        elseif msg.type == "agent" then
-            table.insert(
-                prompt,
-                { type = "text", text = "Assistant: " .. msg.text }
-            )
-        elseif msg.type == "thought" then
-            table.insert(prompt, {
-                type = "text",
-                text = "Assistant (thinking): " .. msg.text,
-            })
-        elseif msg.type == "tool_call" and msg.argument then
-            local tool_text = string.format(
-                "Tool call (%s): %s",
-                msg.kind or "unknown",
-                msg.argument
-            )
-            -- Include tool output if available
-            if msg.body and #msg.body > 0 then
-                tool_text = tool_text
-                    .. "\nResult:\n"
-                    .. table.concat(msg.body, "\n")
+--- @param session_id string
+--- @param content string
+--- @return agentic.ui.ChatHistory|nil history
+--- @return string|nil err
+local function parse_jsonl_history(session_id, content)
+    local history = ChatHistory:new()
+    history.session_id = session_id
+    history.messages = {}
+    history.message_count = 0
+    history._meta_written = true
+    local metadata_message_count = nil
+    local parsed_message_count = 0
+
+    for _, line in ipairs(vim.split(content, "\n", { plain = true })) do
+        if line ~= "" then
+            local ok, record = pcall(vim.json.decode, line)
+            if not ok or type(record) ~= "table" then
+                return nil, "JSONL decode error"
             end
-            table.insert(prompt, { type = "text", text = tool_text })
+
+            if record.type == "meta" then
+                if
+                    type(record.session_id) ~= "string"
+                    or record.session_id == ""
+                    or record.session_id == session_id
+                then
+                    local created_at, updated_at =
+                        normalize_session_times(record)
+                    history.session_id = resolve_session_id(record, session_id)
+                    history.acp_session_id = record.acp_session_id
+                    history.title = record.title or ""
+                    history.created_at = created_at
+                    history.updated_at = updated_at
+                    metadata_message_count = record.message_count
+                end
+            elseif
+                record.type == "message" and type(record.message) == "table"
+            then
+                append_replayed_message(history.messages, record.message)
+                parsed_message_count = parsed_message_count + 1
+            elseif
+                record.type == "tool_call_update"
+                and type(record.tool_call_id) == "string"
+                and type(record.update) == "table"
+            then
+                apply_tool_call_update(
+                    history.messages,
+                    record.tool_call_id,
+                    record.update
+                )
+            end
         end
     end
+
+    history.message_count = metadata_message_count or parsed_message_count
+    history.session_id = session_id
+    history._loaded_from_disk = true
+
+    return history, nil
+end
+
+--- @param history agentic.ui.ChatHistory
+--- @param metadata table|nil
+--- @return boolean valid
+local function apply_metadata(history, metadata, requested_session_id)
+    if
+        type(metadata) ~= "table"
+        or type(metadata.session_id) ~= "string"
+        or metadata.session_id == ""
+        or type(metadata.title) ~= "string"
+        or type(metadata.created_at) ~= "number"
+        or type(metadata.updated_at) ~= "number"
+    then
+        return false
+    end
+    if metadata.session_id ~= requested_session_id then
+        return false
+    end
+    history.session_id = requested_session_id
+    history.acp_session_id = metadata.acp_session_id
+    history.title = metadata.title or ""
+    history.created_at, history.updated_at = normalize_session_times(metadata)
+    if type(metadata.message_count) == "number" then
+        history.message_count = math.floor(metadata.message_count)
+    end
+    return true
+end
+
+--- @param metadata table|nil
+--- @param session_id string
+--- @return boolean should_repair
+local function should_repair_metadata(metadata, session_id)
+    return type(metadata) ~= "table"
+        or type(metadata.session_id) ~= "string"
+        or metadata.session_id == ""
+        or metadata.session_id == session_id
+end
+
+--- @param session_id string
+--- @return agentic.ui.ChatHistory|nil history
+--- @return string|nil err
+function ChatHistory.load_sync(session_id)
+    local content = read_file_sync(ChatHistory.get_jsonl_file_path(session_id))
+    if not content then
+        return nil, "Failed to read file"
+    end
+
+    local history, err = parse_jsonl_history(session_id, content)
+    if history then
+        local metadata =
+            read_json_file_sync(ChatHistory.get_metadata_file_path(session_id))
+        local valid = apply_metadata(history, metadata, session_id)
+        if not valid and should_repair_metadata(metadata, session_id) then
+            history:_write_meta_record()
+        end
+    end
+    return history, err
+end
+
+--- @param session_id string
+--- @param callback fun(history: agentic.ui.ChatHistory|nil, err: string|nil)
+function ChatHistory.load(session_id, callback)
+    local metadata_path = ChatHistory.get_metadata_file_path(session_id)
+    read_file_async(
+        ChatHistory.get_jsonl_file_path(session_id),
+        function(content)
+            if not content then
+                callback(nil, "Failed to read file")
+                return
+            end
+
+            local history, err = parse_jsonl_history(session_id, content)
+            local function finish()
+                callback(history, err)
+            end
+            if not history or vim.uv.fs_stat(metadata_path) == nil then
+                if history then
+                    history:_write_meta_record()
+                end
+                finish()
+                return
+            end
+            read_file_async(metadata_path, function(metadata_content)
+                local ok, decoded =
+                    pcall(vim.json.decode, metadata_content or "")
+                --- @type table|nil
+                local metadata = ok and decoded or nil
+                local valid = ok
+                    and apply_metadata(history, metadata, session_id)
+                if
+                    not valid
+                    and should_repair_metadata(metadata, session_id)
+                then
+                    history:_write_meta_record()
+                end
+                finish()
+            end)
+        end
+    )
 end
 
 --- @param callback fun(err: string|nil)|nil
@@ -342,277 +737,580 @@ function ChatHistory:save(callback)
         return
     end
 
-    if #self.messages == 0 then
+    if self._event_write_error then
         if callback then
+            callback(self._event_write_error)
+        end
+        return
+    end
+
+    local ok, err
+    if self.message_count == 0 and #self._pending_records == 0 then
+        ok, err = self:_write_meta_record()
+    else
+        ok, err = self:_flush_pending_records()
+    end
+    if ok then
+        ok, err = self:_write_meta_record()
+    end
+
+    if callback then
+        if ok then
             callback(nil)
+        else
+            callback(err or "Failed to save chat history")
         end
-        return
     end
+end
 
-    local messages_path = ChatHistory.get_file_path(self.session_id)
-    local metadata_path = ChatHistory.get_metadata_file_path(self.session_id)
-    local dir = vim.fn.fnamemodify(messages_path, ":h")
+--- @return agentic.ui.ChatHistory.ReplaySource source
+function ChatHistory:get_replay_source()
+    if self._loaded_from_disk then
+        return { kind = "messages", messages = self.messages }
+    end
+    if self.session_id then
+        return { kind = "jsonl", session_id = self.session_id }
+    end
+    return { kind = "messages", messages = self.messages }
+end
 
-    local dir_ok, dir_err = FileSystem.mkdirp(dir)
-    if not dir_ok then
-        Logger.debug("Failed to create directory:", dir, dir_err)
-        if callback then
-            callback(
-                "Failed to create directory: " .. (dir_err or "unknown error")
-            )
+--- @param source agentic.ui.ChatHistory.ReplaySource|agentic.ui.ChatHistory.Message[]
+--- @return agentic.ui.ChatHistory.Message[] messages
+function ChatHistory.collect_messages(source)
+    if vim.islist(source) then
+        return source --[[@as agentic.ui.ChatHistory.Message[] ]]
+    end
+    --- @cast source agentic.ui.ChatHistory.ReplaySource
+    if source.kind == "messages" then
+        return source.messages or {}
+    end
+    if source.session_id then
+        local history = ChatHistory.load_sync(source.session_id)
+        return history and history.messages or {}
+    end
+    return {}
+end
+
+--- @param source agentic.ui.ChatHistory.ReplaySource|agentic.ui.ChatHistory.Message[]
+--- @return boolean success
+--- @return string|nil err
+--- @return agentic.ui.ChatHistory.Message[]|nil messages
+function ChatHistory:append_replay_source(source)
+    if vim.islist(source) then
+        --- @cast source agentic.ui.ChatHistory.Message[]
+        for _, message in ipairs(source) do
+            self:add_message(message)
         end
-        return
+        return true, nil, source
     end
 
-    --- @type agentic.ui.ChatHistory.MessagesData
-    local messages_data = {
-        messages = self.messages,
-    }
-
-    local now = os.time()
-    if now <= self.updated_at then
-        now = self.updated_at + 1
-    end
-    self.updated_at = now
-
-    --- @type agentic.ui.ChatHistory.SessionMeta
-    local metadata = {
-        session_id = self.session_id,
-        acp_session_id = self.acp_session_id,
-        title = self.title,
-        created_at = self.created_at,
-        updated_at = self.updated_at,
-    }
-
-    local messages_ok, messages_json = pcall(vim.json.encode, messages_data)
-    if not messages_ok then
-        Logger.debug("JSON encoding failed:", messages_json)
-        if callback then
-            callback("JSON encoding error")
+    --- @cast source agentic.ui.ChatHistory.ReplaySource
+    if source.kind == "messages" then
+        for _, message in ipairs(source.messages or {}) do
+            self:add_message(message)
         end
-        return
+        return true, nil, source.messages or {}
     end
 
-    local metadata_ok, metadata_json = pcall(vim.json.encode, metadata)
-    if not metadata_ok then
-        Logger.debug("JSON encoding failed:", metadata_json)
-        if callback then
-            callback("JSON encoding error")
+    if not source.session_id then
+        return true, nil, {}
+    end
+
+    if source.session_id == self.session_id then
+        return true, nil, {}
+    end
+
+    local path = ChatHistory.get_jsonl_file_path(source.session_id)
+    if vim.fn.filereadable(path) == 0 then
+        return false, "Replay source not found"
+    end
+
+    if self.session_id and not self._meta_written then
+        local meta_ok, meta_err = self:_write_meta_record()
+        if not meta_ok then
+            return false, meta_err
         end
-        return
     end
 
-    FileSystem.write_file(messages_path, messages_json, function(messages_err)
-        if messages_err then
-            if callback then
-                vim.schedule(function()
-                    callback(messages_err)
-                end)
+    local messages = {}
+    for line in io.lines(path) do
+        if line ~= "" then
+            local ok, record = pcall(vim.json.decode, line)
+            if not ok or type(record) ~= "table" then
+                return false, "JSONL decode error"
             end
-            return
-        end
 
-        FileSystem.write_file(
-            metadata_path,
-            metadata_json,
-            function(metadata_err)
-                if callback then
-                    vim.schedule(function()
-                        callback(metadata_err)
-                    end)
+            if record.type == "message" then
+                self.message_count = self.message_count + 1
+                append_replayed_message(messages, record.message)
+                local append_ok, append_err = self:_append_record(record)
+                if not append_ok then
+                    return false, append_err
+                end
+            elseif record.type == "tool_call_update" then
+                apply_tool_call_update(
+                    messages,
+                    record.tool_call_id,
+                    record.update
+                )
+                local append_ok, append_err = self:_append_record(record)
+                if not append_ok then
+                    return false, append_err
                 end
             end
-        )
-    end)
+        end
+    end
+
+    return true, nil, messages
 end
 
---- @param session_id string
---- @param callback fun(history: agentic.ui.ChatHistory|nil, err: string|nil)
-function ChatHistory.load(session_id, callback)
-    local messages_path = ChatHistory.get_file_path(session_id)
-    local metadata_path = ChatHistory.get_metadata_file_path(session_id)
-
-    FileSystem.read_file(messages_path, nil, nil, function(content)
-        if not content then
-            vim.schedule(function()
-                callback(nil, "Failed to read file")
-            end)
-            return
+--- @param messages_or_source agentic.ui.ChatHistory.Message[]|agentic.ui.ChatHistory.ReplaySource
+--- @param prompt agentic.acp.Content[]
+function ChatHistory.prepend_restored_messages(messages_or_source, prompt)
+    local messages = ChatHistory.collect_messages(messages_or_source)
+    for _, msg in ipairs(messages) do
+        if msg.type == "user" then
+            table.insert(prompt, { type = "text", text = "User: " .. msg.text })
+        elseif msg.type == "agent" then
+            table.insert(prompt, {
+                type = "text",
+                text = "Assistant: " .. msg.text,
+            })
+        elseif msg.type == "thought" then
+            table.insert(prompt, {
+                type = "text",
+                text = "Assistant (thinking): " .. msg.text,
+            })
+        elseif msg.type == "tool_call" and msg.argument then
+            local tool_text = string.format(
+                "Tool call (%s): %s",
+                msg.kind or "unknown",
+                msg.argument
+            )
+            if msg.body and #msg.body > 0 then
+                tool_text = tool_text
+                    .. "\nResult:\n"
+                    .. table.concat(msg.body, "\n")
+            end
+            table.insert(prompt, { type = "text", text = tool_text })
         end
-
-        local ok, parsed = pcall(vim.json.decode, content)
-        if not ok then
-            Logger.debug("JSON decode failed:", parsed)
-            vim.schedule(function()
-                callback(nil, "JSON decode error")
-            end)
-            return
-        end
-
-        if
-            is_legacy_storage_data(parsed) and is_messages_storage_data(parsed)
-        then
-            --- @cast parsed agentic.ui.ChatHistory.LegacyStorageData
-            local created_at, updated_at = normalize_session_times(parsed)
-            --- @type agentic.ui.ChatHistory.SessionMeta
-            local legacy_metadata = {
-                session_id = resolve_session_id(parsed, session_id),
-                acp_session_id = parsed.acp_session_id,
-                title = parsed.title or "",
-                created_at = created_at,
-                updated_at = updated_at,
-            }
-            local instance = build_history(session_id, parsed, legacy_metadata)
-            vim.schedule(function()
-                callback(instance, nil)
-            end)
-            return
-        end
-
-        if not is_messages_storage_data(parsed) then
-            vim.schedule(function()
-                callback(nil, "Invalid session data")
-            end)
-            return
-        end
-
-        --- @cast parsed agentic.ui.ChatHistory.MessagesData
-        local metadata = read_metadata_sync(session_id, metadata_path)
-        local instance = build_history(session_id, parsed, metadata)
-
-        vim.schedule(function()
-            callback(instance, nil)
-        end)
-    end)
+    end
 end
 
---- Delete a session file from disk
 --- @param session_id string
 --- @param callback fun(err: string|nil)|nil
 function ChatHistory.delete_session(session_id, callback)
-    local messages_path = ChatHistory.get_file_path(session_id)
-    local metadata_path = ChatHistory.get_metadata_file_path(session_id)
-    local removed_any = false
-
-    local function remove_if_exists(path)
-        if vim.uv.fs_stat(path) == nil then
-            return true, nil
+    local paths = {
+        ChatHistory.get_jsonl_file_path(session_id),
+        ChatHistory.get_metadata_file_path(session_id),
+    }
+    local ok = true
+    local err = nil
+    for _, path in ipairs(paths) do
+        if vim.uv.fs_stat(path) ~= nil then
+            local removed, remove_err = os.remove(path)
+            if not removed then
+                ok = false
+                err = remove_err
+            end
         end
-
-        removed_any = true
-        local ok, err = os.remove(path)
-        return ok, err
     end
-
-    local messages_ok, messages_err = remove_if_exists(messages_path)
-    local metadata_ok, metadata_err = remove_if_exists(metadata_path)
-
     if callback then
-        if not removed_any then
-            callback("Failed to delete session file")
-        elseif messages_ok and metadata_ok then
+        if ok then
             callback(nil)
         else
-            callback(
-                messages_err or metadata_err or "Failed to delete session file"
-            )
+            callback(err or "Failed to delete session files")
         end
     end
 end
 
---- List all sessions for the current project, sorted by updated_at descending
 --- @param callback fun(sessions: agentic.ui.ChatHistory.SessionMeta[])
 function ChatHistory.list_sessions(callback)
     local folder = ChatHistory.get_sessions_folder()
     local sessions = {}
-    local sessions_by_id = {}
-
+    local candidates = {}
+    local seen = {}
     if vim.fn.isdirectory(folder) == 0 then
-        Logger.debug("Session folder does not exist:", folder)
-        callback(sessions)
+        vim.schedule(function()
+            callback(sessions)
+        end)
         return
     end
 
     for filename, file_type in vim.fs.dir(folder) do
-        local session_id = filename:match("^(.*)%.meta%.json$")
-        if file_type == "file" and session_id then
-            local file_path = vim.fs.joinpath(folder, filename)
-            local parsed, err = read_json_file_sync(file_path)
-            if err == nil and type(parsed) == "table" then
-                local created_at, updated_at = normalize_session_times(parsed)
-
-                --- @type agentic.ui.ChatHistory.SessionMeta
-                local session = {
-                    session_id = resolve_session_id(parsed, session_id),
-                    acp_session_id = parsed.acp_session_id,
-                    title = parsed.title or "",
-                    created_at = created_at,
-                    updated_at = updated_at,
-                }
-                sessions_by_id[session.session_id] = session
-            else
-                Logger.debug(
-                    "Failed to parse session metadata file:",
-                    file_path
-                )
+        if file_type == "file" then
+            local jsonl_id = filename:match("^(.*)%.jsonl$")
+            local session_id = jsonl_id
+            if session_id and not seen[session_id] then
+                seen[session_id] = true
+                table.insert(candidates, session_id)
             end
         end
     end
 
-    for filename, file_type in vim.fs.dir(folder) do
-        local session_id = filename:match("^(.*)%.json$")
-        if
-            file_type == "file"
-            and session_id
-            and not filename:match("%.meta%.json$")
-            and not sessions_by_id[session_id]
-        then
-            local file_path = vim.fs.joinpath(folder, filename)
-            local parsed, err = read_json_file_sync(file_path)
-            if
-                err == nil
-                and is_legacy_storage_data(parsed)
-                and is_messages_storage_data(parsed)
-            then
-                --- @cast parsed agentic.ui.ChatHistory.LegacyStorageData
-                local created_at, updated_at = normalize_session_times(parsed)
-
-                --- @type agentic.ui.ChatHistory.SessionMeta
-                local session = {
-                    session_id = resolve_session_id(parsed, session_id),
-                    acp_session_id = parsed.acp_session_id,
-                    title = parsed.title or "",
-                    created_at = created_at,
-                    updated_at = updated_at,
-                }
-                sessions_by_id[session.session_id] = session
-            end
+    local index = 0
+    local function process_next()
+        index = index + 1
+        local session_id = candidates[index]
+        if not session_id then
+            table.sort(sessions, function(a, b)
+                return a.updated_at > b.updated_at
+            end)
+            callback(sessions)
+            return
         end
+
+        read_session_metadata(session_id, function(metadata)
+            if metadata then
+                table.insert(sessions, metadata)
+            end
+            vim.schedule(process_next)
+        end)
     end
 
-    for _, session in pairs(sessions_by_id) do
-        table.insert(sessions, session)
-    end
-
-    table.sort(sessions, function(a, b)
-        return a.updated_at > b.updated_at
-    end)
-
-    callback(sessions)
+    vim.schedule(process_next)
 end
 
---- Back up and migrate all legacy monolithic session files to split storage.
---- @return agentic.ui.ChatHistory.MigrationResult|nil result
-function ChatHistory.migrate_all_legacy_sessions()
+--- @param message table|nil
+--- @return boolean valid
+local function is_valid_message(message)
+    if type(message) ~= "table" or type(message.type) ~= "string" then
+        return false
+    end
+    if message.type == "user" then
+        return type(message.text) == "string"
+            and type(message.timestamp) == "number"
+            and type(message.provider_name) == "string"
+    elseif message.type == "agent" or message.type == "thought" then
+        return type(message.text) == "string"
+            and type(message.provider_name) == "string"
+    elseif message.type == "turn_end" then
+        return type(message.timestamp) == "number"
+            and type(message.duration) == "string"
+    elseif message.type == "tool_call" then
+        return (
+            message.tool_call_id == nil
+            or type(message.tool_call_id) == "string"
+        )
+            and (message.status == nil or type(message.status) == "string")
+            and (message.kind == nil or type(message.kind) == "string")
+            and (message.argument == nil or type(message.argument) == "string")
+    end
+    return false
+end
+
+--- @param messages table|nil
+--- @return boolean valid
+local function is_valid_message_list(messages)
+    if type(messages) ~= "table" or not vim.islist(messages) then
+        return false
+    end
+    for _, message in ipairs(messages) do
+        if not is_valid_message(message) then
+            return false
+        end
+    end
+    return true
+end
+
+--- @param parsed table|nil
+--- @return boolean is_legacy
+local function is_legacy_storage_data(parsed)
+    if
+        type(parsed) ~= "table"
+        or type(parsed.messages) ~= "table"
+        or not vim.islist(parsed.messages)
+    then
+        return false
+    end
+    return is_valid_message_list(parsed.messages)
+end
+
+--- @param messages table
+--- @param metadata table
+--- @return string|nil jsonl
+local function encode_jsonl(messages, metadata)
+    if not is_valid_message_list(messages) then
+        return nil
+    end
+    local lines = {}
+    local ok, encoded_meta = pcall(
+        vim.json.encode,
+        vim.tbl_extend("force", {
+            type = "meta",
+        }, metadata)
+    )
+    if not ok then
+        return nil
+    end
+    table.insert(lines, encoded_meta)
+
+    for _, message in ipairs(messages) do
+        local ok_msg, encoded_msg = pcall(vim.json.encode, {
+            type = "message",
+            message = compact_message(message),
+        })
+        if not ok_msg then
+            return nil
+        end
+        table.insert(lines, encoded_msg)
+    end
+
+    return table.concat(lines, "\n")
+end
+
+--- @param jsonl string
+--- @return boolean valid
+local function validate_jsonl(jsonl)
+    if jsonl == "" then
+        return false
+    end
+    local has_record = false
+    for _, line in ipairs(vim.split(jsonl, "\n", { plain = true })) do
+        if line:match("%S") then
+            has_record = true
+            local ok, record = pcall(vim.json.decode, line)
+            if
+                not ok
+                or type(record) ~= "table"
+                or type(record.type) ~= "string"
+            then
+                return false
+            end
+            if record.type == "meta" then
+                if
+                    type(record.session_id) ~= "string"
+                    or record.session_id == ""
+                    or type(record.title) ~= "string"
+                    or type(record.created_at) ~= "number"
+                    or type(record.updated_at) ~= "number"
+                    or (
+                        record.message_count ~= nil
+                        and type(record.message_count) ~= "number"
+                    )
+                then
+                    return false
+                end
+            elseif
+                record.type == "message"
+                and not is_valid_message(record.message)
+            then
+                return false
+            elseif
+                record.type == "tool_call_update"
+                and (
+                    type(record.tool_call_id) ~= "string"
+                    or type(record.update) ~= "table"
+                )
+            then
+                return false
+            elseif
+                record.type ~= "meta"
+                and record.type ~= "message"
+                and record.type ~= "tool_call_update"
+            then
+                return false
+            end
+        end
+    end
+    return has_record
+end
+
+--- @param jsonl string
+--- @return boolean valid
+local function validate_event_jsonl(jsonl)
+    if not validate_jsonl(jsonl) then
+        return false
+    end
+    for _, line in ipairs(vim.split(jsonl, "\n", { plain = true })) do
+        if line:match("%S") then
+            local ok, record = pcall(vim.json.decode, line)
+            if not ok or type(record) ~= "table" or record.type == "meta" then
+                return false
+            end
+        end
+    end
+    return true
+end
+
+--- @param src string
+--- @param dst string
+--- @return boolean success
+--- @return string|nil err
+local function copy_file(src, dst)
+    local source, source_err = io.open(src, "rb")
+    if not source then
+        return false, tostring(source_err)
+    end
+    local content = source:read("*a")
+    source:close()
+    if not content then
+        return false, "Failed to read backup source"
+    end
+
+    local dir = vim.fn.fnamemodify(dst, ":h")
+    if vim.fn.isdirectory(dir) == 0 then
+        local ok, err = FileSystem.mkdirp(dir)
+        if not ok then
+            return false, err
+        end
+    end
+
+    local destination, destination_err = io.open(dst, "wb")
+    if not destination then
+        return false, tostring(destination_err)
+    end
+    local ok, write_err = destination:write(content)
+    destination:close()
+    if not ok then
+        return false, tostring(write_err)
+    end
+    return true, nil
+end
+
+--- @param sessions_root string
+--- @param project_folder string
+--- @param filename string
+--- @return string[] backup_paths
+local function find_preserved_json_backup(
+    sessions_root,
+    project_folder,
+    filename
+)
+    local backups = {}
+    for backup_root_order, backup_root_name in ipairs({
+        "_legacy_backups",
+        BACKUP_DIR_NAME,
+    }) do
+        local backup_root = vim.fs.joinpath(sessions_root, backup_root_name)
+        if vim.fn.isdirectory(backup_root) == 1 then
+            for timestamp, file_type in vim.fs.dir(backup_root) do
+                if file_type == "directory" then
+                    local backup_path = vim.fs.joinpath(
+                        backup_root,
+                        timestamp,
+                        project_folder,
+                        filename
+                    )
+                    if vim.uv.fs_stat(backup_path) ~= nil then
+                        table.insert(backups, {
+                            path = backup_path,
+                            timestamp = timestamp,
+                            root_order = backup_root_order,
+                        })
+                    end
+                end
+            end
+        end
+    end
+
+    table.sort(backups, function(a, b)
+        if a.timestamp == b.timestamp then
+            return a.root_order < b.root_order
+        end
+        return a.timestamp > b.timestamp
+    end)
+
+    local backup_paths = {}
+    for _, backup in ipairs(backups) do
+        table.insert(backup_paths, backup.path)
+    end
+    return backup_paths
+end
+
+--- @param backup_path string
+--- @param session_id string
+--- @return string|nil jsonl
+local function recover_jsonl_from_backup(backup_path, session_id)
+    local messages_data = read_json_file_sync(backup_path)
+    if not is_legacy_storage_data(messages_data) then
+        return nil
+    end
+    --- @cast messages_data table
+    local created_at, updated_at = normalize_session_times(messages_data)
+    return encode_jsonl(messages_data.messages, {
+        session_id = resolve_session_id(messages_data, session_id),
+        acp_session_id = messages_data.acp_session_id,
+        title = messages_data.title or "",
+        created_at = created_at,
+        updated_at = updated_at,
+        message_count = #messages_data.messages,
+    })
+end
+
+--- @param path string
+local function remove_if_exists(path)
+    if vim.uv.fs_stat(path) ~= nil then
+        os.remove(path)
+    end
+end
+
+--- @param path string
+--- @return boolean empty
+local function is_empty_file(path)
+    local stat = vim.uv.fs_stat(path)
+    return stat ~= nil and stat.type == "file" and stat.size == 0
+end
+
+--- @param folder_name string
+--- @return boolean ignored
+local function is_backup_or_quarantine_folder(folder_name)
+    local normalized = folder_name:lower()
+    return normalized:find("backup", 1, true) ~= nil
+        or normalized:find("quarantine", 1, true) ~= nil
+end
+
+--- @param backup_dir string
+--- @param project_folder string
+--- @param messages_path string
+--- @param metadata_path string
+--- @param filename string
+--- @param session_id string
+--- @return boolean success
+local function backup_legacy_files(
+    backup_dir,
+    project_folder,
+    messages_path,
+    metadata_path,
+    filename,
+    session_id
+)
+    local backup_project = vim.fs.joinpath(backup_dir, project_folder)
+    local backup_messages = vim.fs.joinpath(backup_project, filename)
+    local backup_ok = copy_file(messages_path, backup_messages)
+    local backup_meta_ok = true
+    if vim.uv.fs_stat(metadata_path) ~= nil then
+        backup_meta_ok = copy_file(
+            metadata_path,
+            vim.fs.joinpath(backup_project, session_id .. ".meta.json")
+        )
+    end
+
+    return backup_ok and backup_meta_ok
+end
+
+--- @return agentic.ui.ChatHistory.MigrationResult result
+function ChatHistory.migrate_all_sessions_to_jsonl()
     local sessions_root = ChatHistory.get_sessions_root()
-    local timestamp = os.date("%Y%m%d_%H%M%S")
-    local backup_dir =
-        vim.fs.joinpath(sessions_root, "_legacy_backups", timestamp)
+    local backup_dir_base = vim.fs.joinpath(
+        sessions_root,
+        BACKUP_DIR_NAME,
+        os.date("%Y%m%d_%H%M%S") .. "_" .. tostring(vim.uv.hrtime())
+    )
+    local backup_dir = backup_dir_base
+    local backup_suffix = 0
+    while vim.fn.isdirectory(backup_dir) == 1 do
+        backup_suffix = backup_suffix + 1
+        backup_dir = backup_dir_base .. "_" .. backup_suffix
+    end
     --- @type agentic.ui.ChatHistory.MigrationResult
     local result = {
         backup_dir = backup_dir,
         migrated = 0,
+        recovered = 0,
         skipped = 0,
+        failed = 0,
+        errors = {},
     }
 
     if vim.fn.isdirectory(sessions_root) == 0 then
@@ -620,89 +1318,254 @@ function ChatHistory.migrate_all_legacy_sessions()
     end
 
     for project_folder, file_type in vim.fs.dir(sessions_root) do
-        if file_type == "directory" and project_folder ~= "_legacy_backups" then
+        if
+            file_type == "directory"
+            and project_folder ~= BACKUP_DIR_NAME
+            and not is_backup_or_quarantine_folder(project_folder)
+        then
             local project_path = vim.fs.joinpath(sessions_root, project_folder)
             for filename, child_type in vim.fs.dir(project_path) do
-                local session_id = filename:match("^(.*)%.json$")
-                if
-                    child_type == "file"
-                    and session_id
-                    and not filename:match("%.meta%.json$")
-                then
-                    local messages_path =
-                        vim.fs.joinpath(project_path, filename)
-                    local metadata_path = vim.fs.joinpath(
-                        project_path,
-                        session_id .. ".meta.json"
-                    )
-                    if vim.uv.fs_stat(metadata_path) ~= nil then
-                        result.skipped = result.skipped + 1
-                    else
-                        local content =
-                            join_file_lines(vim.fn.readfile(messages_path))
-                        local ok, parsed = pcall(vim.json.decode, content or "")
-                        if
-                            ok
-                            and is_legacy_storage_data(parsed)
-                            and is_messages_storage_data(parsed)
-                            and content ~= nil
-                        then
-                            local backup_path = vim.fs.joinpath(
+                if child_type == "file" then
+                    local jsonl_id = filename:match("^(.*)%.jsonl$")
+                    local session_id = filename:match("^(.*)%.json$")
+                    if jsonl_id then
+                        local jsonl_path =
+                            vim.fs.joinpath(project_path, filename)
+                        local jsonl_content = read_file_sync(jsonl_path)
+                        if jsonl_content and validate_jsonl(jsonl_content) then
+                            result.skipped = result.skipped + 1
+                        else
+                            local backup_paths = find_preserved_json_backup(
+                                sessions_root,
+                                project_folder,
+                                jsonl_id .. ".json"
+                            )
+                            local recovered_jsonl = nil
+                            local active_legacy_path = vim.fs.joinpath(
+                                project_path,
+                                jsonl_id .. ".json"
+                            )
+                            local recovery_paths = { active_legacy_path }
+                            vim.list_extend(recovery_paths, backup_paths)
+                            for _, candidate_path in ipairs(recovery_paths) do
+                                local candidate_jsonl =
+                                    recover_jsonl_from_backup(
+                                        candidate_path,
+                                        jsonl_id
+                                    )
+                                if candidate_jsonl then
+                                    recovered_jsonl = candidate_jsonl
+                                    break
+                                end
+                            end
+                            local recovery_backup_path = vim.fs.joinpath(
                                 backup_dir,
                                 project_folder,
                                 filename
                             )
-                            local backup_ok, backup_err =
-                                write_json_sync(backup_path, content)
-                            if not backup_ok then
-                                Logger.debug(
-                                    "Failed to back up legacy session:",
-                                    backup_path,
-                                    backup_err
-                                )
-                                result.skipped = result.skipped + 1
-                            else
-                                --- @cast parsed agentic.ui.ChatHistory.LegacyStorageData
-                                local messages_json = vim.json.encode({
-                                    messages = parsed.messages,
-                                })
-                                local created_at, updated_at =
-                                    normalize_session_times(parsed)
-                                local metadata_json = vim.json.encode({
-                                    session_id = resolve_session_id(
-                                        parsed,
-                                        session_id
-                                    ),
-                                    acp_session_id = parsed.acp_session_id,
-                                    title = parsed.title or "",
-                                    created_at = created_at,
-                                    updated_at = updated_at,
-                                })
-
-                                local messages_ok, messages_err =
-                                    write_json_sync(
-                                        messages_path,
-                                        messages_json
+                            if
+                                type(recovered_jsonl) == "string"
+                                and copy_file(jsonl_path, recovery_backup_path)
+                            then
+                                local tmp_path = jsonl_path .. ".tmp"
+                                local write_ok =
+                                    write_file_sync(tmp_path, recovered_jsonl)
+                                if
+                                    write_ok
+                                    and validate_jsonl(
+                                        assert(read_file_sync(tmp_path))
                                     )
-                                local metadata_ok, metadata_err =
-                                    write_json_sync(
-                                        metadata_path,
-                                        metadata_json
-                                    )
-
-                                if messages_ok and metadata_ok then
-                                    result.migrated = result.migrated + 1
+                                    and os.rename(tmp_path, jsonl_path)
+                                then
+                                    result.recovered = result.recovered + 1
                                 else
-                                    Logger.debug(
-                                        "Failed to migrate legacy session:",
-                                        messages_path,
-                                        messages_err or metadata_err
+                                    remove_if_exists(tmp_path)
+                                    result.failed = result.failed + 1
+                                    table.insert(
+                                        result.errors,
+                                        jsonl_path .. ": recovery failed"
                                     )
-                                    result.skipped = result.skipped + 1
                                 end
+                            else
+                                result.failed = result.failed + 1
+                                table.insert(
+                                    result.errors,
+                                    jsonl_path
+                                        .. ": recovery backup unavailable"
+                                )
+                            end
+                        end
+                    elseif
+                        session_id and not filename:match("%.meta%.json$")
+                    then
+                        local messages_path =
+                            vim.fs.joinpath(project_path, filename)
+                        local metadata_path = vim.fs.joinpath(
+                            project_path,
+                            session_id .. ".meta.json"
+                        )
+                        local jsonl_path = vim.fs.joinpath(
+                            project_path,
+                            session_id .. ".jsonl"
+                        )
+
+                        if vim.uv.fs_stat(jsonl_path) ~= nil then
+                            if
+                                backup_legacy_files(
+                                    backup_dir,
+                                    project_folder,
+                                    messages_path,
+                                    metadata_path,
+                                    filename,
+                                    session_id
+                                )
+                            then
+                                remove_if_exists(messages_path)
+                                remove_if_exists(metadata_path)
+                                result.migrated = result.migrated + 1
+                            else
+                                result.failed = result.failed + 1
+                                table.insert(
+                                    result.errors,
+                                    messages_path .. ": backup failed"
+                                )
                             end
                         else
-                            result.skipped = result.skipped + 1
+                            local messages_data, messages_err =
+                                read_json_file_sync(messages_path)
+                            local metadata_data =
+                                read_json_file_sync(metadata_path)
+                            local messages = nil
+                            local metadata = nil
+
+                            if
+                                is_empty_file(messages_path)
+                                and (
+                                    vim.uv.fs_stat(metadata_path) == nil
+                                    or is_empty_file(metadata_path)
+                                )
+                            then
+                                messages = {}
+                                metadata = {
+                                    session_id = session_id,
+                                    title = "",
+                                    created_at = 0,
+                                    updated_at = 0,
+                                    message_count = 0,
+                                }
+                            elseif is_legacy_storage_data(messages_data) then
+                                --- @cast messages_data table
+                                messages = messages_data.messages
+                                local created_at, updated_at =
+                                    normalize_session_times(messages_data)
+                                metadata = {
+                                    session_id = resolve_session_id(
+                                        messages_data,
+                                        session_id
+                                    ),
+                                    acp_session_id = messages_data.acp_session_id,
+                                    title = messages_data.title or "",
+                                    created_at = created_at,
+                                    updated_at = updated_at,
+                                    message_count = #messages,
+                                }
+                            elseif
+                                type(messages_data) == "table"
+                                and type(messages_data.messages) == "table"
+                                and type(metadata_data) == "table"
+                            then
+                                messages = messages_data.messages
+                                local created_at, updated_at =
+                                    normalize_session_times(metadata_data)
+                                metadata = {
+                                    session_id = resolve_session_id(
+                                        metadata_data,
+                                        session_id
+                                    ),
+                                    acp_session_id = metadata_data.acp_session_id,
+                                    title = metadata_data.title or "",
+                                    created_at = created_at,
+                                    updated_at = updated_at,
+                                    message_count = #messages,
+                                }
+                            end
+
+                            local jsonl = messages
+                                    and metadata
+                                    and encode_jsonl(messages, metadata)
+                                or nil
+                            if not jsonl or not validate_jsonl(jsonl) then
+                                result.failed = result.failed + 1
+                                if
+                                    backup_legacy_files(
+                                        backup_dir,
+                                        project_folder,
+                                        messages_path,
+                                        metadata_path,
+                                        filename,
+                                        session_id
+                                    )
+                                then
+                                    remove_if_exists(messages_path)
+                                    remove_if_exists(metadata_path)
+                                end
+                                table.insert(
+                                    result.errors,
+                                    messages_path
+                                        .. ": "
+                                        .. (messages_err or "invalid session")
+                                )
+                            else
+                                if
+                                    not backup_legacy_files(
+                                        backup_dir,
+                                        project_folder,
+                                        messages_path,
+                                        metadata_path,
+                                        filename,
+                                        session_id
+                                    )
+                                then
+                                    result.failed = result.failed + 1
+                                    table.insert(
+                                        result.errors,
+                                        messages_path .. ": backup failed"
+                                    )
+                                else
+                                    local tmp_path = jsonl_path .. ".tmp"
+                                    local write_ok =
+                                        write_file_sync(tmp_path, jsonl)
+                                    if
+                                        write_ok
+                                        and validate_jsonl(
+                                            assert(read_file_sync(tmp_path))
+                                        )
+                                    then
+                                        local rename_ok =
+                                            os.rename(tmp_path, jsonl_path)
+                                        if rename_ok then
+                                            remove_if_exists(messages_path)
+                                            remove_if_exists(metadata_path)
+                                            result.migrated = result.migrated
+                                                + 1
+                                        else
+                                            remove_if_exists(tmp_path)
+                                            result.failed = result.failed + 1
+                                            table.insert(
+                                                result.errors,
+                                                jsonl_path .. ": rename failed"
+                                            )
+                                        end
+                                    else
+                                        remove_if_exists(tmp_path)
+                                        result.failed = result.failed + 1
+                                        table.insert(
+                                            result.errors,
+                                            jsonl_path .. ": write failed"
+                                        )
+                                    end
+                                end
+                            end
                         end
                     end
                 end
@@ -710,6 +1573,195 @@ function ChatHistory.migrate_all_legacy_sessions()
         end
     end
 
+    return result
+end
+
+ChatHistory.migrate_all_legacy_sessions =
+    ChatHistory.migrate_all_sessions_to_jsonl
+
+--- @param content string
+--- @param session_id string
+--- @return string|nil messages_jsonl
+--- @return table|nil metadata
+local function split_mixed_jsonl(content, session_id)
+    local events = {}
+    local metadata = nil
+    for _, line in ipairs(vim.split(content, "\n", { plain = true })) do
+        if line:match("%S") then
+            local ok, record = pcall(vim.json.decode, line)
+            if not ok or type(record) ~= "table" then
+                return nil, nil
+            end
+            if record.type == "meta" then
+                if
+                    type(record.title) ~= "string"
+                    or type(record.created_at) ~= "number"
+                    or type(record.updated_at) ~= "number"
+                then
+                    return nil, nil
+                end
+                metadata = {
+                    session_id = resolve_session_id(record, session_id),
+                    acp_session_id = record.acp_session_id,
+                    title = record.title,
+                    created_at = record.created_at,
+                    updated_at = record.updated_at,
+                    message_count = record.message_count,
+                }
+            elseif
+                (record.type == "message" and is_valid_message(record.message))
+                or (
+                    record.type == "tool_call_update"
+                    and type(record.tool_call_id) == "string"
+                    and type(record.update) == "table"
+                )
+            then
+                table.insert(events, record)
+            else
+                return nil, nil
+            end
+        end
+    end
+    if not metadata then
+        return nil, nil
+    end
+    local lines = {}
+    for _, event in ipairs(events) do
+        local ok, encoded = pcall(vim.json.encode, event)
+        if not ok then
+            return nil, nil
+        end
+        table.insert(lines, encoded)
+    end
+    metadata.message_count = metadata.message_count or 0
+    return table.concat(lines, "\n"), metadata
+end
+
+--- @return agentic.ui.ChatHistory.MigrationResult result
+function ChatHistory.migrate_all_sessions_to_split()
+    local sessions_root = ChatHistory.get_sessions_root()
+    local backup_dir = vim.fs.joinpath(
+        sessions_root,
+        BACKUP_DIR_NAME,
+        os.date("%Y%m%d_%H%M%S") .. "_" .. tostring(vim.uv.hrtime())
+    )
+    --- @type agentic.ui.ChatHistory.MigrationResult
+    local result = {
+        backup_dir = backup_dir,
+        migrated = 0,
+        recovered = 0,
+        skipped = 0,
+        failed = 0,
+        errors = {},
+    }
+    if vim.fn.isdirectory(sessions_root) == 0 then
+        return result
+    end
+
+    for project_folder, project_type in vim.fs.dir(sessions_root) do
+        if
+            project_type == "directory"
+            and project_folder ~= BACKUP_DIR_NAME
+            and not is_backup_or_quarantine_folder(project_folder)
+        then
+            local project_path = vim.fs.joinpath(sessions_root, project_folder)
+            for filename, file_type in vim.fs.dir(project_path) do
+                local session_id = filename:match("^(.*)%.jsonl$")
+                if file_type == "file" and session_id then
+                    local jsonl_path = vim.fs.joinpath(project_path, filename)
+                    local content = read_file_sync(jsonl_path)
+                    local metadata_path = vim.fs.joinpath(
+                        project_path,
+                        session_id .. ".meta.json"
+                    )
+                    local metadata_content = read_file_sync(metadata_path)
+                    local metadata_data = read_json_file_sync(metadata_path)
+                    local already_split = metadata_content ~= nil
+                        and content ~= nil
+                        and not content:match('"type"%s*:%s*"meta"')
+                        and type(metadata_data) == "table"
+                        and type(metadata_data.session_id) == "string"
+                        and metadata_data.session_id ~= ""
+                        and type(metadata_data.title) == "string"
+                        and type(metadata_data.created_at) == "number"
+                        and type(metadata_data.updated_at) == "number"
+                        and validate_event_jsonl(content)
+                    if already_split then
+                        result.skipped = result.skipped + 1
+                    else
+                        local messages_jsonl, metadata =
+                            split_mixed_jsonl(content or "", session_id)
+                        if not messages_jsonl or not metadata then
+                            result.skipped = result.skipped + 1
+                        else
+                            if
+                                type(metadata_data) == "table"
+                                and type(metadata_data.session_id) == "string"
+                                and metadata_data.session_id ~= ""
+                                and type(metadata_data.title) == "string"
+                                and type(metadata_data.created_at) == "number"
+                                and type(metadata_data.updated_at)
+                                    == "number"
+                            then
+                                metadata = vim.tbl_extend(
+                                    "force",
+                                    metadata,
+                                    metadata_data
+                                )
+                            end
+                            local backup_project =
+                                vim.fs.joinpath(backup_dir, project_folder)
+                            local backup_jsonl =
+                                vim.fs.joinpath(backup_project, filename)
+                            local backup_ok =
+                                copy_file(jsonl_path, backup_jsonl)
+                            if metadata_content then
+                                backup_ok = backup_ok
+                                    and copy_file(
+                                        metadata_path,
+                                        vim.fs.joinpath(
+                                            backup_project,
+                                            session_id .. ".meta.json"
+                                        )
+                                    )
+                            end
+                            if not backup_ok then
+                                result.failed = result.failed + 1
+                                table.insert(
+                                    result.errors,
+                                    jsonl_path .. ": backup failed"
+                                )
+                            else
+                                local encoded_metadata =
+                                    vim.json.encode(metadata)
+                                local messages_ok, messages_err =
+                                    write_file_atomic_sync(
+                                        jsonl_path,
+                                        messages_jsonl
+                                    )
+                                local metadata_ok, metadata_err =
+                                    write_file_atomic_sync(
+                                        metadata_path,
+                                        encoded_metadata
+                                    )
+                                if messages_ok and metadata_ok then
+                                    result.migrated = result.migrated + 1
+                                else
+                                    result.failed = result.failed + 1
+                                    table.insert(
+                                        result.errors,
+                                        jsonl_path
+                                            .. ": "
+                                            .. (messages_err or metadata_err)
+                                    )
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
     return result
 end
 

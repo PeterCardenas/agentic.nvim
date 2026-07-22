@@ -48,6 +48,7 @@ local Logger = require("agentic.utils.logger")
 --- @field _available_commands_updates table<string, table> Cursor sends available commands before session starts, indexed by session ID, to be processed after session creation
 --- @field _chunk_stream_started table<string, table<string, boolean>> Track whether a chunk stream started per session and chunk type
 --- @field _task_tool_inputs table<string, agentic.acp.CursorTaskRawInput> Track task raw input so completion updates can rebuild a clean task body
+--- @field _task_tool_sessions table<string, string> Track task tool call session IDs for cancel cleanup
 local CursorACPAdapter = setmetatable({}, { __index = ACPClient })
 CursorACPAdapter.__index = CursorACPAdapter
 
@@ -65,6 +66,7 @@ function CursorACPAdapter:new(config, on_ready)
     self._available_commands_updates = {}
     self._chunk_stream_started = {}
     self._task_tool_inputs = {}
+    self._task_tool_sessions = {}
 
     return self
 end
@@ -203,6 +205,7 @@ end
 --- @param title string|nil
 --- @return string
 function CursorACPAdapter:_format_read_argument(raw_input, title)
+    local _ = self
     return format_file_argument("read", raw_input, title)
 end
 
@@ -210,6 +213,7 @@ end
 --- @param title string|nil
 --- @return string
 function CursorACPAdapter:_format_search_argument(raw_input, title)
+    local _ = self
     local fallback =
         strip_wrapping_backticks(strip_title_prefix("search", title))
     if not raw_input or vim.tbl_isempty(raw_input) then
@@ -360,6 +364,7 @@ end
 --- @param title string|nil
 --- @return string
 function CursorACPAdapter:_format_task_argument(task, title)
+    local _ = self
     local fallback = strip_title_prefix("task", title)
     if not task or vim.tbl_isempty(task) then
         return fallback ~= "" and fallback or "subagent task"
@@ -398,6 +403,16 @@ function CursorACPAdapter:_format_task_argument(task, title)
     end
 
     return fallback ~= "" and fallback or "subagent task"
+end
+
+--- @param tool_call_id string|nil
+function CursorACPAdapter:_clear_task_tool_input(tool_call_id)
+    if not tool_call_id then
+        return
+    end
+
+    self._task_tool_inputs[tool_call_id] = nil
+    self._task_tool_sessions[tool_call_id] = nil
 end
 
 --- Overloading create_session to handle slash commands, as cursor sends them before session starts
@@ -561,6 +576,8 @@ function CursorACPAdapter:__handle_tool_call(session_id, update)
             local raw_input = update.rawInput
             ---@cast raw_input agentic.acp.CursorTaskRawInput
             self._task_tool_inputs[update.toolCallId] = raw_input
+            self._task_tool_sessions = self._task_tool_sessions or {}
+            self._task_tool_sessions[update.toolCallId] = session_id
             message.kind = "SubAgent"
             message.argument =
                 self:_format_task_argument(raw_input, update.title)
@@ -631,6 +648,9 @@ function CursorACPAdapter:__build_tool_call_update(update)
                     final_message = final_message,
                 })
             end
+            if update.status == "completed" or update.status == "failed" then
+                self:_clear_task_tool_input(update.toolCallId)
+            end
         elseif rawOutput.content then
             -- read kind: rawOutput.content is the file text
             message.body = self:safe_split(rawOutput.content)
@@ -661,6 +681,10 @@ function CursorACPAdapter:__build_tool_call_update(update)
     -- Fall back to standard content extraction
     if not message.body and not message.diff then
         message.body = self:extract_content_body(update)
+    end
+
+    if update.status == "completed" or update.status == "failed" then
+        self:_clear_task_tool_input(update.toolCallId)
     end
 
     return message
@@ -734,6 +758,25 @@ function CursorACPAdapter:_handle_cursor_task(message_id, params)
             subscriber.on_tool_call_update(update)
         end)
     end
+
+    self:_clear_task_tool_input(params.toolCallId)
+end
+
+--- @param session_id string
+function CursorACPAdapter:cancel_session(session_id)
+    --- @type string[]
+    local tool_call_ids = {}
+    for tool_call_id, task_session_id in pairs(self._task_tool_sessions) do
+        if task_session_id == session_id then
+            table.insert(tool_call_ids, tool_call_id)
+        end
+    end
+
+    for _, tool_call_id in ipairs(tool_call_ids) do
+        self:_clear_task_tool_input(tool_call_id)
+    end
+
+    ACPClient.cancel_session(self, session_id)
 end
 
 --- @param params table|nil

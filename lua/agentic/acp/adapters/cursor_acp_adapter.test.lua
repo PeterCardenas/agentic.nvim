@@ -1,3 +1,4 @@
+--- @diagnostic disable: access-invisible, missing-fields
 local assert = require("tests.helpers.assert")
 local spy = require("tests.helpers.spy")
 local CursorACPAdapter = require("agentic.acp.adapters.cursor_acp_adapter")
@@ -15,6 +16,7 @@ local function new_adapter()
         _available_commands_updates = {},
         _chunk_stream_started = {},
         _task_tool_inputs = {},
+        _task_tool_sessions = {},
         transport = {
             send = function()
                 return true
@@ -459,5 +461,61 @@ describe("agentic.acp.adapters.CursorACPAdapter", function()
             "Final message:",
             "SUBAGENT_OK",
         }, message.body)
+    end)
+
+    it("clears retained task raw input after terminal task update", function()
+        local adapter = new_adapter()
+        adapter._task_tool_inputs["tool-task-done"] = {
+            _toolName = "task",
+            description = "Subagent returns OK",
+            prompt = "Reply OK",
+        }
+
+        adapter:__build_tool_call_update({
+            sessionUpdate = "tool_call_update",
+            toolCallId = "tool-task-done",
+            status = "completed",
+            rawOutput = {
+                finalMessage = "OK",
+            },
+        })
+
+        assert.is_nil(adapter._task_tool_inputs["tool-task-done"])
+    end)
+
+    it("clears only the cancelled session's retained task inputs", function()
+        local adapter = new_adapter()
+        adapter.subscribers["session-1"] = new_handlers()
+        adapter.subscribers["session-2"] = new_handlers()
+
+        adapter:__handle_tool_call("session-1", {
+            sessionUpdate = "tool_call",
+            toolCallId = "tool-task-1",
+            kind = "other",
+            status = "pending",
+            title = "Task one",
+            rawInput = {
+                _toolName = "task",
+                description = "Task one",
+                prompt = "one",
+            },
+        })
+        adapter:__handle_tool_call("session-2", {
+            sessionUpdate = "tool_call",
+            toolCallId = "tool-task-2",
+            kind = "other",
+            status = "pending",
+            title = "Task two",
+            rawInput = {
+                _toolName = "task",
+                description = "Task two",
+                prompt = "two",
+            },
+        })
+
+        adapter:cancel_session("session-1")
+
+        assert.is_nil(adapter._task_tool_inputs["tool-task-1"])
+        assert.is_not_nil(adapter._task_tool_inputs["tool-task-2"])
     end)
 end)

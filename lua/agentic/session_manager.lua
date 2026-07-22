@@ -100,6 +100,7 @@ end
 --- @field chat_folds? agentic.ui.ChatFolds
 --- @field _header_refresh_scheduled boolean
 --- @field _history_to_send? agentic.ui.ChatHistory.Message[]
+--- @field _history_replay_source? agentic.ui.ChatHistory.ReplaySource
 --- @field _restoring boolean
 --- @field _replace_session boolean
 --- @field _is_creating_session boolean
@@ -129,6 +130,7 @@ end
 --- @field chat_folds agentic.ui.ChatFolds
 --- @field _header_refresh_scheduled boolean
 --- @field _history_to_send? agentic.ui.ChatHistory.Message[] Messages to prepend on next prompt submit
+--- @field _history_replay_source? agentic.ui.ChatHistory.ReplaySource Messages to prepend on next prompt submit
 --- @field _restoring boolean Flag to prevent auto-new_session during restore
 --- @field _replace_session boolean When true, preserve loaded session identity on next submit (continue mode)
 --- @field _is_creating_session boolean True once session startup is requested, until session/new resolves
@@ -586,89 +588,34 @@ end
 --- @param ctx agentic.acp.CursorExtensionContext
 function SessionManager:_handle_cursor_ask_question(ctx)
     local params = ctx.params
-    local q = params.question or params.title or params.prompt
-    local choices = params.options or params.choices or params.answers
+    local questions = params.questions
 
-    if type(q) ~= "string" or q == "" then
-        ctx.respond(vim.empty_dict())
+    if type(questions) ~= "table" or #questions == 0 then
+        ctx.respond({ outcome = { outcome = "cancelled" } })
         return
     end
 
-    if type(choices) ~= "table" or #choices == 0 then
-        self.message_writer:write_message(ACPPayloads.generate_agent_message(q))
-        ctx.respond(vim.empty_dict())
-        return
-    end
-
-    --- @type string[]
-    local lines = { q, "" }
-
-    for i, ch in ipairs(choices) do
-        local label = ""
-
-        if type(ch) == "table" then
-            label = ch.label or ch.name or ch.title or ch.text or ""
-        elseif type(ch) == "string" then
-            label = ch
+    for _, question in ipairs(questions) do
+        if
+            type(question) ~= "table"
+            or type(question.prompt) ~= "string"
+            or question.prompt == ""
+            or type(question.options) ~= "table"
+            or #question.options == 0
+            or question.allowMultiple == true
+        then
+            ctx.respond({ outcome = { outcome = "cancelled" } })
+            return
         end
-
-        table.insert(lines, string.format("- %s) %s", tostring(i), label))
     end
-
-    self.message_writer:write_message(ACPPayloads.generate_agent_message(lines))
 
     self.status_animation:stop()
 
-    --- @type agentic.acp.PermissionOption[]
-    local options = {}
+    local answers = {}
+    local question_index = 1
 
-    for i, ch in ipairs(choices) do
-        local opt_id = tostring(i)
-        local name = ""
-
-        if type(ch) == "table" then
-            opt_id = tostring(ch.id or ch.optionId or ch.value or i)
-            name = ch.label or ch.name or ch.title or ch.text or opt_id
-        elseif type(ch) == "string" then
-            name = ch
-        end
-
-        --- @type agentic.acp.PermissionOption
-        local opt = {
-            optionId = opt_id,
-            name = name,
-            kind = "allow_once",
-        }
-        table.insert(options, opt)
-    end
-
-    local tool_call_id = "cursor_ext_ask_" .. tostring(ctx.message_id or 0)
-
-    --- @type agentic.acp.RequestPermission
-    local request = {
-        sessionId = self.session_id or "",
-        toolCall = {
-            toolCallId = tool_call_id,
-        },
-        options = options,
-    }
-
-    local function wrapped_callback(option_id)
-        if option_id == nil then
-            ctx.respond({
-                outcome = {
-                    outcome = "cancelled",
-                },
-            })
-        else
-            ctx.respond({
-                outcome = {
-                    outcome = "selected",
-                    optionId = option_id,
-                },
-            })
-        end
-
+    local function finish(request, outcome)
+        ctx.respond({ outcome = outcome })
         self:_clear_diff_in_buffer(request.toolCall.toolCallId, false)
 
         if
@@ -679,8 +626,78 @@ function SessionManager:_handle_cursor_ask_question(ctx)
         end
     end
 
-    self:_show_diff_in_buffer(request.toolCall.toolCallId)
-    self.permission_manager:add_request(request, wrapped_callback)
+    local function queue_question()
+        local question = questions[question_index]
+        local question_id = tostring(question.id or question_index)
+        --- @type string[]
+        local lines = { question.prompt, "" }
+        --- @type agentic.acp.PermissionOption[]
+        local options = {}
+
+        for i, choice in ipairs(question.options) do
+            local option_id = tostring(i)
+            local name = ""
+            if type(choice) == "table" then
+                option_id =
+                    tostring(choice.id or choice.optionId or choice.value or i)
+                name = choice.label
+                    or choice.name
+                    or choice.title
+                    or choice.text
+                    or option_id
+            elseif type(choice) == "string" then
+                name = choice
+            end
+            table.insert(lines, string.format("- %s) %s", tostring(i), name))
+            table.insert(options, {
+                optionId = option_id,
+                name = name,
+                kind = "allow_once",
+            })
+        end
+
+        self.message_writer:write_message(
+            ACPPayloads.generate_agent_message(lines)
+        )
+
+        local request = {
+            sessionId = self.session_id or "",
+            toolCall = {
+                toolCallId = "cursor_ext_ask_"
+                    .. tostring(ctx.message_id or 0)
+                    .. "_"
+                    .. tostring(question_index),
+            },
+            options = options,
+        }
+
+        local function callback(option_id)
+            if option_id == nil then
+                finish(request, { outcome = "cancelled" })
+                return
+            end
+
+            table.insert(answers, {
+                questionId = question_id,
+                selectedOptionIds = { option_id },
+            })
+            self:_clear_diff_in_buffer(request.toolCall.toolCallId, false)
+            question_index = question_index + 1
+            if question_index <= #questions then
+                queue_question()
+            else
+                finish(request, {
+                    outcome = "answered",
+                    answers = answers,
+                })
+            end
+        end
+
+        self:_show_diff_in_buffer(request.toolCall.toolCallId)
+        self.permission_manager:add_request(request, callback)
+    end
+
+    queue_question()
 end
 
 --- @param ctx agentic.acp.CursorExtensionContext
@@ -802,6 +819,14 @@ end
 --- Handle tool call update: update UI, history, diff preview, permissions, and reload buffers
 --- @param tool_call_update agentic.ui.MessageWriter.ToolCallBase
 function SessionManager:_on_tool_call_update(tool_call_update)
+    local is_terminal = tool_call_update.status == "completed"
+        or tool_call_update.status == "failed"
+    local is_rejection = tool_call_update.status == "failed"
+
+    if is_terminal then
+        self:_clear_diff_in_buffer(tool_call_update.tool_call_id, is_rejection)
+    end
+
     self.message_writer:update_tool_call_block(tool_call_update)
 
     --- @type agentic.ui.ChatHistory.ToolCall
@@ -821,8 +846,9 @@ function SessionManager:_on_tool_call_update(tool_call_update)
     self.chat_history:update_tool_call(tool_call_update.tool_call_id, tool_call)
 
     -- pre-emptively clear diff preview when tool call update is received, as it's either done or failed
-    local is_rejection = tool_call_update.status == "failed"
-    self:_clear_diff_in_buffer(tool_call_update.tool_call_id, is_rejection)
+    if not is_terminal then
+        self:_clear_diff_in_buffer(tool_call_update.tool_call_id, is_rejection)
+    end
 
     -- Remove the permission request if the tool call failed before user granted it
     if tool_call_update.status == "failed" then
@@ -1222,12 +1248,14 @@ function SessionManager:_handle_input_submit(input_text)
     local prompt = {}
 
     -- If restored/switched session, prepend history on first submit
-    if self._history_to_send then
+    local history_source = self._history_replay_source or self._history_to_send
+    if history_source then
         if not self._replace_session then
             self.chat_history.title = input_text -- Fork: new title from first message
         end
         self._replace_session = false -- Clear flag after use
-        ChatHistory.prepend_restored_messages(self._history_to_send, prompt)
+        ChatHistory.prepend_restored_messages(history_source, prompt)
+        self._history_replay_source = nil
         self._history_to_send = nil
     elseif self.chat_history.title == "" then
         self.chat_history.title = input_text -- Set title for new session
@@ -1409,7 +1437,7 @@ function SessionManager:_handle_input_submit(input_text)
     self.is_generating = true
     self._turn_start_time = vim.uv.hrtime()
 
-    self.agent:send_prompt(self.session_id, prompt, function(response, err)
+    self.agent:send_prompt(session_id, prompt, function(response, err)
         vim.schedule(function()
             self.is_generating = false
 
@@ -1508,9 +1536,6 @@ function SessionManager:new_session(opts)
         end,
 
         on_tool_call = function(tool_call)
-            self.message_writer:write_tool_call_block(tool_call)
-            self.status_animation:start("generating")
-            -- Store full tool_call in chat history
             --- @type agentic.ui.ChatHistory.ToolCall
             local tool_msg = {
                 type = "tool_call",
@@ -1518,9 +1543,12 @@ function SessionManager:new_session(opts)
                 kind = tool_call.kind,
                 status = tool_call.status,
                 argument = tool_call.argument,
-                body = tool_call.body,
-                diff = tool_call.diff,
+                body = tool_call.body and vim.deepcopy(tool_call.body) or nil,
+                diff = tool_call.diff and vim.deepcopy(tool_call.diff) or nil,
             }
+
+            self.message_writer:write_tool_call_block(tool_call)
+            self.status_animation:start("generating")
             self.chat_history:add_message(tool_msg)
         end,
 
@@ -1559,7 +1587,8 @@ function SessionManager:new_session(opts)
     }
 
     self.agent:create_session(handlers, function(response, err)
-        if self._session_create_id ~= session_create_id then
+        local current_session_create_id = self._session_create_id
+        if current_session_create_id ~= session_create_id then
             return
         end
 
@@ -1668,6 +1697,7 @@ function SessionManager:_cancel_session()
         self.agent:cancel_session(self.session_id)
         self.widget:clear()
         self.message_writer:clear_navigation_positions()
+        self.message_writer.tool_call_blocks = {}
         self.todo_list:clear()
         self.file_list:clear()
         self.code_selection:clear()
@@ -1683,6 +1713,7 @@ function SessionManager:_cancel_session()
 
     self.chat_history = ChatHistory:new()
     self._history_to_send = nil
+    self._history_replay_source = nil
 end
 
 --- Show the model selector picker and switch to the selected model.
@@ -1720,6 +1751,10 @@ function SessionManager:switch_provider(provider_name)
 
     -- Save references before get_instance (on_ready may fire synchronously)
     local saved_history = self.chat_history
+    local saved_replay_source = type(saved_history.get_replay_source)
+                == "function"
+            and saved_history:get_replay_source()
+        or { kind = "messages", messages = saved_history.messages or {} }
     local old_agent = self.agent
     local old_session_id = self.session_id
     self._provider_switch_id = (self._provider_switch_id or 0) + 1
@@ -1730,7 +1765,8 @@ function SessionManager:switch_provider(provider_name)
     -- Get new agent instance BEFORE tearing down the current session
     local new_agent = AgentInstance.get_instance(provider_name, function(client)
         vim.schedule(function()
-            if self._provider_switch_id ~= provider_switch_id then
+            local current_provider_switch_id = self._provider_switch_id
+            if current_provider_switch_id ~= provider_switch_id then
                 return
             end
 
@@ -1741,17 +1777,20 @@ function SessionManager:switch_provider(provider_name)
                 restore_mode = true,
                 on_created = function()
                     local new_history = self.chat_history
-                    -- Capture new session metadata before overwriting
-                    local new_session_id = new_history.session_id
-                    local new_created_at = new_history.created_at
-                    local new_updated_at = new_history.updated_at
-
-                    -- Restore saved messages (new_session created a fresh one)
-                    self.chat_history = saved_history
-                    self.chat_history.session_id = new_session_id
-                    self.chat_history.created_at = new_created_at
-                    self.chat_history.updated_at = new_updated_at
-                    self._history_to_send = saved_history.messages
+                    new_history.title = saved_history.title
+                    local copy_ok, copy_err, copied_messages =
+                        new_history:append_replay_source(saved_replay_source)
+                    if not copy_ok then
+                        Logger.debug(
+                            "Failed to copy provider switch history:",
+                            copy_err
+                        )
+                    end
+                    self._history_replay_source = {
+                        kind = "messages",
+                        messages = copied_messages or {},
+                    }
+                    self._history_to_send = nil
                     self._is_first_message = true
                     self._is_switching_provider = false
                 end,
@@ -1800,9 +1839,16 @@ end
 
 ---@return boolean
 function SessionManager:has_messages()
-    return self.chat_history ~= nil
-        and self.chat_history.messages ~= nil
-        and #self.chat_history.messages > 0
+    if self.chat_history == nil then
+        return false
+    end
+    if
+        self.chat_history.message_count
+        and self.chat_history.message_count > 0
+    then
+        return true
+    end
+    return self.chat_history.messages ~= nil and #self.chat_history.messages > 0
 end
 
 ---@param provider_name agentic.UserConfig.ProviderName
@@ -2004,11 +2050,15 @@ end
 function SessionManager:restore_from_history(history, opts)
     opts = opts or {}
 
+    local replay_source = history:get_replay_source()
+
     -- Prevent constructor's auto-new_session from running
     self._restoring = true
-    self._history_to_send = history.messages
+    self._history_replay_source = replay_source
+    self._history_to_send = nil
     self._is_first_message = false
-    self.chat_history = history
+    self.chat_history = ChatHistory:new()
+    self.chat_history.title = history.title
 
     -- In continue mode, remember original identity to restore after new_session
     local original_session_id = opts.replace_session and history.session_id
@@ -2039,10 +2089,23 @@ function SessionManager:restore_from_history(history, opts)
                 self.chat_history.updated_at = original_updated_at
             end
 
+            local copy_ok, copy_err =
+                self.chat_history:append_replay_source(replay_source)
+            if not copy_ok then
+                Logger.debug("Failed to copy restored history:", copy_err)
+            end
+            if
+                self.chat_history.message_count == 0
+                and history.message_count
+                and history.message_count > 0
+            then
+                self.chat_history.message_count = history.message_count
+            end
+
             self._restoring = false
-            SessionRestore.replay_messages(
+            SessionRestore.replay_messages_from_source(
                 self.message_writer,
-                self._history_to_send
+                self._history_replay_source
             )
         end,
     })

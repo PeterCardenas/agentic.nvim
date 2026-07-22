@@ -37,6 +37,7 @@ local KNOWN_ACP_KINDS = {
 --- @field capabilities agentic.acp.ClientCapabilities
 --- @field agent_capabilities? agentic.acp.AgentCapabilities
 --- @field callbacks table<number, fun(result: table|nil, err: agentic.acp.ACPError|nil)|nil>
+--- @field _timed_out_callback_ids table<number, boolean|nil>
 --- @field reconnect_count number
 --- @field transport? agentic.acp.ACPTransportInstance
 --- @field subscribers table<string, agentic.acp.ClientHandlers>
@@ -83,6 +84,7 @@ function ACPClient:new(config, on_ready)
             },
         },
         callbacks = {},
+        _timed_out_callback_ids = {},
         transport = nil,
         state = "disconnected",
         reconnect_count = 0,
@@ -225,6 +227,29 @@ function ACPClient:_send_request(method, params, callback)
     Logger.debug_to_file("request: ", message)
 
     self.transport:send(data)
+
+    local timeout = self.provider_config.timeout
+    if timeout and timeout > 0 then
+        vim.defer_fn(function()
+            if rawget(self.callbacks, id) ~= callback then
+                return
+            end
+
+            self.callbacks[id] = nil
+            self._timed_out_callback_ids = self._timed_out_callback_ids or {}
+            self._timed_out_callback_ids[id] = true
+
+            local err = self:__create_error(
+                self.ERROR_CODES.TIMEOUT_ERROR,
+                string.format(
+                    "Request timed out after %dms: %s",
+                    timeout,
+                    method
+                )
+            )
+            callback(nil, err)
+        end, timeout)
+    end
 end
 
 --- @param method string
@@ -297,6 +322,11 @@ function ACPClient:_handle_message(message)
         if callback then
             self.callbacks[message.id] = nil
             callback(message.result, message.error)
+        elseif
+            self._timed_out_callback_ids
+            and self._timed_out_callback_ids[message.id]
+        then
+            self._timed_out_callback_ids[message.id] = nil
         else
             Logger.notify(
                 "No callback found for response id: "

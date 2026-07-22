@@ -10,10 +10,7 @@ local prewarmed_cwd_by_tab = {}
 ---@param session agentic.SessionManager
 ---@return boolean
 local function can_recreate_prewarmed_session(session)
-    local message_count = session.chat_history
-            and session.chat_history.messages
-            and #session.chat_history.messages
-        or 0
+    local message_count = session.chat_history.message_count or 0
 
     return session._is_first_message == true
         and not session.is_generating
@@ -28,6 +25,8 @@ local function can_recreate_prewarmed_session(session)
         and session.todo_list
         and session.todo_list:is_empty()
 end
+
+M._can_recreate_prewarmed_session = can_recreate_prewarmed_session
 
 ---@param tab_page_id? integer
 local function prewarm_session(tab_page_id)

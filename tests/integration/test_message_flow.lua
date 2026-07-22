@@ -163,7 +163,8 @@ local function get_chat_history_messages()
         local tab_id = vim.api.nvim_get_current_tabpage()
         local session = require("agentic.session_registry").sessions[tab_id]
         if not session then return {} end
-        return session.chat_history.messages
+        local ChatHistory = require("agentic.ui.chat_history")
+        return ChatHistory.collect_messages(session.chat_history:get_replay_source())
     ]])
 end
 
@@ -321,7 +322,7 @@ describe("Tool call - enriched argument preserved in chat history", function()
             local restored_content = child.lua([[
                 local tab_id = vim.api.nvim_get_current_tabpage()
                 local session = require("agentic.session_registry").sessions[tab_id]
-                local messages = session.chat_history.messages
+                local source = session.chat_history:get_replay_source()
 
                 -- Create a fresh buffer and message writer to simulate restore
                 local MessageWriter = require("agentic.ui.message_writer")
@@ -330,7 +331,7 @@ describe("Tool call - enriched argument preserved in chat history", function()
                 local writer = MessageWriter:new(fresh_buf)
 
                 local SessionRestore = require("agentic.session_restore")
-                SessionRestore.replay_messages(writer, messages)
+                SessionRestore.replay_messages_from_source(writer, source)
 
                 local lines = vim.api.nvim_buf_get_lines(fresh_buf, 0, -1, false)
                 vim.api.nvim_buf_delete(fresh_buf, { force = true })

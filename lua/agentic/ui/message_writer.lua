@@ -105,6 +105,22 @@ local function is_agent_message_update(session_update)
     return session_update == "agent_message_chunk"
 end
 
+--- @param status agentic.acp.ToolCallStatus|nil
+--- @return boolean
+local function is_terminal_tool_call_status(status)
+    return status == "completed" or status == "failed"
+end
+
+--- @param tracker agentic.ui.MessageWriter.ToolCallBlock
+local function release_terminal_tool_call_payload(tracker)
+    if not is_terminal_tool_call_status(tracker.status) then
+        return
+    end
+
+    tracker.body = nil
+    tracker.diff = nil
+end
+
 --- @param bufnr integer
 --- @param start_row integer 0-indexed
 --- @param lines string[]
@@ -776,6 +792,7 @@ function MessageWriter:write_tool_call_block(tool_call_block)
     end)
 
     self:_fix_scroll_after_fold()
+    release_terminal_tool_call_payload(tool_call_block)
 end
 
 --- @param tool_call_block agentic.ui.MessageWriter.ToolCallBase
@@ -827,6 +844,7 @@ function MessageWriter:update_tool_call_block(tool_call_block)
             "Extmark not found",
             { tool_call_id = tracker.tool_call_id }
         )
+        release_terminal_tool_call_payload(tracker)
         return
     end
 
@@ -839,6 +857,7 @@ function MessageWriter:update_tool_call_block(tool_call_block)
             "Could not determine end row of tool call block",
             { tool_call_id = tracker.tool_call_id, details = details }
         )
+        release_terminal_tool_call_payload(tracker)
         return
     end
 
@@ -944,6 +963,7 @@ function MessageWriter:update_tool_call_block(tool_call_block)
     end)
 
     self:_fix_scroll_after_fold()
+    release_terminal_tool_call_payload(tracker)
 end
 
 --- @param tool_call_block agentic.ui.MessageWriter.ToolCallBlock

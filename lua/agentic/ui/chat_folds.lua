@@ -54,6 +54,7 @@ end
 
 --- @return boolean
 function ChatFolds:_folding_enabled()
+    local _ = self
     local folding = Config.folding
     return folding ~= nil
         and folding.tool_calls ~= nil
@@ -405,6 +406,7 @@ function ChatFolds:_apply_fold_in_window(
     block_end,
     fold
 )
+    local _ = self
     if not vim.api.nvim_win_is_valid(winid) then
         return
     end

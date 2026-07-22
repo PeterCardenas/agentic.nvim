@@ -664,6 +664,11 @@ stored in:
 `~/.cache/nvim/agentic/sessions/Users_me_projects_myapp_abc12345/`
 
 The hash is to avoid collisions with projects with similar paths.
+Each session is stored as append-only JSONL in `<session_id>.jsonl`. On setup,
+legacy session files are migrated to JSONL and backed up under
+`_jsonl_migration_backups/<timestamp>/` before the active legacy files are
+removed. You can also run `require("agentic").migrate_sessions_to_jsonl()`
+manually.
 
 **Restoring sessions:**
 

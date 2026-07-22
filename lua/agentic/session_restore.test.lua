@@ -345,6 +345,153 @@ describe("SessionRestore", function()
         end)
 
         it(
+            "loads preview content through the asynchronous history callback",
+            function()
+                setup_list_stub()
+                local preview_callback = nil
+                chat_history_load_stub:invokes(function(_session_id, callback)
+                    preview_callback = callback
+                end)
+
+                package.loaded["fzf-lua.previewer.builtin"] = {
+                    base = {
+                        extend = function(self)
+                            local child = {
+                                super = self,
+                                get_tmp_buffer = function(instance)
+                                    local buffer = rawget(
+                                        instance,
+                                        "_preview_buf"
+                                    ) or vim.api.nvim_create_buf(
+                                        false,
+                                        true
+                                    )
+                                    rawset(instance, "_preview_buf", buffer)
+                                    return buffer
+                                end,
+                                set_preview_buf = function() end,
+                            }
+                            child.__index = function(instance, key)
+                                return rawget(instance, key)
+                                    or rawget(self, key)
+                            end
+                            return setmetatable(child, { __index = self })
+                        end,
+                        new = function() end,
+                    },
+                }
+
+                SessionRestore.show_picker(1)
+                local opts = get_fzf_opts()
+                local previewer = opts.previewer()
+                local instance = previewer:new({}, {}, {})
+                instance:populate_preview_buf("session-1\tFirst chat")
+
+                local load_preview = assert.not_nil(preview_callback)
+                local preview_buf = assert.not_nil(instance._preview_buf)
+                local preview_win = vim.api.nvim_open_win(preview_buf, false, {
+                    relative = "editor",
+                    width = 20,
+                    height = 5,
+                    row = 0,
+                    col = 0,
+                })
+                instance.win = { winid = preview_win }
+                local loading_lines =
+                    vim.api.nvim_buf_get_lines(preview_buf, 0, -1, false)
+                assert.equal("_Loading session preview..._", loading_lines[3])
+                load_preview({
+                    title = "Loaded title",
+                    messages = {
+                        {
+                            type = "agent",
+                            text = "Loaded preview",
+                        },
+                    },
+                })
+                local loaded_lines =
+                    vim.api.nvim_buf_get_lines(preview_buf, 0, -1, false)
+                assert.equal("## Loaded title", loaded_lines[3])
+                vim.api.nvim_win_close(preview_win, true)
+                assert.has_no_errors(function()
+                    load_preview({
+                        title = "Closed picker title",
+                        messages = {},
+                    })
+                end)
+                vim.api.nvim_buf_delete(preview_buf, { force = true })
+                load_preview({
+                    title = "Late title",
+                    messages = {},
+                })
+                package.loaded["fzf-lua.previewer.builtin"] = nil
+            end
+        )
+
+        it(
+            "ignores a preview callback superseded by a newer preview",
+            function()
+                setup_list_stub()
+                local preview_callbacks = {}
+                chat_history_load_stub:invokes(function(_session_id, callback)
+                    table.insert(preview_callbacks, callback)
+                end)
+
+                package.loaded["fzf-lua.previewer.builtin"] = {
+                    base = {
+                        extend = function(self)
+                            local child = {
+                                super = self,
+                                get_tmp_buffer = function(instance)
+                                    local buffer = rawget(
+                                        instance,
+                                        "_preview_buf"
+                                    ) or vim.api.nvim_create_buf(
+                                        false,
+                                        true
+                                    )
+                                    rawset(instance, "_preview_buf", buffer)
+                                    return buffer
+                                end,
+                                set_preview_buf = function() end,
+                            }
+                            child.__index = function(instance, key)
+                                return rawget(instance, key)
+                                    or rawget(self, key)
+                            end
+                            return setmetatable(child, { __index = self })
+                        end,
+                        new = function() end,
+                    },
+                }
+
+                SessionRestore.show_picker(1)
+                local previewer = get_fzf_opts().previewer()
+                local instance = previewer:new({}, {}, {})
+                instance:populate_preview_buf("session-1\tFirst chat")
+                instance:populate_preview_buf("session-2\tSecond chat")
+
+                preview_callbacks[1]({
+                    title = "Stale title",
+                    messages = {},
+                })
+                local preview_buf = assert.not_nil(instance._preview_buf)
+                local lines =
+                    vim.api.nvim_buf_get_lines(preview_buf, 0, -1, false)
+                assert.equal("_Loading session preview..._", lines[3])
+
+                preview_callbacks[2]({
+                    title = "Current title",
+                    messages = {},
+                })
+                lines = vim.api.nvim_buf_get_lines(preview_buf, 0, -1, false)
+                assert.equal("## Current title", lines[3])
+                vim.api.nvim_buf_delete(preview_buf, { force = true })
+                package.loaded["fzf-lua.previewer.builtin"] = nil
+            end
+        )
+
+        it(
             "registers ctrl-x action with reload=true and header hint",
             function()
                 setup_list_stub()
@@ -606,7 +753,7 @@ describe("SessionRestore", function()
                 callback(nil)
             end)
 
-            SessionRestore.show_picker(42)
+            SessionRestore.show_picker(vim.api.nvim_get_current_tabpage())
 
             -- Populate items and delete one
             local actions = get_fzf_actions()

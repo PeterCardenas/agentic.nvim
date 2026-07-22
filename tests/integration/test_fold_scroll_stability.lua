@@ -514,7 +514,22 @@ describe("Fold scroll stability", function()
 
             local tracker =
                 assert.not_nil(writer.tool_call_blocks["tc_claude_ui"])
-            local body = assert.not_nil(tracker.body)
+            assert.is_nil(tracker.body)
+
+            local body_start, body_end = ChatFolds._resolve_body_range(
+                bufnr,
+                writer.tool_call_blocks,
+                "tc_claude_ui"
+            )
+            body_start = assert.not_nil(body_start)
+            body_end = assert.not_nil(body_end)
+
+            local body = vim.api.nvim_buf_get_lines(
+                bufnr,
+                body_start - 1,
+                body_end,
+                false
+            )
 
             assert.is_true(vim.tbl_contains(body, "preparing command"))
             assert.is_true(vim.tbl_contains(body, "stdout 1"))
@@ -528,14 +543,6 @@ describe("Fold scroll stability", function()
                 end
             end
             assert.equal(3, separator_count)
-
-            local body_start, body_end = ChatFolds._resolve_body_range(
-                bufnr,
-                writer.tool_call_blocks,
-                "tc_claude_ui"
-            )
-            body_start = assert.not_nil(body_start)
-            body_end = assert.not_nil(body_end)
 
             local outer_fold_starts = {}
             local max_level = 0

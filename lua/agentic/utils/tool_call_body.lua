@@ -1,7 +1,6 @@
 local Config = require("agentic.config")
 
---- Truncate large tool call bodies for chat buffer display.
---- Full bodies remain in session history for ACP continue mode.
+--- Truncate large tool call bodies for chat buffer display and compact history.
 --- @class agentic.utils.ToolCallBody
 local M = {}
 
@@ -36,13 +35,7 @@ function M.truncate_for_display(body, max_lines)
     end
 
     local omitted = #body - max_lines
-    table.insert(
-        display,
-        string.format(
-            "... (%d more lines omitted from display; full output kept in session history)",
-            omitted
-        )
-    )
+    table.insert(display, string.format("... (%d more lines omitted)", omitted))
 
     return display, true
 end

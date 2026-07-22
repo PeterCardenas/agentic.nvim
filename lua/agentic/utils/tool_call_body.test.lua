@@ -34,6 +34,18 @@ describe("agentic.utils.ToolCallBody", function()
             assert.truthy(footer:match("2 more lines omitted"))
         end)
 
+        it(
+            "does not claim omitted output is kept in session history",
+            function()
+                local body = { "1", "2", "3", "4" }
+                local display = ToolCallBody.truncate_for_display(body, 2)
+
+                local footer = assert.not_nil(display[3])
+                assert.is_nil(footer:match("session history"))
+                assert.is_nil(footer:match("full output kept"))
+            end
+        )
+
         it("does not truncate when max_lines is nil", function()
             local body = { "1", "2", "3" }
             local display, truncated =

@@ -455,9 +455,13 @@ agentic.switch_config_option()
 
                                              *agentic.restore_session()*
 agentic.restore_session()
-  Show the provider's session picker to restore a previous
-  session. Sessions are interchangeable between Neovim and the
-  terminal.
+  Show the session picker to restore a previous JSONL session.
+
+                                        *agentic.migrate_sessions_to_jsonl()*
+agentic.migrate_sessions_to_jsonl()
+  Migrate legacy session files to append-only JSONL storage. Legacy
+  active files are backed up under `_jsonl_migration_backups/{timestamp}/`
+  before removal.
 
                                               *agentic.rotate_layout()*
 agentic.rotate_layout({layouts})
@@ -605,10 +609,11 @@ On Linux, img-clip.nvim requires `xclip` (X11) or `wl-clipboard`
 
 Session restoration ~
                                             *agentic-session-restore*
-Sessions are interchangeable between Neovim and the terminal. Call
-|agentic.restore_session()| to see previous sessions from your
-provider. If the current tab has an active conversation, you will be
-prompted to cancel or clear and restore.
+Sessions are saved as append-only JSONL files named `{session_id}.jsonl`
+under the current project's session directory. Call
+|agentic.restore_session()| to see previous sessions for the current
+project. Legacy session files are migrated to JSONL during setup and
+backed up under `_jsonl_migration_backups/{timestamp}/` first.
 
 System information ~
                                              *agentic-system-context*

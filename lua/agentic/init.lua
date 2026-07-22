@@ -5,6 +5,7 @@ local SessionRegistry = require("agentic.session_registry")
 local SessionRestore = require("agentic.session_restore")
 local Object = require("agentic.utils.object")
 local Logger = require("agentic.utils.logger")
+local ChatHistory = require("agentic.ui.chat_history")
 
 --- @class agentic.Agentic
 local Agentic = {}
@@ -268,6 +269,12 @@ end
 function Agentic.restore_session()
     local tab_page_id = vim.api.nvim_get_current_tabpage()
     SessionRestore.show_picker(tab_page_id)
+end
+
+--- Migrates legacy session files to JSONL storage.
+--- @return agentic.ui.ChatHistory.MigrationResult result
+function Agentic.migrate_sessions_to_jsonl()
+    return ChatHistory.migrate_all_sessions_to_jsonl()
 end
 
 --- Toggle between prompt and code window

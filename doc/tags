@@ -58,6 +58,7 @@ agentic.add_files_to_context()	agentic.txt	/*agentic.add_files_to_context()*
 agentic.add_selection()	agentic.txt	/*agentic.add_selection()*
 agentic.add_selection_or_file_to_context()	agentic.txt	/*agentic.add_selection_or_file_to_context()*
 agentic.close()	agentic.txt	/*agentic.close()*
+agentic.migrate_sessions_to_jsonl()	agentic.txt	/*agentic.migrate_sessions_to_jsonl()*
 agentic.new_session()	agentic.txt	/*agentic.new_session()*
 agentic.new_session_with_provider()	agentic.txt	/*agentic.new_session_with_provider()*
 agentic.nvim	agentic.txt	/*agentic.nvim*

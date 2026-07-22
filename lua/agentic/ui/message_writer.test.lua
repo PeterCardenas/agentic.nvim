@@ -1122,7 +1122,7 @@ describe("agentic.ui.MessageWriter", function()
             local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
             local found_footer = false
             for _, line in ipairs(lines) do
-                if line:match("more lines omitted from display") then
+                if line:match("more lines omitted") then
                     found_footer = true
                 end
             end
@@ -1132,7 +1132,7 @@ describe("agentic.ui.MessageWriter", function()
                 "````console",
                 "line 1",
                 "line 2",
-                "... (2 more lines omitted from display; full output kept in session history)",
+                "... (2 more lines omitted)",
                 "````",
             }, vim.list_slice(lines, 1, 6))
         end)
@@ -1144,7 +1144,7 @@ describe("agentic.ui.MessageWriter", function()
             local json_text = '{"key":"' .. long_value .. '","x":42}'
 
             local block =
-                make_tool_call_block("json-1", "completed", { json_text })
+                make_tool_call_block("json-1", "in_progress", { json_text })
             writer:write_tool_call_block(block)
 
             local tracker = writer.tool_call_blocks["json-1"]
@@ -1159,7 +1159,7 @@ describe("agentic.ui.MessageWriter", function()
 
             local block = make_tool_call_block(
                 "json-blank",
-                "completed",
+                "in_progress",
                 { json_text, "" }
             )
             writer:write_tool_call_block(block)
@@ -1188,7 +1188,7 @@ describe("agentic.ui.MessageWriter", function()
 
                 writer:update_tool_call_block({
                     tool_call_id = "json-stream",
-                    status = "completed",
+                    status = "in_progress",
                     body = { json_text },
                 })
 
@@ -1214,13 +1214,80 @@ describe("agentic.ui.MessageWriter", function()
             local malformed = "{" .. string.rep("not valid json ", 10) .. "}"
 
             local block =
-                make_tool_call_block("json-bad", "completed", { malformed })
+                make_tool_call_block("json-bad", "in_progress", { malformed })
             writer:write_tool_call_block(block)
 
             local tracker = writer.tool_call_blocks["json-bad"]
             tracker = assert.not_nil(tracker)
             assert.same({ malformed }, tracker.body)
         end)
+    end)
+
+    describe("terminal tool call payload release", function()
+        it(
+            "keeps rendered body lines but releases retained body on completion",
+            function()
+                Config.folding = {
+                    tool_calls = {
+                        enabled = true,
+                        closed_by_default = false,
+                        preview = true,
+                        min_lines = 20,
+                        max_display_lines = 10,
+                    },
+                } --- @diagnostic disable-line: assign-type-mismatch
+
+                writer:write_tool_call_block({
+                    tool_call_id = "release-body",
+                    status = "in_progress",
+                    kind = "execute",
+                    argument = "printf",
+                    body = { "line 1", "line 2" },
+                })
+
+                writer:update_tool_call_block({
+                    tool_call_id = "release-body",
+                    status = "completed",
+                    body = { "done" },
+                })
+
+                local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+                assert.is_true(vim.tbl_contains(lines, "line 1"))
+                assert.is_true(vim.tbl_contains(lines, "done"))
+
+                local tracker =
+                    assert.not_nil(writer.tool_call_blocks["release-body"])
+                assert.is_nil(tracker.body)
+            end
+        )
+
+        it(
+            "keeps rendered diff lines but releases retained diff on failure",
+            function()
+                writer:write_tool_call_block({
+                    tool_call_id = "release-diff",
+                    status = "in_progress",
+                    kind = "edit",
+                    argument = "lua/example.lua",
+                    diff = {
+                        old = { "local value = 1" },
+                        new = { "local value = 2" },
+                    },
+                })
+
+                writer:update_tool_call_block({
+                    tool_call_id = "release-diff",
+                    status = "failed",
+                })
+
+                local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+                assert.is_true(vim.tbl_contains(lines, "local value = 2"))
+
+                local tracker =
+                    assert.not_nil(writer.tool_call_blocks["release-diff"])
+                assert.is_nil(tracker.diff)
+            end
+        )
     end)
 
     describe("_prepare_block_lines", function()
