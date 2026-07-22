@@ -20,6 +20,11 @@ local function setup_child()
     ]])
 
     child.lua([[ require("agentic").setup() ]])
+    child.lua([[
+        local Config = require("agentic.config")
+        Config.session_restore.storage_path = vim.fn.tempname()
+        vim.fn.mkdir(Config.session_restore.storage_path, "p")
+    ]])
 end
 
 --- Open the widget and wait for session to initialize.
@@ -164,6 +169,7 @@ local function get_chat_history_messages()
         local session = require("agentic.session_registry").sessions[tab_id]
         if not session then return {} end
         local ChatHistory = require("agentic.ui.chat_history")
+        session.chat_history:save(function() end)
         return ChatHistory.collect_messages(session.chat_history:get_replay_source())
     ]])
 end
@@ -174,6 +180,10 @@ describe("Tool call - enriched argument preserved in chat history", function()
     end)
 
     after_each(function()
+        child.lua([[
+            local Config = require("agentic.config")
+            vim.fn.delete(Config.session_restore.storage_path, "rf")
+        ]])
         child.stop()
     end)
 

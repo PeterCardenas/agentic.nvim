@@ -1250,11 +1250,20 @@ function SessionManager:_handle_input_submit(input_text)
     -- If restored/switched session, prepend history on first submit
     local history_source = self._history_replay_source or self._history_to_send
     if history_source then
+        local replay_ok, replay_err =
+            ChatHistory.prepend_restored_messages(history_source, prompt)
+        if not replay_ok then
+            Logger.notify(
+                "Failed to restore chat history: "
+                    .. (replay_err or "unknown error"),
+                vim.log.levels.ERROR
+            )
+            return
+        end
         if not self._replace_session then
             self.chat_history.title = input_text -- Fork: new title from first message
         end
         self._replace_session = false -- Clear flag after use
-        ChatHistory.prepend_restored_messages(history_source, prompt)
         self._history_replay_source = nil
         self._history_to_send = nil
     elseif self.chat_history.title == "" then
@@ -1755,6 +1764,17 @@ function SessionManager:switch_provider(provider_name)
                 == "function"
             and saved_history:get_replay_source()
         or { kind = "messages", messages = saved_history.messages or {} }
+    local saved_messages, replay_err =
+        ChatHistory.collect_messages(saved_replay_source)
+    if not saved_messages then
+        Logger.notify(
+            "Failed to switch provider: "
+                .. (replay_err or "unable to load chat history"),
+            vim.log.levels.ERROR
+        )
+        return
+    end
+    saved_replay_source = { kind = "messages", messages = saved_messages }
     local old_agent = self.agent
     local old_session_id = self.session_id
     self._provider_switch_id = (self._provider_switch_id or 0) + 1
@@ -1781,10 +1801,22 @@ function SessionManager:switch_provider(provider_name)
                     local copy_ok, copy_err, copied_messages =
                         new_history:append_replay_source(saved_replay_source)
                     if not copy_ok then
-                        Logger.debug(
-                            "Failed to copy provider switch history:",
-                            copy_err
+                        Logger.notify(
+                            "Failed to switch provider: "
+                                .. (copy_err or "unable to copy chat history"),
+                            vim.log.levels.ERROR
                         )
+                        self._is_switching_provider = false
+                        return
+                    else
+                        new_history:save(function(save_err)
+                            if save_err then
+                                Logger.debug(
+                                    "Failed to save provider switch history:",
+                                    save_err
+                                )
+                            end
+                        end)
                     end
                     self._history_replay_source = {
                         kind = "messages",
@@ -2092,7 +2124,22 @@ function SessionManager:restore_from_history(history, opts)
             local copy_ok, copy_err =
                 self.chat_history:append_replay_source(replay_source)
             if not copy_ok then
-                Logger.debug("Failed to copy restored history:", copy_err)
+                Logger.notify(
+                    "Failed to restore chat history: "
+                        .. (copy_err or "unable to copy history"),
+                    vim.log.levels.ERROR
+                )
+                self._restoring = false
+                return
+            else
+                self.chat_history:save(function(save_err)
+                    if save_err then
+                        Logger.debug(
+                            "Failed to save restored history:",
+                            save_err
+                        )
+                    end
+                end)
             end
             if
                 self.chat_history.message_count == 0

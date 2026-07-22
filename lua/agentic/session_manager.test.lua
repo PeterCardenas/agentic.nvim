@@ -523,7 +523,7 @@ describe("agentic.SessionManager", function()
                     message_count = 2,
                     session_id = "old",
                     get_replay_source = function()
-                        return { kind = "jsonl", session_id = "old" }
+                        return { kind = "messages", messages = {} }
                     end,
                 }
 
@@ -561,6 +561,45 @@ describe("agentic.SessionManager", function()
                     session._history_replay_source
                 )
                 assert.is_true(session._is_first_message)
+            end
+        )
+
+        it(
+            "aborts provider switch when replay history cannot be loaded",
+            function()
+                local AgentInstance = require("agentic.acp.agent_instance")
+                get_instance_stub = spy.stub(AgentInstance, "get_instance")
+
+                local new_session_spy = spy.new(function() end)
+                Config.provider = "new-provider"
+
+                local session = {
+                    is_generating = false,
+                    session_id = "old-session",
+                    agent = {
+                        cancel_session = spy.new(function() end),
+                        provider_config = { name = "Old" },
+                    },
+                    permission_manager = { clear = function() end },
+                    todo_list = { clear = function() end },
+                    chat_history = {
+                        messages = {},
+                        session_id = "missing-replay",
+                        get_replay_source = function()
+                            return {
+                                kind = "jsonl",
+                                session_id = "missing-replay",
+                            }
+                        end,
+                    },
+                    new_session = new_session_spy,
+                }
+
+                SessionManager.switch_provider(session, "new-provider")
+
+                assert.spy(get_instance_stub).was.called(0)
+                assert.spy(new_session_spy).was.called(0)
+                assert.spy(notify_stub).was.called(1)
             end
         )
 
@@ -978,6 +1017,9 @@ describe("agentic.SessionManager", function()
                 timestamp = 1704067200,
                 provider_name = "Old Provider",
             })
+            old_history:save(function(err)
+                assert.is_nil(err)
+            end)
             local loaded = ChatHistory.load_sync("old-restore-session")
             assert.is_not_nil(loaded)
             --- @cast loaded agentic.ui.ChatHistory

@@ -371,8 +371,8 @@ local function show_fzf_picker(build_items, on_choice, on_delete, initial_items)
 end
 
 --- Build session items from disk.
---- @param callback fun(items: table[])
-local function build_session_items(callback)
+--- @return table[] items
+local function build_session_items()
     local items = {}
     ChatHistory.list_sessions(function(sessions)
         for _, s in ipairs(sessions) do
@@ -384,40 +384,39 @@ local function build_session_items(callback)
                 session_id = s.session_id,
             })
         end
-        callback(items)
     end)
+    return items
 end
 
 --- Show session picker and restore selected session
 --- @param tab_page_id integer
 function SessionRestore.show_picker(tab_page_id)
-    build_session_items(function(initial_items)
-        if #initial_items == 0 then
-            Logger.notify("No saved sessions found", vim.log.levels.INFO)
+    local initial_items = build_session_items()
+    if #initial_items == 0 then
+        Logger.notify("No saved sessions found", vim.log.levels.INFO)
+        return
+    end
+
+    show_fzf_picker(function(callback)
+        callback(build_session_items())
+    end, function(choice)
+        if not choice then
             return
         end
 
-        show_fzf_picker(function(callback)
-            build_session_items(callback)
-        end, function(choice)
-            if not choice then
+        do_restore(choice.session_id, tab_page_id)
+    end, function(choice)
+        ChatHistory.delete_session(choice.session_id, function(err)
+            if err then
+                Logger.notify(
+                    "Failed to delete session: " .. err,
+                    vim.log.levels.WARN
+                )
                 return
             end
-
-            do_restore(choice.session_id, tab_page_id)
-        end, function(choice)
-            ChatHistory.delete_session(choice.session_id, function(err)
-                if err then
-                    Logger.notify(
-                        "Failed to delete session: " .. err,
-                        vim.log.levels.WARN
-                    )
-                    return
-                end
-                Logger.notify("Session deleted", vim.log.levels.INFO)
-            end)
-        end, initial_items)
-    end)
+            Logger.notify("Session deleted", vim.log.levels.INFO)
+        end)
+    end, initial_items)
 end
 
 --- Replay stored messages to the UI
@@ -500,7 +499,16 @@ end
 --- @param writer agentic.ui.MessageWriter
 --- @param source agentic.ui.ChatHistory.ReplaySource|agentic.ui.ChatHistory.Message[]
 function SessionRestore.replay_messages_from_source(writer, source)
-    SessionRestore.replay_messages(writer, ChatHistory.collect_messages(source))
+    local messages, err = ChatHistory.collect_messages(source)
+    if not messages then
+        Logger.notify(
+            "Failed to replay chat history: " .. (err or "unknown error"),
+            vim.log.levels.ERROR
+        )
+        return false, err
+    end
+    SessionRestore.replay_messages(writer, messages)
+    return true, nil
 end
 
 return SessionRestore

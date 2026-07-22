@@ -32,6 +32,11 @@ local function setup_child()
             },
         })
     ]])
+    child.lua([[
+        local Config = require("agentic.config")
+        Config.session_restore.storage_path = vim.fn.tempname()
+        vim.fn.mkdir(Config.session_restore.storage_path, "p")
+    ]])
 end
 
 local function open_widget_and_wait()
@@ -112,6 +117,10 @@ describe("Cursor task flow", function()
     end)
 
     after_each(function()
+        child.lua([[
+            local Config = require("agentic.config")
+            vim.fn.delete(Config.session_restore.storage_path, "rf")
+        ]])
         child.stop()
     end)
 
