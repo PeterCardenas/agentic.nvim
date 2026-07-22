@@ -1178,6 +1178,61 @@ local function find_preserved_json_backup(
     return backup_paths
 end
 
+--- @param data table|nil
+--- @param session_id string
+--- @return agentic.ui.ChatHistory.SessionMeta|nil metadata
+local function metadata_from_legacy_data(data, session_id)
+    if type(data) ~= "table" then
+        return nil
+    end
+    local created_at, updated_at = normalize_session_times(data)
+    if created_at <= 0 or updated_at <= 0 then
+        return nil
+    end
+    --- @type agentic.ui.ChatHistory.SessionMeta
+    local metadata = {
+        session_id = resolve_session_id(data, session_id),
+        acp_session_id = data.acp_session_id,
+        title = data.title,
+        created_at = created_at,
+        updated_at = updated_at,
+        message_count = data.message_count,
+    }
+    return metadata
+end
+
+--- @param sessions_root string
+--- @param project_folder string
+--- @param session_id string
+--- @return agentic.ui.ChatHistory.SessionMeta|nil metadata
+local function find_legacy_metadata(sessions_root, project_folder, session_id)
+    local project_path = vim.fs.joinpath(sessions_root, project_folder)
+    local candidates = {
+        vim.fs.joinpath(project_path, session_id .. ".json"),
+        vim.fs.joinpath(project_path, session_id .. ".meta.json"),
+    }
+    local backup_json_paths = find_preserved_json_backup(
+        sessions_root,
+        project_folder,
+        session_id .. ".json"
+    )
+    vim.list_extend(candidates, backup_json_paths)
+    local backup_metadata_paths = find_preserved_json_backup(
+        sessions_root,
+        project_folder,
+        session_id .. ".meta.json"
+    )
+    vim.list_extend(candidates, backup_metadata_paths)
+    for _, path in ipairs(candidates) do
+        local data = read_json_file_sync(path)
+        local metadata = metadata_from_legacy_data(data, session_id)
+        if metadata then
+            return metadata
+        end
+    end
+    return nil
+end
+
 --- @param backup_path string
 --- @param session_id string
 --- @return string|nil jsonl
@@ -1370,8 +1425,33 @@ function ChatHistory.migrate_all_sessions_to_jsonl()
                         )
 
                         if vim.uv.fs_stat(jsonl_path) ~= nil then
+                            local jsonl_content = read_file_sync(jsonl_path)
+                            local metadata_data =
+                                read_json_file_sync(metadata_path)
+                            local metadata_ok = true
+                            local metadata_to_write = nil
                             if
-                                backup_legacy_files(
+                                jsonl_content
+                                and validate_event_jsonl(jsonl_content)
+                                and not metadata_from_legacy_data(
+                                    metadata_data,
+                                    session_id
+                                )
+                            then
+                                local metadata = find_legacy_metadata(
+                                    sessions_root,
+                                    project_folder,
+                                    session_id
+                                )
+                                metadata_ok = metadata ~= nil
+                                if metadata_ok and metadata then
+                                    metadata_to_write =
+                                        vim.json.encode(metadata)
+                                end
+                            end
+                            if
+                                metadata_ok
+                                and backup_legacy_files(
                                     backup_dir,
                                     project_folder,
                                     messages_path,
@@ -1380,9 +1460,29 @@ function ChatHistory.migrate_all_sessions_to_jsonl()
                                     session_id
                                 )
                             then
-                                remove_if_exists(messages_path)
-                                remove_if_exists(metadata_path)
-                                result.migrated = result.migrated + 1
+                                if metadata_to_write then
+                                    metadata_ok = write_file_atomic_sync(
+                                        metadata_path,
+                                        metadata_to_write
+                                    ) and decode_session_metadata(
+                                        metadata_to_write,
+                                        session_id
+                                    ) ~= nil
+                                end
+                                if metadata_ok then
+                                    remove_if_exists(messages_path)
+                                    if not metadata_to_write then
+                                        remove_if_exists(metadata_path)
+                                    end
+                                    result.migrated = result.migrated + 1
+                                else
+                                    result.failed = result.failed + 1
+                                    table.insert(
+                                        result.errors,
+                                        messages_path
+                                            .. ": metadata write failed"
+                                    )
+                                end
                             else
                                 result.failed = result.failed + 1
                                 table.insert(
@@ -1645,12 +1745,27 @@ function ChatHistory.migrate_all_sessions_to_split()
                         and type(metadata_data.title) == "string"
                         and type(metadata_data.created_at) == "number"
                         and type(metadata_data.updated_at) == "number"
+                        and metadata_from_legacy_data(metadata_data, session_id) ~= nil
                         and validate_event_jsonl(content)
                     if already_split then
                         result.skipped = result.skipped + 1
                     else
                         local messages_jsonl, metadata =
                             split_mixed_jsonl(content or "", session_id)
+                        if
+                            not messages_jsonl
+                            and content
+                            and validate_event_jsonl(content)
+                        then
+                            metadata = find_legacy_metadata(
+                                sessions_root,
+                                project_folder,
+                                session_id
+                            )
+                            if metadata then
+                                messages_jsonl = content
+                            end
+                        end
                         if not messages_jsonl or not metadata then
                             result.skipped = result.skipped + 1
                         else
@@ -1663,11 +1778,18 @@ function ChatHistory.migrate_all_sessions_to_split()
                                 and type(metadata_data.updated_at)
                                     == "number"
                             then
-                                metadata = vim.tbl_extend(
-                                    "force",
-                                    metadata,
-                                    metadata_data
-                                )
+                                local external_metadata =
+                                    metadata_from_legacy_data(
+                                        metadata_data,
+                                        session_id
+                                    )
+                                if external_metadata then
+                                    metadata = vim.tbl_extend(
+                                        "force",
+                                        metadata,
+                                        external_metadata
+                                    )
+                                end
                             end
                             local backup_project =
                                 vim.fs.joinpath(backup_dir, project_folder)

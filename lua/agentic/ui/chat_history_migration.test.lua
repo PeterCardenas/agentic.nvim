@@ -1092,4 +1092,211 @@ describe("ChatHistory migration", function()
             )
         end
     )
+
+    it(
+        "creates split metadata from an event-only JSONL and active legacy source",
+        function()
+            local project_dir = vim.fs.joinpath(temp_dir, "project-active-meta")
+            vim.fn.mkdir(project_dir, "p")
+            local jsonl_path = vim.fs.joinpath(project_dir, "active.jsonl")
+            local legacy_path = vim.fs.joinpath(project_dir, "active.json")
+            local metadata_path =
+                vim.fs.joinpath(project_dir, "active.meta.json")
+
+            local jsonl_file = assert.not_nil(io.open(jsonl_path, "w"))
+            jsonl_file:write(vim.json.encode({
+                type = "message",
+                message = {
+                    type = "user",
+                    text = "event",
+                    timestamp = 1704067201,
+                    provider_name = "test-provider",
+                },
+            }))
+            jsonl_file:close()
+
+            local legacy_file = assert.not_nil(io.open(legacy_path, "w"))
+            legacy_file:write(vim.json.encode({
+                session_id = "active",
+                acp_session_id = "acp-active",
+                title = "Active legacy title",
+                timestamp = 1704067200,
+                message_count = 9,
+                messages = {},
+            }))
+            legacy_file:close()
+
+            local metadata_file = assert.not_nil(io.open(metadata_path, "w"))
+            metadata_file:write(vim.json.encode({
+                session_id = "active",
+                title = "",
+                created_at = 0,
+                updated_at = 0,
+            }))
+            metadata_file:close()
+
+            local result = ChatHistory.migrate_all_sessions_to_split()
+
+            assert.equal(1, result.migrated)
+            local metadata = vim.json.decode(
+                table.concat(vim.fn.readfile(metadata_path), "\n")
+            )
+            assert.equal("Active legacy title", metadata.title)
+            assert.equal(1704067200, metadata.created_at)
+            assert.equal(1704067200, metadata.updated_at)
+            assert.equal("acp-active", metadata.acp_session_id)
+            assert.equal(9, metadata.message_count)
+            assert.is_not_nil(vim.uv.fs_stat(legacy_path))
+        end
+    )
+
+    it(
+        "recovers split metadata from the exact project's preserved legacy source",
+        function()
+            local project_dir =
+                vim.fs.joinpath(temp_dir, "project-recovery-meta")
+            local other_project_dir =
+                vim.fs.joinpath(temp_dir, "project-other-meta")
+            local backup_dir = vim.fs.joinpath(
+                temp_dir,
+                "_legacy_backups",
+                "20260722_105200",
+                "project-recovery-meta"
+            )
+            local other_backup_dir = vim.fs.joinpath(
+                temp_dir,
+                "_legacy_backups",
+                "20260722_105300",
+                "project-other-meta"
+            )
+            vim.fn.mkdir(project_dir, "p")
+            vim.fn.mkdir(other_project_dir, "p")
+            vim.fn.mkdir(backup_dir, "p")
+            vim.fn.mkdir(other_backup_dir, "p")
+
+            local jsonl_path = vim.fs.joinpath(project_dir, "same.jsonl")
+            local jsonl_file = assert.not_nil(io.open(jsonl_path, "w"))
+            jsonl_file:write(vim.json.encode({
+                type = "message",
+                message = {
+                    type = "user",
+                    text = "event",
+                    timestamp = 1704067201,
+                    provider_name = "test-provider",
+                },
+            }))
+            jsonl_file:close()
+
+            local other_backup_file = assert.not_nil(
+                io.open(vim.fs.joinpath(other_backup_dir, "same.json"), "w")
+            )
+            other_backup_file:write(vim.json.encode({
+                session_id = "same",
+                title = "Wrong project",
+                timestamp = 1,
+                messages = {},
+            }))
+            other_backup_file:close()
+
+            local backup_file = assert.not_nil(
+                io.open(vim.fs.joinpath(backup_dir, "same.json"), "w")
+            )
+            backup_file:write(vim.json.encode({
+                session_id = "same",
+                acp_session_id = "acp-backup",
+                title = "Backup legacy title",
+                timestamp = 1704067202,
+                created_at = 1704067202,
+                updated_at = 1704067202,
+                message_count = 4,
+                messages = {},
+            }))
+            backup_file:close()
+            local backup_metadata_file = assert.not_nil(
+                io.open(vim.fs.joinpath(backup_dir, "same.meta.json"), "w")
+            )
+            backup_metadata_file:write(vim.json.encode({
+                session_id = "same",
+                acp_session_id = "acp-backup",
+                title = "Backup legacy title",
+                timestamp = 1704067202,
+                created_at = 1704067202,
+                updated_at = 1704067202,
+                message_count = 4,
+            }))
+            backup_metadata_file:close()
+
+            local result = ChatHistory.migrate_all_sessions_to_split()
+
+            assert.equal(0, result.skipped)
+            assert.equal(1, result.migrated)
+            local metadata_path = vim.fs.joinpath(project_dir, "same.meta.json")
+            local metadata = vim.json.decode(
+                table.concat(vim.fn.readfile(metadata_path), "\n")
+            )
+            assert.equal("Backup legacy title", metadata.title)
+            assert.equal(1704067202, metadata.created_at)
+            assert.equal(1704067202, metadata.updated_at)
+            assert.equal("acp-backup", metadata.acp_session_id)
+            assert.equal(4, metadata.message_count)
+        end
+    )
+
+    it(
+        "writes valid metadata before removing legacy files beside event-only JSONL",
+        function()
+            local project_dir = vim.fs.joinpath(temp_dir, "project-event-only")
+            vim.fn.mkdir(project_dir, "p")
+            local jsonl_path = vim.fs.joinpath(project_dir, "event-only.jsonl")
+            local legacy_path = vim.fs.joinpath(project_dir, "event-only.json")
+            local metadata_path =
+                vim.fs.joinpath(project_dir, "event-only.meta.json")
+
+            local jsonl_file = assert.not_nil(io.open(jsonl_path, "w"))
+            jsonl_file:write(vim.json.encode({
+                type = "message",
+                message = {
+                    type = "user",
+                    text = "event-only",
+                    timestamp = 1704067201,
+                    provider_name = "test-provider",
+                },
+            }))
+            jsonl_file:close()
+
+            local legacy_file = assert.not_nil(io.open(legacy_path, "w"))
+            legacy_file:write(vim.json.encode({
+                session_id = "event-only",
+                acp_session_id = "acp-event-only",
+                title = "Event-only legacy title",
+                timestamp = 1704067200,
+                message_count = 7,
+                messages = {},
+            }))
+            legacy_file:close()
+
+            local metadata_file = assert.not_nil(io.open(metadata_path, "w"))
+            metadata_file:write(vim.json.encode({
+                session_id = "event-only",
+                title = "",
+                created_at = 0,
+                updated_at = 0,
+            }))
+            metadata_file:close()
+
+            local result = ChatHistory.migrate_all_sessions_to_jsonl()
+
+            assert.equal(1, result.migrated)
+            assert.is_nil(vim.uv.fs_stat(legacy_path))
+            assert.is_not_nil(vim.uv.fs_stat(metadata_path))
+            local metadata = vim.json.decode(
+                table.concat(vim.fn.readfile(metadata_path), "\n")
+            )
+            assert.equal("Event-only legacy title", metadata.title)
+            assert.equal(1704067200, metadata.created_at)
+            assert.equal(1704067200, metadata.updated_at)
+            assert.equal("acp-event-only", metadata.acp_session_id)
+            assert.equal(7, metadata.message_count)
+        end
+    )
 end)
