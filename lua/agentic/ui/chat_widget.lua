@@ -5,6 +5,7 @@ local Logger = require("agentic.utils.logger")
 local WindowDecoration = require("agentic.ui.window_decoration")
 local WidgetLayout = require("agentic.ui.widget_layout")
 local ChatWidgetMaximize = require("agentic.ui.chat_widget_maximize")
+local ChatWidgetGf = require("agentic.ui.chat_widget_gf")
 
 --- @alias agentic.ui.ChatWidget.PanelNames "chat"|"todos"|"code"|"files"|"input"|"diagnostics"
 
@@ -106,6 +107,7 @@ local CYCLE_ORDER = { "chat", "todos", "code", "files", "diagnostics", "input" }
 --- @field _restore_maximize_state fun(self: agentic.ui.ChatWidget, keep_widget: boolean): boolean
 --- @field _clear_maximize_state fun(self: agentic.ui.ChatWidget, reason: string, opts: { restore_layout?: boolean, keep_widget?: boolean }|nil): boolean
 --- @field _toggle_full_width fun(self: agentic.ui.ChatWidget)
+--- @field _goto_file_under_cursor fun(self: agentic.ui.ChatWidget)
 --- @field current_position agentic.UserConfig.Windows.Position
 local ChatWidget = {}
 ChatWidget.__index = ChatWidget
@@ -818,6 +820,17 @@ function ChatWidget:_bind_keymaps()
         end
     end
 
+    -- Add 'gf' keymap to every widget buffer (including input) to open the
+    -- file under the cursor in the user's main editor window. Builtin `gf`
+    -- fails here with E1513 since ALL widget windows have `winfixbuf` set
+    -- (see widget_layout.lua) and their buffers have no real directory
+    -- context.
+    for _, bufnr in pairs(self.buf_nrs) do
+        BufHelpers.keymap_set(bufnr, "n", "gf", function()
+            self:_goto_file_under_cursor()
+        end, { desc = "Agentic: Go to file under cursor" })
+    end
+
     -- Add 'x' keymap only to chat buffer to toggle maximize
     BufHelpers.keymap_set(self.buf_nrs.chat, "n", "x", function()
         self:_toggle_full_width()
@@ -1073,6 +1086,58 @@ local EXCLUDED_FILETYPES = {
     ["mason"] = true, -- Mason installer
 }
 
+--- Classifies whether `winid` is usable for displaying editor content (diff
+--- previews, `gf` targets), and how desirable it is. Shared by
+--- `find_first_non_widget_window` (which prefers `"preferred"` windows but
+--- falls back to `"excluded"` ones) and `open_buf_in_editor_window` (which
+--- validates a caller-supplied `preferred_winid` against the same rules
+--- before ever calling `nvim_win_set_buf` on it, so e.g. a file-explorer or
+--- terminal window that merely happens to be `winnr('#')` is never silently
+--- clobbered).
+--- @param winid number
+--- @return "reject"|"excluded"|"preferred"
+function ChatWidget:_classify_editor_window(winid)
+    if not vim.api.nvim_win_is_valid(winid) then
+        return "reject"
+    end
+
+    if vim.api.nvim_win_get_tabpage(winid) ~= self.tab_page_id then
+        return "reject"
+    end
+
+    -- Skip floating windows (notifications, popups, etc.)
+    local win_config = vim.api.nvim_win_get_config(winid)
+    if win_config.relative ~= "" then
+        return "reject"
+    end
+
+    local bufnr = vim.api.nvim_win_get_buf(winid)
+    local ft = vim.bo[bufnr].filetype
+
+    -- Always skip windows showing any Agentic buffer (including
+    -- cross-tabpage widget buffers not in this instance's buf_nrs)
+    if AGENTIC_FILETYPES[ft] == true then
+        return "reject"
+    end
+
+    -- `EXCLUDED_FILETYPES["terminal"]` keys on `filetype`, but a real
+    -- `:terminal` buffer has an EMPTY filetype and only `buftype ==
+    -- "terminal"` -- so it never matched there, leaving real terminals
+    -- (and other non-editor buftypes) willing to be silently evicted.
+    -- Catch those directly by `buftype` here.
+    local buftype = vim.bo[bufnr].buftype
+    if
+        EXCLUDED_FILETYPES[ft] == true
+        or buftype == "terminal"
+        or buftype == "prompt"
+        or buftype == "nofile"
+    then
+        return "excluded"
+    end
+
+    return "preferred"
+end
+
 --- Finds the first window on the current tabpage that is NOT part of the chat widget.
 --- Prefers windows with non-excluded filetypes (regular editor buffers),
 --- but falls back to any non-widget, non-floating window (e.g. dashboard)
@@ -1092,24 +1157,12 @@ function ChatWidget:find_first_non_widget_window()
 
     for _, winid in ipairs(all_windows) do
         if not widget_win_ids[winid] then
-            -- Skip floating windows (notifications, popups, etc.)
-            local win_config = vim.api.nvim_win_get_config(winid)
-            if win_config.relative == "" then
-                local bufnr = vim.api.nvim_win_get_buf(winid)
-                local ft = vim.bo[bufnr].filetype
-                local is_agentic_filetype = AGENTIC_FILETYPES[ft] == true
-                local is_excluded_filetype = EXCLUDED_FILETYPES[ft] == true
-                -- Always skip windows showing any Agentic buffer (including
-                -- cross-tabpage widget buffers not in this instance's buf_nrs)
-                if is_agentic_filetype then
-                    -- skip entirely, not even as fallback
-                elseif not is_excluded_filetype then
-                    -- Preferred: a regular editor window
-                    return winid
-                elseif not fallback_winid then
-                    -- Remember as fallback (e.g. dashboard window)
-                    fallback_winid = winid
-                end
+            local classification = self:_classify_editor_window(winid)
+            if classification == "preferred" then
+                return winid
+            elseif classification == "excluded" and not fallback_winid then
+                -- Remember as fallback (e.g. dashboard window)
+                fallback_winid = winid
             end
         end
     end
@@ -1235,9 +1288,50 @@ function ChatWidget:open_left_window(bufnr)
     return winid
 end
 
+--- Displays a buffer in the user's main editor window. When `preferred_winid`
+--- is a still-valid, `"preferred"`-classified window (see
+--- `_classify_editor_window`) it is reused first (e.g. `gf` wants the
+--- specific split the user came from, not just any editor window) --
+--- otherwise it is discarded so a file explorer, terminal, or other
+--- special window that merely happens to be `winnr('#')` is never silently
+--- clobbered. Falls back to the first non-widget window on this tabpage, or
+--- a newly opened left window if none exists. Used to route content (diff
+--- previews, `gf` targets) away from widget windows, which have
+--- `winfixbuf` set and cannot switch buffers.
+--- @param bufnr number
+--- @param preferred_winid number|nil
+--- @return number|nil winid
+function ChatWidget:open_buf_in_editor_window(bufnr, preferred_winid)
+    local winid = preferred_winid
+    if
+        not winid
+        or not vim.api.nvim_win_is_valid(winid)
+        or self:_classify_editor_window(winid) ~= "preferred"
+    then
+        winid = self:find_first_non_widget_window()
+    end
+
+    if not winid then
+        return self:open_left_window(bufnr)
+    end
+
+    local ok, err = pcall(vim.api.nvim_win_set_buf, winid, bufnr)
+    if not ok then
+        Logger.notify(
+            "Failed to set buffer in window: " .. tostring(err),
+            vim.log.levels.WARN
+        )
+        return nil
+    end
+
+    return winid
+end
+
 ChatWidgetMaximize.attach(ChatWidget, {
     AGENTIC_FILETYPES = AGENTIC_FILETYPES,
     CYCLE_ORDER = CYCLE_ORDER,
 })
+
+ChatWidgetGf.attach(ChatWidget)
 
 return ChatWidget
