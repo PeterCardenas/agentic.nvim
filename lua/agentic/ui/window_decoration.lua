@@ -207,6 +207,117 @@ local function set_winbar(winid, text)
     vim.cmd("redrawstatus!")
 end
 
+--- Returns a normalized path comparable across nvim's stored buffer names and
+--- the input given to `nvim_buf_set_name`. nvim resolves symlinks and prefixes
+--- the cwd; we mirror both.
+--- @param name string
+--- @return string normalized
+local function normalize_buf_name(name)
+    return vim.fn.resolve(vim.fn.fnamemodify(name, ":p"))
+end
+
+--- Returns the buffer that would collide with `name` on `nvim_buf_set_name`,
+--- or nil. Excludes `exclude_bufnr` so callers can use the result to decide
+--- whether to rename a different buffer.
+--- @param name string
+--- @param exclude_bufnr integer|nil
+--- @return integer|nil colliding_bufnr
+local function find_buf_by_name(name, exclude_bufnr)
+    local target = normalize_buf_name(name)
+    for _, candidate_bufnr in ipairs(vim.api.nvim_list_bufs()) do
+        if candidate_bufnr ~= exclude_bufnr then
+            local existing = vim.api.nvim_buf_get_name(candidate_bufnr)
+            if existing ~= "" and normalize_buf_name(existing) == target then
+                return candidate_bufnr
+            end
+        end
+    end
+    return nil
+end
+
+--- Reports a rename failure at most once per buffer+name. `render_header` runs
+--- on many events, so a persistently failing rename would otherwise notify on
+--- every render. De-duplication lives here rather than on
+--- `agentic_buffer_name`, which must keep meaning "this name is applied".
+--- @param bufnr integer
+--- @param buf_name string
+--- @param message string
+local function notify_rename_failure(bufnr, buf_name, message)
+    if vim.b[bufnr].agentic_buffer_name_error == buf_name then
+        return
+    end
+
+    vim.b[bufnr].agentic_buffer_name_error = buf_name
+    Logger.notify(message)
+end
+
+--- Assigns `buf_name` to `bufnr`, first renaming any pre-existing buffer that
+--- already holds the name to `<buf_name>-old-N` (lowest free N starting at 1).
+--- Required to survive session restore: `:mksession` (with `blank` in
+--- `sessionoptions`) persists agentic buffer names, so on reopen
+--- `nvim_buf_set_name` raises E95 ("buffer with this name already exists").
+--- Silently swallowing that error leaves the widget buffer unnamed, so any
+--- failure that survives collision resolution is surfaced and reported to the
+--- caller, which must not cache the name as applied.
+--- @param bufnr integer
+--- @param buf_name string
+--- @return boolean success
+function WindowDecoration._set_buffer_name(bufnr, buf_name)
+    if
+        normalize_buf_name(vim.api.nvim_buf_get_name(bufnr))
+        == normalize_buf_name(buf_name)
+    then
+        return true
+    end
+
+    local collider = find_buf_by_name(buf_name, bufnr)
+    local suffix_index = 1
+
+    while collider do
+        local candidate = buf_name .. "-old-" .. suffix_index
+        if not find_buf_by_name(candidate, bufnr) then
+            local renamed, rename_err =
+                pcall(vim.api.nvim_buf_set_name, collider, candidate)
+            if not renamed then
+                notify_rename_failure(
+                    bufnr,
+                    buf_name,
+                    string.format(
+                        "Agentic: failed to free buffer name '%s' held by buffer %d: %s",
+                        buf_name,
+                        collider,
+                        tostring(rename_err)
+                    )
+                )
+                return false
+            end
+            break
+        end
+        suffix_index = suffix_index + 1
+    end
+
+    -- If this fails the collider keeps its `-old-N` name. That is deliberate:
+    -- undoing it could fail too, and leaving it aside means the retry finds no
+    -- collider and only has to land the rename below.
+    local ok, err = pcall(vim.api.nvim_buf_set_name, bufnr, buf_name)
+    if not ok then
+        notify_rename_failure(
+            bufnr,
+            buf_name,
+            string.format(
+                "Agentic: failed to name buffer %d as '%s': %s",
+                bufnr,
+                buf_name,
+                tostring(err)
+            )
+        )
+        return false
+    end
+
+    vim.b[bufnr].agentic_buffer_name_error = nil
+    return true
+end
+
 --- Sets the buffer name based on header text and tab count
 --- @param bufnr integer Buffer number
 --- @param header_text string|nil Resolved header text
@@ -219,7 +330,7 @@ local function set_buffer_name(bufnr, header_text, tab_page_id)
     -- Determine if we should show tab suffix based on total tab count
     local total_tabs = #vim.api.nvim_list_tabpages()
 
-    --- @type string|nil
+    --- @type string
     local buf_name
     if total_tabs > 1 then
         buf_name = string.format("%s (Tab %d)", header_text, tab_page_id)
@@ -231,8 +342,12 @@ local function set_buffer_name(bufnr, header_text, tab_page_id)
         return
     end
 
-    vim.b[bufnr].agentic_buffer_name = buf_name
-    pcall(vim.api.nvim_buf_set_name, bufnr, buf_name)
+    -- Cached only once the rename actually landed, so a transient failure is
+    -- retried on the next render instead of leaving the buffer unnamed for the
+    -- rest of the session.
+    if WindowDecoration._set_buffer_name(bufnr, buf_name) then
+        vim.b[bufnr].agentic_buffer_name = buf_name
+    end
 end
 
 --- Renders a header for a window, handling user customization, winbar, and buffer naming
