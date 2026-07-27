@@ -1289,6 +1289,7 @@ describe("agentic.SessionManager", function()
             )
             local save_spy = spy.new(function() end)
             local pending_prompt_spy = spy.new(function() end)
+            local cancel_session_spy = spy.new(function() end)
 
             local session = {
                 _session_create_id = 0,
@@ -1297,6 +1298,7 @@ describe("agentic.SessionManager", function()
                         name = "Stale Provider",
                     },
                     create_session = create_session_spy,
+                    cancel_session = cancel_session_spy,
                 },
                 status_animation = {
                     start = spy.new(function() end),
@@ -1332,8 +1334,405 @@ describe("agentic.SessionManager", function()
             assert.spy(pending_prompt_spy).was.called(0)
             assert.equal(0, #scheduled_callbacks)
 
+            -- The superseded session is orphaned agent-side unless cancelled.
+            assert.spy(cancel_session_spy).was.called(1)
+            local cancel_args = assert.not_nil(cancel_session_spy.calls[1])
+            assert.equal("stale-session", cancel_args[2])
+
             schedule_stub:revert()
         end)
+
+        it(
+            "adopts legacy modes and models from a stale create response",
+            function()
+                local schedule_stub = spy.stub(vim, "schedule")
+                schedule_stub:invokes(function() end)
+
+                local create_session_callback
+                local create_session_spy = spy.new(
+                    function(_self, _handlers, callback)
+                        create_session_callback = callback
+                    end
+                )
+                local set_legacy_modes_spy = spy.new(function() end)
+                local set_legacy_models_spy = spy.new(function() end)
+                local set_mode_to_chat_header_spy = spy.new(function() end)
+                local cancel_session_spy = spy.new(function() end)
+
+                local session = {
+                    _session_create_id = 0,
+                    agent = {
+                        provider_config = { name = "Stale Provider" },
+                        create_session = create_session_spy,
+                        cancel_session = cancel_session_spy,
+                    },
+                    status_animation = {
+                        start = spy.new(function() end),
+                        stop = spy.new(function() end),
+                    },
+                    _is_creating_session = false,
+                    session_id = nil,
+                    chat_history = { messages = {}, save = function() end },
+                    config_options = {
+                        set_initial_mode = function() end,
+                        set_legacy_modes = set_legacy_modes_spy,
+                        set_legacy_models = set_legacy_models_spy,
+                    },
+                    message_writer = { write_message = function() end },
+                    _cancel_session = spy.new(function() end),
+                    _set_mode_to_chat_header = set_mode_to_chat_header_spy,
+                }
+                setmetatable(session, { __index = SessionManager })
+
+                SessionManager.new_session(session)
+                -- Supersede the in-flight create, e.g. restore_from_history
+                -- starting a fresh new_session before this one answered.
+                session._session_create_id = session._session_create_id + 1
+
+                create_session_callback({
+                    sessionId = "stale-session",
+                    modes = {
+                        currentModeId = "chat",
+                        availableModes = {
+                            { id = "chat", name = "Chat" },
+                            { id = "plan", name = "Plan" },
+                        },
+                    },
+                    models = {
+                        currentModelId = "sonnet",
+                        availableModels = {},
+                    },
+                }, nil)
+
+                -- Session state must not be adopted from the stale response.
+                assert.is_nil(session.session_id)
+
+                -- Agent-instance capabilities must be.
+                assert.spy(set_legacy_modes_spy).was.called(1)
+                local modes_args = assert.not_nil(set_legacy_modes_spy.calls[1])
+                assert.equal("chat", modes_args[2].currentModeId)
+                assert.spy(set_legacy_models_spy).was.called(1)
+                assert.spy(set_mode_to_chat_header_spy).was.called(1)
+                local header_args =
+                    assert.not_nil(set_mode_to_chat_header_spy.calls[1])
+                assert.equal("chat", header_args[2])
+
+                assert.spy(cancel_session_spy).was.called(1)
+
+                schedule_stub:revert()
+            end
+        )
+
+        it("adopts configOptions from a stale create response", function()
+            local schedule_stub = spy.stub(vim, "schedule")
+            schedule_stub:invokes(function() end)
+
+            local create_session_callback
+            local create_session_spy = spy.new(
+                function(_self, _handlers, callback)
+                    create_session_callback = callback
+                end
+            )
+            local handle_new_config_options_spy = spy.new(function() end)
+            local set_legacy_modes_spy = spy.new(function() end)
+            local set_legacy_models_spy = spy.new(function() end)
+            local cancel_session_spy = spy.new(function() end)
+
+            local session = {
+                _session_create_id = 0,
+                agent = {
+                    provider_config = { name = "Stale Provider" },
+                    create_session = create_session_spy,
+                    cancel_session = cancel_session_spy,
+                },
+                status_animation = {
+                    start = spy.new(function() end),
+                    stop = spy.new(function() end),
+                },
+                _is_creating_session = false,
+                session_id = nil,
+                chat_history = { messages = {}, save = function() end },
+                config_options = {
+                    set_initial_mode = function() end,
+                    set_legacy_modes = set_legacy_modes_spy,
+                    set_legacy_models = set_legacy_models_spy,
+                },
+                message_writer = { write_message = function() end },
+                _cancel_session = spy.new(function() end),
+                _handle_new_config_options = handle_new_config_options_spy,
+            }
+            setmetatable(session, { __index = SessionManager })
+
+            local config_options = {
+                { category = "mode", currentValue = "chat" },
+            }
+
+            SessionManager.new_session(session)
+            session._session_create_id = session._session_create_id + 1
+
+            create_session_callback({
+                sessionId = "stale-session",
+                configOptions = config_options,
+            }, nil)
+
+            assert.is_nil(session.session_id)
+            assert.spy(handle_new_config_options_spy).was.called(1)
+            local args = assert.not_nil(handle_new_config_options_spy.calls[1])
+            assert.equal(config_options, args[2])
+
+            -- The configOptions path must not touch the legacy setters.
+            assert.spy(set_legacy_modes_spy).was.called(0)
+            assert.spy(set_legacy_models_spy).was.called(0)
+
+            assert.spy(cancel_session_spy).was.called(1)
+
+            schedule_stub:revert()
+        end)
+
+        it("tolerates a stale create response that failed", function()
+            local schedule_stub = spy.stub(vim, "schedule")
+            schedule_stub:invokes(function() end)
+
+            local create_session_callback
+            local create_session_spy = spy.new(
+                function(_self, _handlers, callback)
+                    create_session_callback = callback
+                end
+            )
+            local cancel_session_spy = spy.new(function() end)
+
+            local session = {
+                _session_create_id = 0,
+                agent = {
+                    provider_config = { name = "Stale Provider" },
+                    create_session = create_session_spy,
+                    cancel_session = cancel_session_spy,
+                },
+                status_animation = {
+                    start = spy.new(function() end),
+                    stop = spy.new(function() end),
+                },
+                _is_creating_session = false,
+                session_id = "restored-session",
+                chat_history = { messages = {}, save = function() end },
+                config_options = { set_initial_mode = function() end },
+                message_writer = { write_message = function() end },
+                _cancel_session = spy.new(function() end),
+            }
+            setmetatable(session, { __index = SessionManager })
+
+            SessionManager.new_session(session, { restore_mode = true })
+            session._session_create_id = session._session_create_id + 1
+
+            assert.has_no_errors(function()
+                create_session_callback(nil, { message = "boom" })
+            end)
+
+            -- A failed stale create has no sessionId to cancel and must not
+            -- wipe the session that superseded it.
+            assert.equal("restored-session", session.session_id)
+            assert.spy(cancel_session_spy).was.called(0)
+
+            schedule_stub:revert()
+        end)
+
+        it(
+            "cancels the orphaned session on the agent that created it after a provider switch",
+            function()
+                local schedule_stub = spy.stub(vim, "schedule")
+                schedule_stub:invokes(function() end)
+
+                local create_session_callback
+                local old_cancel_spy = spy.new(function() end)
+                local new_cancel_spy = spy.new(function() end)
+
+                local old_agent = {
+                    provider_config = { name = "Old Provider" },
+                    create_session = spy.new(
+                        function(_self, _handlers, callback)
+                            create_session_callback = callback
+                        end
+                    ),
+                    cancel_session = old_cancel_spy,
+                }
+                local new_agent = {
+                    provider_config = { name = "New Provider" },
+                    create_session = spy.new(function() end),
+                    cancel_session = new_cancel_spy,
+                }
+
+                local session = {
+                    _session_create_id = 0,
+                    agent = old_agent,
+                    status_animation = {
+                        start = spy.new(function() end),
+                        stop = spy.new(function() end),
+                    },
+                    _is_creating_session = false,
+                    session_id = nil,
+                    chat_history = { messages = {}, save = function() end },
+                    config_options = { set_initial_mode = function() end },
+                    message_writer = { write_message = function() end },
+                    _cancel_session = spy.new(function() end),
+                }
+                setmetatable(session, { __index = SessionManager })
+
+                SessionManager.new_session(session)
+
+                -- Provider switch supersedes the create and swaps self.agent.
+                session._session_create_id = session._session_create_id + 1
+                session.agent = new_agent
+
+                create_session_callback({ sessionId = "stale-session" }, nil)
+
+                assert.spy(new_cancel_spy).was.called(0)
+                assert.spy(old_cancel_spy).was.called(1)
+                local cancel_args = assert.not_nil(old_cancel_spy.calls[1])
+                assert.equal(old_agent, cancel_args[1])
+                assert.equal("stale-session", cancel_args[2])
+
+                schedule_stub:revert()
+            end
+        )
+
+        --- Builds a session whose in-flight create belongs to `old_agent`,
+        --- then simulates `switch_provider`: bump the create id and swap
+        --- `self.agent` to a different agent instance.
+        --- @param capability_response table Stale response fired afterwards
+        --- @return table probes
+        local function run_provider_switch_with_stale_create(
+            capability_response
+        )
+            local create_session_callback
+            local old_cancel_spy = spy.new(function() end)
+            local probes = {
+                set_legacy_modes = spy.new(function() end),
+                set_legacy_models = spy.new(function() end),
+                set_mode_to_chat_header = spy.new(function() end),
+                handle_new_config_options = spy.new(function() end),
+                old_cancel = old_cancel_spy,
+            }
+
+            local old_agent = {
+                provider_config = { name = "Old Provider" },
+                create_session = spy.new(function(_self, _handlers, callback)
+                    create_session_callback = callback
+                end),
+                cancel_session = old_cancel_spy,
+            }
+            local new_agent = {
+                provider_config = { name = "New Provider" },
+                create_session = spy.new(function() end),
+                cancel_session = spy.new(function() end),
+            }
+
+            local session = {
+                _session_create_id = 0,
+                agent = old_agent,
+                status_animation = {
+                    start = spy.new(function() end),
+                    stop = spy.new(function() end),
+                },
+                _is_creating_session = false,
+                session_id = nil,
+                chat_history = { messages = {}, save = function() end },
+                config_options = {
+                    set_initial_mode = function() end,
+                    set_legacy_modes = probes.set_legacy_modes,
+                    set_legacy_models = probes.set_legacy_models,
+                    -- Mode the live (new) provider already settled on.
+                    mode = { currentValue = "plan" },
+                },
+                message_writer = { write_message = function() end },
+                _cancel_session = spy.new(function() end),
+                _set_mode_to_chat_header = probes.set_mode_to_chat_header,
+                _handle_new_config_options = probes.handle_new_config_options,
+            }
+            setmetatable(session, { __index = SessionManager })
+
+            SessionManager.new_session(session)
+
+            session._session_create_id = session._session_create_id + 1
+            session.agent = new_agent
+            session.session_id = "new-sess"
+
+            create_session_callback(capability_response, nil)
+
+            probes.session = session
+            return probes
+        end
+
+        -- The fork's monotonic create-id guard also fires on provider switch,
+        -- where upstream's `session_id ~= nil` guard never could. Adopting
+        -- capabilities there would overwrite the live provider's modes (and
+        -- the chat header) with the dead provider's.
+        it(
+            "does not adopt legacy modes from a superseded provider but still cancels its orphan",
+            function()
+                local schedule_stub = spy.stub(vim, "schedule")
+                schedule_stub:invokes(function() end)
+
+                local probes = run_provider_switch_with_stale_create({
+                    sessionId = "stale-session",
+                    modes = {
+                        currentModeId = "chat",
+                        availableModes = { { id = "chat", name = "Chat" } },
+                    },
+                    models = {
+                        currentModelId = "haiku",
+                        availableModels = {},
+                    },
+                })
+
+                assert.spy(probes.set_legacy_modes).was.called(0)
+                assert.spy(probes.set_legacy_models).was.called(0)
+                assert.spy(probes.set_mode_to_chat_header).was.called(0)
+
+                -- The live provider's mode survives untouched.
+                assert.equal(
+                    "plan",
+                    probes.session.config_options.mode.currentValue
+                )
+                assert.equal("new-sess", probes.session.session_id)
+
+                -- Cancelling the orphan is correct in every case, and is most
+                -- necessary here.
+                assert.spy(probes.old_cancel).was.called(1)
+                local cancel_args = assert.not_nil(probes.old_cancel.calls[1])
+                assert.equal("stale-session", cancel_args[2])
+
+                schedule_stub:revert()
+            end
+        )
+
+        it(
+            "does not adopt configOptions from a superseded provider but still cancels its orphan",
+            function()
+                local schedule_stub = spy.stub(vim, "schedule")
+                schedule_stub:invokes(function() end)
+
+                local probes = run_provider_switch_with_stale_create({
+                    sessionId = "stale-session",
+                    configOptions = {
+                        { category = "mode", currentValue = "chat" },
+                    },
+                })
+
+                -- _handle_new_config_options also re-renders the chat header,
+                -- so adopting here is visible to the user, not just internal.
+                assert.spy(probes.handle_new_config_options).was.called(0)
+                assert.equal(
+                    "plan",
+                    probes.session.config_options.mode.currentValue
+                )
+
+                assert.spy(probes.old_cancel).was.called(1)
+                local cancel_args = assert.not_nil(probes.old_cancel.calls[1])
+                assert.equal("stale-session", cancel_args[2])
+
+                schedule_stub:revert()
+            end
+        )
 
         it(
             "stores terminal initial tool call payload before writer releases it",

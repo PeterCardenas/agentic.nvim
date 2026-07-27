@@ -1595,9 +1595,62 @@ function SessionManager:new_session(opts)
         end,
     }
 
+    -- Captured so a stale callback cancels the orphan on the agent that
+    -- actually created it, even after `switch_provider` swapped `self.agent`.
+    local creating_agent = self.agent
+
     self.agent:create_session(handlers, function(response, err)
         local current_session_create_id = self._session_create_id
         if current_session_create_id ~= session_create_id then
+            -- Stale create: another new_session/cancel/provider-switch already
+            -- superseded this request. Salvage what belongs to the agent
+            -- instance rather than the session before dropping the response.
+            if response then
+                -- Capabilities describe the agent process, not the session. On
+                -- a restore-first flow this response is their only source, so
+                -- discarding it breaks mode/model switching for the whole tab.
+                -- Only adopt them while that process is still the active one:
+                -- `switch_provider` also supersedes creates, and adopting there
+                -- would overwrite the live provider's modes (and the chat
+                -- header) with a dead provider's.
+                --
+                -- DO NOT collapse the two sides of this comparison. They are
+                -- deliberately different expressions: `creating_agent` is the
+                -- agent captured when this create was issued, `self.agent` is
+                -- whatever is active by the time the response lands. Comparing
+                -- them IS the check. emmylua sees the second read of
+                -- `self.agent` and suggests reusing the local, which would
+                -- yield `creating_agent == creating_agent` — always true,
+                -- silently restoring the provider-switch clobbering bug that
+                -- only `new_session`'s two "superseded provider" tests catch.
+                --- @diagnostic disable-next-line: preferred-local-alias
+                if creating_agent == self.agent then
+                    if response.configOptions then
+                        Logger.debug("Stale create announced configOptions")
+                        self:_handle_new_config_options(response.configOptions)
+                    else
+                        if response.modes then
+                            Logger.debug("Stale create announced legacy modes")
+                            self.config_options:set_legacy_modes(response.modes)
+                            self:_set_mode_to_chat_header(
+                                response.modes.currentModeId
+                            )
+                        end
+
+                        if response.models then
+                            Logger.debug("Stale create announced legacy models")
+                            self.config_options:set_legacy_models(
+                                response.models
+                            )
+                        end
+                    end
+                end
+
+                -- The session itself is orphaned regardless of which agent is
+                -- active now, so always tear it down on its own agent.
+                creating_agent:cancel_session(response.sessionId)
+            end
+
             return
         end
 
