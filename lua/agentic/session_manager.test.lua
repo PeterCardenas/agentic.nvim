@@ -14,6 +14,184 @@ local function mode_update(mode_id)
 end
 
 describe("agentic.SessionManager", function()
+    describe("_on_session_update: streamed agent messages", function()
+        local function message_update(session_update, text)
+            return {
+                sessionUpdate = session_update,
+                content = { type = "text", text = text },
+            }
+        end
+
+        local function make_session(events)
+            local write_message_chunk = spy.new(function(_writer, update)
+                table.insert(
+                    events,
+                    "write:"
+                        .. update.sessionUpdate
+                        .. ":"
+                        .. (update.content.text or update.content.type)
+                )
+                return update.content.text or "rendered-content"
+            end)
+            local append_agent_text = spy.new(function(_history, msg)
+                table.insert(events, "history:" .. msg.type .. ":" .. msg.text)
+            end)
+            local render_header = spy.new(function() end)
+
+            local session = {
+                agent = { provider_config = { name = "test-provider" } },
+                chat_history = { append_agent_text = append_agent_text },
+                message_writer = {
+                    write_message_chunk = write_message_chunk,
+                },
+                status_animation = { start = function() end },
+                widget = { render_header = render_header },
+            }
+            setmetatable(session, { __index = SessionManager })
+            return session, write_message_chunk, append_agent_text
+        end
+
+        it(
+            "coalesces adjacent message chunks before a non-text update",
+            function()
+                local events = {}
+                local session, write_message_chunk, append_agent_text =
+                    make_session(events)
+
+                local scheduled_callbacks = {}
+                local schedule_stub = spy.stub(vim, "schedule")
+                schedule_stub:invokes(function(callback)
+                    table.insert(scheduled_callbacks, callback)
+                end)
+
+                SessionManager._on_session_update(
+                    session,
+                    message_update("agent_message_chunk", "Hello")
+                )
+                SessionManager._on_session_update(
+                    session,
+                    message_update("agent_message_chunk", " world")
+                )
+
+                assert.spy(write_message_chunk).was.called(0)
+                assert.spy(append_agent_text).was.called(0)
+                assert.equal(1, #scheduled_callbacks)
+
+                -- A pure stream becomes visible at the end of this event-loop
+                -- turn rather than waiting for a semantic update.
+                scheduled_callbacks[1]()
+                assert.spy(write_message_chunk).was.called(1)
+                assert.spy(append_agent_text).was.called(1)
+
+                SessionManager._on_session_update(session, {
+                    sessionUpdate = "usage_update",
+                })
+                schedule_stub:revert()
+
+                assert.spy(write_message_chunk).was.called(1)
+                assert.spy(append_agent_text).was.called(1)
+                local written = assert.not_nil(write_message_chunk.calls[1])
+                assert.equal("Hello world", written[2].content.text)
+                assert.same({
+                    type = "agent",
+                    text = "Hello world",
+                    provider_name = "test-provider",
+                }, append_agent_text.calls[1][2])
+                assert.same({
+                    "write:agent_message_chunk:Hello world",
+                    "history:agent:Hello world",
+                }, events)
+            end
+        )
+
+        it(
+            "preserves thought and message stream boundaries and ordering",
+            function()
+                local events = {}
+                local session, write_message_chunk, append_agent_text =
+                    make_session(events)
+
+                local schedule_stub = spy.stub(vim, "schedule")
+                schedule_stub:invokes(function() end)
+
+                SessionManager._on_session_update(
+                    session,
+                    message_update("agent_message_chunk", "answer")
+                )
+                SessionManager._on_session_update(
+                    session,
+                    message_update("agent_thought_chunk", "thinking")
+                )
+                SessionManager._on_session_update(
+                    session,
+                    message_update("agent_message_chunk", "continued")
+                )
+                SessionManager._on_session_update(session, {
+                    sessionUpdate = "usage_update",
+                })
+
+                assert.spy(write_message_chunk).was.called(3)
+                assert.spy(append_agent_text).was.called(3)
+                assert.equal(
+                    "agent_message_chunk",
+                    write_message_chunk.calls[1][2].sessionUpdate
+                )
+                assert.equal(
+                    "answer",
+                    write_message_chunk.calls[1][2].content.text
+                )
+                assert.equal(
+                    "agent_thought_chunk",
+                    write_message_chunk.calls[2][2].sessionUpdate
+                )
+                assert.equal(
+                    "thinking",
+                    write_message_chunk.calls[2][2].content.text
+                )
+                assert.equal(
+                    "agent_message_chunk",
+                    write_message_chunk.calls[3][2].sessionUpdate
+                )
+                assert.equal(
+                    "continued",
+                    write_message_chunk.calls[3][2].content.text
+                )
+                assert.same({
+                    "write:agent_message_chunk:answer",
+                    "history:agent:answer",
+                    "write:agent_thought_chunk:thinking",
+                    "history:thought:thinking",
+                    "write:agent_message_chunk:continued",
+                    "history:agent:continued",
+                }, events)
+                schedule_stub:revert()
+            end
+        )
+
+        it("records history for rendered non-text content", function()
+            local events = {}
+            local session, write_message_chunk, append_agent_text =
+                make_session(events)
+
+            SessionManager._on_session_update(session, {
+                sessionUpdate = "agent_message_chunk",
+                content = {
+                    type = "image",
+                    text = "image description",
+                    data = "encoded",
+                    mimeType = "image/png",
+                },
+            })
+
+            assert.spy(write_message_chunk).was.called(1)
+            assert.same({
+                type = "agent",
+                text = "image description",
+                provider_name = "test-provider",
+            }, append_agent_text.calls[1][2])
+        end)
+    end)
+
     describe("_on_session_update: current_mode_update", function()
         --- @type TestStub
         local notify_stub

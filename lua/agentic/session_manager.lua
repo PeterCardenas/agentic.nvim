@@ -107,6 +107,10 @@ end
 --- @field _is_switching_provider boolean
 --- @field _provider_switch_id integer
 --- @field _session_create_id integer
+--- @field _pending_agent_message_text? string
+--- @field _pending_agent_message_provider_name? string
+--- @field _pending_agent_message_generation? integer
+--- @field _agent_message_generation integer
 
 --- @class agentic.SessionManager : agentic.SessionManagerData
 --- @field session_id? string
@@ -137,6 +141,10 @@ end
 --- @field _is_switching_provider boolean True while a provider switch is waiting for the replacement session
 --- @field _provider_switch_id integer Monotonic token used to ignore stale provider switch callbacks
 --- @field _session_create_id integer Monotonic token used to ignore stale session creation callbacks
+--- @field _pending_agent_message_text? string Text buffered across adjacent agent message chunks
+--- @field _pending_agent_message_provider_name? string Provider name for buffered message history
+--- @field _pending_agent_message_generation? integer Generation captured by the scheduled flush
+--- @field _agent_message_generation integer Invalidates flushes from replaced turns/sessions
 local SessionManager = {}
 SessionManager.__index = SessionManager
 
@@ -182,6 +190,10 @@ function SessionManager:new(tab_page_id, provider_name)
         _is_switching_provider = false,
         _provider_switch_id = 0,
         _session_create_id = 0,
+        _pending_agent_message_text = nil,
+        _pending_agent_message_provider_name = nil,
+        _pending_agent_message_generation = nil,
+        _agent_message_generation = 0,
     }
     self = setmetatable(instance, self)
 
@@ -324,8 +336,101 @@ function SessionManager:get_provider_name()
     return Config.provider
 end
 
+--- Schedule a flush so a pure stream remains visible without delaying it.
+function SessionManager:_schedule_pending_agent_message_flush()
+    if self._pending_agent_message_generation ~= nil then
+        return
+    end
+
+    local generation = self._agent_message_generation or 0
+    self._pending_agent_message_generation = generation
+    local instance = self
+    vim.schedule(function()
+        -- The callback may run after a synchronous flush and a new stream.
+        -- Only the instance and pending generation that scheduled it may flush.
+        if instance._pending_agent_message_generation == generation then
+            instance:_flush_pending_agent_message(generation)
+        end
+    end)
+end
+
+--- Flush buffered agent text before another update can change its ordering.
+--- @param generation integer|nil Only flush this scheduled generation when set.
+function SessionManager:_flush_pending_agent_message(generation)
+    if
+        generation ~= nil
+        and generation ~= self._pending_agent_message_generation
+    then
+        return
+    end
+
+    -- A synchronous flush invalidates the scheduled callback. This also
+    -- prevents an old callback from flushing text from a later turn.
+    if generation == nil then
+        self._agent_message_generation = (self._agent_message_generation or 0)
+            + 1
+    end
+
+    local text = self._pending_agent_message_text
+    --- @type string|nil
+    local provider_name = self._pending_agent_message_provider_name
+    self._pending_agent_message_text = nil
+    self._pending_agent_message_provider_name = nil
+    self._pending_agent_message_generation = nil
+    if not text then
+        return
+    end
+
+    -- The provider name is captured when buffering starts, so flushing does
+    -- not depend on the agent still being attached to this session.
+    provider_name = provider_name or self.provider_name or Config.provider
+    if type(provider_name) ~= "string" then
+        return
+    end
+
+    -- MessageWriter intentionally does not return rendered text. The buffered
+    -- text is already the canonical history representation for this update.
+    self.message_writer:write_message_chunk(
+        ACPPayloads.generate_agent_message(text)
+    )
+    self.chat_history:append_agent_text({
+        type = "agent",
+        text = text,
+        provider_name = provider_name,
+    })
+end
+
+--- Flush current text and invalidate callbacks from the old turn/session.
+function SessionManager:_invalidate_pending_agent_message()
+    self:_flush_pending_agent_message()
+end
+
+-- Lightweight session fixtures may intentionally omit the SessionManager
+-- metatable. Real sessions resolve these methods through that metatable, while
+-- the guards keep lifecycle callbacks safe for partial session objects.
+local function flush_pending_agent_message(session)
+    local flush = session._flush_pending_agent_message
+    if flush then
+        flush(session)
+    end
+end
+
+local function invalidate_pending_agent_message(session)
+    local invalidate = session._invalidate_pending_agent_message
+    if invalidate then
+        invalidate(session)
+    else
+        flush_pending_agent_message(session)
+    end
+end
+
 --- @param update agentic.acp.SessionUpdateMessage
 function SessionManager:_on_session_update(update)
+    -- A buffered message must be written before any other update is handled.
+    if update.sessionUpdate ~= "agent_message_chunk" then
+        flush_pending_agent_message(self)
+    end
+
     -- order the IF blocks in order of likeliness to be called for performance
     if update.sessionUpdate == "plan" then
         --- @cast update agentic.acp.PlanUpdate
@@ -334,27 +439,39 @@ function SessionManager:_on_session_update(update)
         end
     elseif update.sessionUpdate == "agent_message_chunk" then
         --- @cast update agentic.acp.AgentMessageChunk
-        self.message_writer:write_message_chunk(update)
-        self.status_animation:start("generating")
-
         local chunk_text = update.content and update.content.text
-        if chunk_text then
-            self.chat_history:append_agent_text({
-                type = "agent",
-                text = chunk_text,
-                provider_name = self.agent.provider_config.name,
-            })
+        if update.content and update.content.type == "text" and chunk_text then
+            if chunk_text ~= "" then
+                self._pending_agent_message_text = (
+                    self._pending_agent_message_text or ""
+                ) .. chunk_text
+                self._pending_agent_message_provider_name = self._pending_agent_message_provider_name
+                    or self.agent.provider_config.name
+                self:_schedule_pending_agent_message_flush()
+            end
+        else
+            flush_pending_agent_message(self)
+            self.message_writer:write_message_chunk(update)
+            local content_text = update.content and update.content.text
+            if content_text then
+                self.chat_history:append_agent_text({
+                    type = "agent",
+                    text = content_text,
+                    provider_name = self.agent.provider_config.name,
+                })
+            end
         end
+        self.status_animation:start("generating")
     elseif update.sessionUpdate == "agent_thought_chunk" then
         --- @cast update agentic.acp.AgentThoughtChunk
         self.message_writer:write_message_chunk(update)
         self.status_animation:start("thinking")
 
-        local chunk_text = update.content and update.content.text
-        if chunk_text then
+        local content_text = update.content and update.content.text
+        if content_text then
             self.chat_history:append_agent_text({
                 type = "thought",
-                text = chunk_text,
+                text = content_text,
                 provider_name = self.agent.provider_config.name,
             })
         end
@@ -1448,6 +1565,7 @@ function SessionManager:_handle_input_submit(input_text)
 
     self.agent:send_prompt(session_id, prompt, function(response, err)
         vim.schedule(function()
+            flush_pending_agent_message(self)
             self.is_generating = false
 
             local duration_str = P.format_duration(self._turn_start_time)
@@ -1530,6 +1648,7 @@ function SessionManager:new_session(opts)
     local handlers = {
         on_error = function(err)
             Logger.debug("Agent error: ", err)
+            flush_pending_agent_message(self)
 
             self.message_writer:write_message(
                 ACPPayloads.generate_agent_message({
@@ -1545,6 +1664,8 @@ function SessionManager:new_session(opts)
         end,
 
         on_tool_call = function(tool_call)
+            flush_pending_agent_message(self)
+
             --- @type agentic.ui.ChatHistory.ToolCall
             local tool_msg = {
                 type = "tool_call",
@@ -1562,6 +1683,7 @@ function SessionManager:new_session(opts)
         end,
 
         on_tool_call_update = function(tool_call_update)
+            flush_pending_agent_message(self)
             self:_on_tool_call_update(tool_call_update)
         end,
 
@@ -1748,6 +1870,7 @@ function SessionManager:_bind_chat_buffer_events()
 end
 
 function SessionManager:_cancel_session()
+    invalidate_pending_agent_message(self)
     self.is_generating = false
     self.status_animation:stop()
     self._is_creating_session = false
