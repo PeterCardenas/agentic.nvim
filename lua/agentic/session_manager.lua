@@ -1727,7 +1727,15 @@ function SessionManager:new_session(opts)
             self.status_animation:stop()
 
             local function wrapped_callback(option_id)
+                if not is_current_session() and option_id ~= nil then
+                    return
+                end
+
                 callback(option_id)
+
+                if not is_current_session() then
+                    return
+                end
 
                 local is_rejection = option_id == "reject_once"
                     or option_id == "reject_always"
@@ -1865,6 +1873,10 @@ function SessionManager:new_session(opts)
         -- Defer to avoid fast event context issues
         -- For restore: write welcome first, then replay via on_created
         vim.schedule(function()
+            if not is_current_session() then
+                return
+            end
+
             local welcome_message = SessionManager._generate_welcome_header(
                 self.agent.provider_config.name,
                 self.session_id
@@ -1879,11 +1891,19 @@ function SessionManager:new_session(opts)
                 on_created()
             end
 
+            if not is_current_session() then
+                return
+            end
+
             self.chat_history:save(function(save_err)
                 if save_err then
                     Logger.debug("Chat history save error:", save_err)
                 end
             end)
+
+            if not is_current_session() then
+                return
+            end
 
             -- Flush prompt that was queued while session was initializing
             if self._pending_input then

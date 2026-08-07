@@ -1453,6 +1453,139 @@ describe("agentic.SessionManager", function()
         end)
 
         it(
+            "ignores scheduled setup from a superseded successful session creation",
+            function()
+                local scheduled_callbacks = {}
+                local schedule_stub = spy.stub(vim, "schedule")
+                schedule_stub:invokes(function(callback)
+                    table.insert(scheduled_callbacks, callback)
+                end)
+
+                local on_created_spy = spy.new(function() end)
+                local pending_input_spy = spy.new(function() end)
+                local write_message_spy = spy.new(function() end)
+                local save_spy = spy.new(function() end)
+                local create_session_callback
+                local create_session_spy = spy.new(
+                    function(_self, _handlers, callback)
+                        create_session_callback = callback
+                    end
+                )
+                local session = {
+                    _session_create_id = 0,
+                    agent = {
+                        provider_config = { name = "Test Provider" },
+                        create_session = create_session_spy,
+                    },
+                    status_animation = {
+                        start = spy.new(function() end),
+                        stop = spy.new(function() end),
+                    },
+                    _is_creating_session = false,
+                    session_id = nil,
+                    chat_history = {
+                        messages = {},
+                        save = save_spy,
+                    },
+                    config_options = { set_initial_mode = function() end },
+                    message_writer = { write_message = write_message_spy },
+                    _cancel_session = spy.new(function() end),
+                    _handle_input_submit = pending_input_spy,
+                    _pending_input = "queued prompt",
+                }
+                setmetatable(session, { __index = SessionManager })
+
+                SessionManager.new_session(session, {
+                    on_created = on_created_spy,
+                })
+                create_session_callback({ sessionId = "created-session" }, nil)
+
+                assert.equal(1, #scheduled_callbacks)
+                session._session_create_id = session._session_create_id + 1
+                session.session_id = "replacement-session"
+                scheduled_callbacks[1]()
+
+                assert.spy(write_message_spy).was.called(0)
+                assert.spy(on_created_spy).was.called(0)
+                assert.spy(save_spy).was.called(0)
+                assert.spy(pending_input_spy).was.called(0)
+                assert.equal("queued prompt", session._pending_input)
+
+                schedule_stub:revert()
+            end
+        )
+
+        it(
+            "ignores delayed permission effects from a superseded session creation",
+            function()
+                local permission_callback
+                local on_request_permission
+                local create_session_spy = spy.new(
+                    function(_self, handlers, _callback)
+                        on_request_permission = handlers.on_request_permission
+                    end
+                )
+                local provider_callback = spy.new(function() end)
+                local clear_diff_spy = spy.new(function() end)
+                local status_start_spy = spy.new(function() end)
+                local add_request_spy = spy.new(
+                    function(_self, _request, callback)
+                        permission_callback = callback
+                    end
+                )
+
+                local session = {
+                    _session_create_id = 0,
+                    agent = {
+                        provider_config = { name = "Test Provider" },
+                        create_session = create_session_spy,
+                    },
+                    status_animation = {
+                        start = status_start_spy,
+                        stop = spy.new(function() end),
+                    },
+                    permission_manager = {
+                        current_request = nil,
+                        queue = {},
+                        add_request = add_request_spy,
+                        clear = spy.new(function() end),
+                    },
+                    message_writer = {},
+                    widget = { buf_nrs = { input = 1 } },
+                    _cancel_session = spy.new(function() end),
+                    _show_diff_in_buffer = spy.new(function() end),
+                    _clear_diff_in_buffer = clear_diff_spy,
+                }
+                setmetatable(session, { __index = SessionManager })
+
+                SessionManager.new_session(session)
+                status_start_spy:reset()
+                local request = {
+                    sessionId = "created-session",
+                    toolCall = { toolCallId = "tool-1" },
+                    options = {},
+                }
+                on_request_permission(request, provider_callback)
+
+                assert.equal("function", type(permission_callback))
+                session._session_create_id = session._session_create_id + 1
+                permission_callback("allow_once")
+
+                assert.spy(provider_callback).was.called(0)
+                assert.spy(clear_diff_spy).was.called(0)
+                assert.spy(status_start_spy).was.called(0)
+
+                -- PermissionManager:clear() must still cancel the ACP request
+                -- after replacement, without applying stale UI effects.
+                permission_callback(nil)
+                assert.spy(provider_callback).was.called(1)
+                assert.is_nil(provider_callback.calls[1][2])
+                assert.spy(clear_diff_spy).was.called(0)
+                assert.spy(status_start_spy).was.called(0)
+            end
+        )
+
+        it(
             "ignores session updates from a superseded session creation",
             function()
                 local schedule_stub = spy.stub(vim, "schedule")

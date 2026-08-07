@@ -288,6 +288,79 @@ describe("agentic", function()
         end)
     end)
 
+    describe("stop_generation", function()
+        --- @type agentic.Agentic|nil
+        local Agentic
+        --- @type table
+        local session_registry_mock
+        --- @type table
+        local original_loaded = {}
+
+        before_each(function()
+            session_registry_mock = {
+                get_session_for_tab_page = function(_, callback)
+                    callback(session_registry_mock.session)
+                end,
+            }
+            original_loaded = {
+                ["agentic"] = package.loaded["agentic"],
+                ["agentic.config"] = package.loaded["agentic.config"],
+                ["agentic.acp.agent_instance"] = package.loaded["agentic.acp.agent_instance"],
+                ["agentic.theme"] = package.loaded["agentic.theme"],
+                ["agentic.session_registry"] = package.loaded["agentic.session_registry"],
+                ["agentic.session_restore"] = package.loaded["agentic.session_restore"],
+                ["agentic.utils.object"] = package.loaded["agentic.utils.object"],
+                ["agentic.utils.logger"] = package.loaded["agentic.utils.logger"],
+            }
+
+            package.loaded["agentic"] = nil
+            package.loaded["agentic.config"] = { acp_providers = {} }
+            package.loaded["agentic.acp.agent_instance"] = {
+                cleanup_all = function() end,
+            }
+            package.loaded["agentic.theme"] = { setup = function() end }
+            package.loaded["agentic.session_registry"] = session_registry_mock
+            package.loaded["agentic.session_restore"] = {}
+            package.loaded["agentic.utils.object"] = {
+                merge_config = function() end,
+            }
+            package.loaded["agentic.utils.logger"] = { notify = function() end }
+            Agentic = require("agentic")
+        end)
+
+        after_each(function()
+            for key, value in pairs(original_loaded) do
+                package.loaded[key] = value
+            end
+        end)
+
+        it(
+            "preserves turn generation so cancellation completion is recorded",
+            function()
+                local stop_generation_spy = spy.new(function() end)
+                local clear_spy = spy.new(function() end)
+                local session = {
+                    is_generating = true,
+                    _turn_generation = 7,
+                    session_id = "session-1",
+                    agent = { stop_generation = stop_generation_spy },
+                    permission_manager = { clear = clear_spy },
+                    status_animation = { stop = spy.new(function() end) },
+                }
+                session_registry_mock.session = session
+
+                assert.not_nil(Agentic).stop_generation()
+
+                -- The ACP cancellation response must still complete this turn;
+                -- only starting/replacing a turn invalidates its completion.
+                assert.equal(7, session._turn_generation)
+                assert.spy(stop_generation_spy).was.called(1)
+                assert.spy(clear_spy).was.called(1)
+                assert.is_false(session.is_generating)
+            end
+        )
+    end)
+
     describe("setup", function()
         --- @type agentic.Agentic|nil
         local Agentic
