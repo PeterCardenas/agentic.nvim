@@ -1452,6 +1452,57 @@ describe("agentic.SessionManager", function()
             schedule_stub:revert()
         end)
 
+        it(
+            "ignores session updates from a superseded session creation",
+            function()
+                local schedule_stub = spy.stub(vim, "schedule")
+                schedule_stub:invokes(function() end)
+
+                local stale_update_handler
+                local write_message_chunk_spy = spy.new(function() end)
+                local create_session_spy = spy.new(
+                    function(_self, handlers, _callback)
+                        stale_update_handler = handlers.on_session_update
+                    end
+                )
+
+                local session = {
+                    _session_create_id = 0,
+                    agent = {
+                        provider_config = { name = "Test Provider" },
+                        create_session = create_session_spy,
+                    },
+                    status_animation = {
+                        start = spy.new(function() end),
+                        stop = spy.new(function() end),
+                    },
+                    _is_creating_session = false,
+                    session_id = nil,
+                    chat_history = { messages = {} },
+                    config_options = { set_initial_mode = function() end },
+                    message_writer = {
+                        write_message = function() end,
+                        write_message_chunk = write_message_chunk_spy,
+                    },
+                    widget = { render_header = function() end },
+                    _cancel_session = spy.new(function() end),
+                }
+                setmetatable(session, { __index = SessionManager })
+
+                SessionManager.new_session(session)
+                session._session_create_id = session._session_create_id + 1
+
+                stale_update_handler({
+                    sessionUpdate = "agent_message_chunk",
+                    content = { type = "text", text = "stale" },
+                })
+
+                assert.spy(write_message_chunk_spy).was.called(0)
+                assert.is_nil(session._pending_agent_message_text)
+                schedule_stub:revert()
+            end
+        )
+
         it("ignores stale session creation callbacks", function()
             local scheduled_callbacks = {}
             local schedule_stub = spy.stub(vim, "schedule")
@@ -2568,6 +2619,92 @@ describe("agentic.SessionManager", function()
     end)
 
     describe("_handle_input_submit turn completion history", function()
+        it(
+            "does not let a late completion flush or finish a newer turn",
+            function()
+                local ChatHistory = require("agentic.ui.chat_history")
+                local history = ChatHistory:new()
+                local prompt_callbacks = {}
+                local scheduled_callbacks = {}
+                local write_message_spy = spy.new(function() end)
+                local write_message_chunk_spy = spy.new(function() end)
+                local schedule_stub = spy.stub(vim, "schedule")
+                schedule_stub:invokes(function(fn)
+                    table.insert(scheduled_callbacks, fn)
+                end)
+
+                local session
+                session = {
+                    session_id = "test-session",
+                    tab_page_id = 1,
+                    _is_first_message = false,
+                    _history_to_send = nil,
+                    _replace_session = false,
+                    todo_list = {
+                        close_if_all_completed = function() end,
+                    },
+                    chat_history = history,
+                    code_selection = {
+                        is_empty = function()
+                            return true
+                        end,
+                        clear = function() end,
+                    },
+                    file_list = {
+                        is_empty = function()
+                            return true
+                        end,
+                    },
+                    diagnostics_list = {
+                        is_empty = function()
+                            return true
+                        end,
+                    },
+                    agent = {
+                        provider_config = { name = "Test Provider" },
+                        send_prompt = function(_, _, _, callback)
+                            table.insert(prompt_callbacks, callback)
+                        end,
+                    },
+                    message_writer = {
+                        record_prompt_position = function() end,
+                        write_message = write_message_spy,
+                        write_message_chunk = write_message_chunk_spy,
+                        enable_auto_scroll = function() end,
+                    },
+                    widget = { render_header = function() end },
+                    status_animation = {
+                        start = function() end,
+                        stop = function() end,
+                    },
+                }
+                setmetatable(session, { __index = SessionManager })
+
+                SessionManager._handle_input_submit(session, "first turn")
+                prompt_callbacks[1]({}, nil)
+                SessionManager._handle_input_submit(session, "second turn")
+                SessionManager._on_session_update(session, {
+                    sessionUpdate = "agent_message_chunk",
+                    content = { type = "text", text = "new turn response" },
+                })
+
+                local completion_callback =
+                    assert.not_nil(scheduled_callbacks[1])
+                completion_callback()
+
+                assert.spy(write_message_spy).was.called(2)
+                assert.spy(write_message_chunk_spy).was.called(0)
+                assert.equal(
+                    "new turn response",
+                    session._pending_agent_message_text
+                )
+                assert.is_true(session.is_generating)
+                assert.equal(2, history.message_count)
+
+                schedule_stub:revert()
+            end
+        )
+
         it("stores the timestamp shown when a turn ends", function()
             local ChatHistory = require("agentic.ui.chat_history")
             local history = ChatHistory:new()

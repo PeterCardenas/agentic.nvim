@@ -107,6 +107,7 @@ end
 --- @field _is_switching_provider boolean
 --- @field _provider_switch_id integer
 --- @field _session_create_id integer
+--- @field _turn_generation integer
 --- @field _pending_agent_message_text? string
 --- @field _pending_agent_message_provider_name? string
 --- @field _pending_agent_message_generation? integer
@@ -141,6 +142,7 @@ end
 --- @field _is_switching_provider boolean True while a provider switch is waiting for the replacement session
 --- @field _provider_switch_id integer Monotonic token used to ignore stale provider switch callbacks
 --- @field _session_create_id integer Monotonic token used to ignore stale session creation callbacks
+--- @field _turn_generation integer Monotonic token used to ignore stale prompt completions
 --- @field _pending_agent_message_text? string Text buffered across adjacent agent message chunks
 --- @field _pending_agent_message_provider_name? string Provider name for buffered message history
 --- @field _pending_agent_message_generation? integer Generation captured by the scheduled flush
@@ -190,6 +192,7 @@ function SessionManager:new(tab_page_id, provider_name)
         _is_switching_provider = false,
         _provider_switch_id = 0,
         _session_create_id = 0,
+        _turn_generation = 0,
         _pending_agent_message_text = nil,
         _pending_agent_message_provider_name = nil,
         _pending_agent_message_generation = nil,
@@ -1556,6 +1559,8 @@ function SessionManager:_handle_input_submit(input_text)
 
     local session_id = self.session_id
     local tab_page_id = self.tab_page_id
+    self._turn_generation = (self._turn_generation or 0) + 1
+    local turn_generation = self._turn_generation
     -- Capture chat_history before send to avoid race with _cancel_session
     -- replacing self.chat_history while the callback is pending
     local chat_history = self.chat_history
@@ -1565,6 +1570,10 @@ function SessionManager:_handle_input_submit(input_text)
 
     self.agent:send_prompt(session_id, prompt, function(response, err)
         vim.schedule(function()
+            if self._turn_generation ~= turn_generation then
+                return
+            end
+
             flush_pending_agent_message(self)
             self.is_generating = false
 
@@ -1637,6 +1646,8 @@ function SessionManager:new_session(opts)
     end
     if not restore_mode then
         self:_cancel_session()
+    else
+        self._turn_generation = (self._turn_generation or 0) + 1
     end
 
     self.status_animation:start("busy")
@@ -1644,9 +1655,17 @@ function SessionManager:new_session(opts)
     self._session_create_id = (self._session_create_id or 0) + 1
     local session_create_id = self._session_create_id
 
+    local is_current_session = function()
+        return self._session_create_id == session_create_id
+    end
+
     --- @type agentic.acp.ClientHandlers
     local handlers = {
         on_error = function(err)
+            if not is_current_session() then
+                return
+            end
+
             Logger.debug("Agent error: ", err)
             flush_pending_agent_message(self)
 
@@ -1660,10 +1679,18 @@ function SessionManager:new_session(opts)
         end,
 
         on_session_update = function(update)
+            if not is_current_session() then
+                return
+            end
+
             self:_on_session_update(update)
         end,
 
         on_tool_call = function(tool_call)
+            if not is_current_session() then
+                return
+            end
+
             flush_pending_agent_message(self)
 
             --- @type agentic.ui.ChatHistory.ToolCall
@@ -1683,11 +1710,20 @@ function SessionManager:new_session(opts)
         end,
 
         on_tool_call_update = function(tool_call_update)
+            if not is_current_session() then
+                return
+            end
+
             flush_pending_agent_message(self)
             self:_on_tool_call_update(tool_call_update)
         end,
 
         on_request_permission = function(request, callback)
+            if not is_current_session() then
+                callback(nil)
+                return
+            end
+
             self.status_animation:stop()
 
             local function wrapped_callback(option_id)
@@ -1713,6 +1749,10 @@ function SessionManager:new_session(opts)
         end,
 
         on_cursor_extension = function(ctx)
+            if not is_current_session() then
+                return
+            end
+
             self:_on_cursor_extension(ctx)
         end,
     }
@@ -1872,6 +1912,7 @@ end
 function SessionManager:_cancel_session()
     invalidate_pending_agent_message(self)
     self.is_generating = false
+    self._turn_generation = (self._turn_generation or 0) + 1
     self.status_animation:stop()
     self._is_creating_session = false
     self._session_create_id = (self._session_create_id or 0) + 1
