@@ -295,6 +295,8 @@ describe("agentic", function()
         local session_registry_mock
         --- @type table
         local original_loaded = {}
+        --- @type TestStub|nil
+        local schedule_stub
 
         before_each(function()
             session_registry_mock = {
@@ -341,17 +343,22 @@ describe("agentic", function()
         end)
 
         after_each(function()
+            if schedule_stub then
+                schedule_stub:revert()
+                schedule_stub = nil
+            end
             for key, value in pairs(original_loaded) do
                 package.loaded[key] = value
             end
         end)
 
         it(
-            "records the cancelled turn after stop_generation receives ACP completion",
+            "ignores a stale cancellation completion after a replacement prompt",
             function()
                 local ChatHistory = require("agentic.ui.chat_history")
                 local SessionManager = require("agentic.session_manager")
                 local prompt_callback
+                local scheduled_callbacks = {}
                 local written_messages = {}
                 local history = ChatHistory:new()
                 local stop_generation_spy = spy.new(function() end)
@@ -407,39 +414,35 @@ describe("agentic", function()
                 setmetatable(session, { __index = SessionManager })
                 session_registry_mock.session = session
 
-                local schedule_stub = spy.stub(vim, "schedule")
+                schedule_stub = spy.stub(vim, "schedule")
                 schedule_stub:invokes(function(callback)
-                    callback()
+                    table.insert(scheduled_callbacks, callback)
                 end)
 
                 --- @diagnostic disable-next-line: param-type-mismatch
                 SessionManager._handle_input_submit(session, "cancel me")
-                assert.not_nil(prompt_callback)
+                local old_completion_callback = assert.not_nil(prompt_callback)
                 assert.not_nil(Agentic).stop_generation()
-                local completion_callback = assert.not_nil(prompt_callback)
-                completion_callback({ stopReason = "cancelled" }, nil)
+                old_completion_callback({ stopReason = "cancelled" }, nil)
 
                 assert.spy(stop_generation_spy).was.called(1)
                 assert.spy(clear_spy).was.called(1)
                 assert.is_false(session.is_generating)
-                assert.equal(2, #written_messages)
-                assert.equal(
-                    "agent_message_chunk",
-                    written_messages[2].sessionUpdate
-                )
-                assert.is_true(
-                    written_messages[2].content.text:find(
-                        "Generation stopped by the user request",
-                        1,
-                        true
-                    ) ~= nil
-                )
-                assert.equal(2, history.message_count)
-                local turn_end =
-                    assert.not_nil(history._pending_records[2]).message
-                assert.equal("turn_end", turn_end.type)
+                assert.equal(1, #scheduled_callbacks)
 
-                schedule_stub:revert()
+                --- @diagnostic disable-next-line: param-type-mismatch
+                SessionManager._handle_input_submit(session, "replacement")
+                assert.is_true(session.is_generating)
+                assert.equal(2, #written_messages)
+                assert.equal(2, history.message_count)
+
+                -- The old completion is now delivered after the replacement
+                -- turn has taken ownership of the session state.
+                scheduled_callbacks[1]()
+
+                assert.is_true(session.is_generating)
+                assert.equal(2, #written_messages)
+                assert.equal(2, history.message_count)
             end
         )
     end)

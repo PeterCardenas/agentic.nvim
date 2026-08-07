@@ -1602,6 +1602,11 @@ describe("agentic.SessionManager", function()
                 assert.spy(replacement_provider_callback).was.called(0)
                 assert.equal(clear_diff_count, clear_diff_spy.call_count)
                 assert.equal(status_start_count, status_start_spy.call_count)
+
+                -- The reverse ordering must also remain idempotent: an
+                -- approval can win before a duplicate cancellation arrives.
+                replacement_callback("allow_once")
+                assert.spy(replacement_provider_callback).was.called(1)
                 replacement_callback(nil)
                 assert.spy(replacement_provider_callback).was.called(1)
             end
