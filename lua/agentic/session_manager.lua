@@ -1726,11 +1726,16 @@ function SessionManager:new_session(opts)
 
             self.status_animation:stop()
 
+            local callback_called = false
             local function wrapped_callback(option_id)
+                if callback_called then
+                    return
+                end
                 if not is_current_session() and option_id ~= nil then
                     return
                 end
 
+                callback_called = true
                 callback(option_id)
 
                 if not is_current_session() then

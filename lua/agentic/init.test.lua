@@ -314,17 +314,29 @@ describe("agentic", function()
             }
 
             package.loaded["agentic"] = nil
-            package.loaded["agentic.config"] = { acp_providers = {} }
+            package.loaded["agentic.config"] = {
+                acp_providers = {},
+                message_icons = {
+                    stopped = "stopped",
+                    error = "error",
+                },
+            }
             package.loaded["agentic.acp.agent_instance"] = {
                 cleanup_all = function() end,
             }
-            package.loaded["agentic.theme"] = { setup = function() end }
+            package.loaded["agentic.theme"] = {
+                setup = function() end,
+                HL_GROUPS = { WIN_BAR_TITLE = "AgenticTitle" },
+            }
             package.loaded["agentic.session_registry"] = session_registry_mock
             package.loaded["agentic.session_restore"] = {}
             package.loaded["agentic.utils.object"] = {
                 merge_config = function() end,
             }
-            package.loaded["agentic.utils.logger"] = { notify = function() end }
+            package.loaded["agentic.utils.logger"] = {
+                notify = function() end,
+                debug = function() end,
+            }
             Agentic = require("agentic")
         end)
 
@@ -335,28 +347,99 @@ describe("agentic", function()
         end)
 
         it(
-            "preserves turn generation so cancellation completion is recorded",
+            "records the cancelled turn after stop_generation receives ACP completion",
             function()
+                local ChatHistory = require("agentic.ui.chat_history")
+                local SessionManager = require("agentic.session_manager")
+                local prompt_callback
+                local written_messages = {}
+                local history = ChatHistory:new()
                 local stop_generation_spy = spy.new(function() end)
                 local clear_spy = spy.new(function() end)
                 local session = {
-                    is_generating = true,
-                    _turn_generation = 7,
                     session_id = "session-1",
-                    agent = { stop_generation = stop_generation_spy },
+                    tab_page_id = 1,
+                    _is_first_message = false,
+                    _history_to_send = nil,
+                    _replace_session = false,
+                    _agent_message_generation = 0,
+                    _handle_mode_change = function() end,
+                    chat_history = history,
+                    code_selection = {
+                        is_empty = function()
+                            return true
+                        end,
+                        clear = function() end,
+                    },
+                    file_list = {
+                        is_empty = function()
+                            return true
+                        end,
+                    },
+                    diagnostics_list = {
+                        is_empty = function()
+                            return true
+                        end,
+                    },
+                    todo_list = {
+                        close_if_all_completed = function() end,
+                    },
+                    agent = {
+                        provider_config = { name = "Test Provider" },
+                        send_prompt = function(_, _, _, callback)
+                            prompt_callback = callback
+                        end,
+                        stop_generation = stop_generation_spy,
+                    },
+                    message_writer = {
+                        record_prompt_position = function() end,
+                        write_message = function(_, message)
+                            table.insert(written_messages, message)
+                        end,
+                        enable_auto_scroll = function() end,
+                    },
                     permission_manager = { clear = clear_spy },
-                    status_animation = { stop = spy.new(function() end) },
+                    status_animation = {
+                        start = function() end,
+                        stop = function() end,
+                    },
                 }
+                setmetatable(session, { __index = SessionManager })
                 session_registry_mock.session = session
 
-                assert.not_nil(Agentic).stop_generation()
+                local schedule_stub = spy.stub(vim, "schedule")
+                schedule_stub:invokes(function(callback)
+                    callback()
+                end)
 
-                -- The ACP cancellation response must still complete this turn;
-                -- only starting/replacing a turn invalidates its completion.
-                assert.equal(7, session._turn_generation)
+                --- @diagnostic disable-next-line: param-type-mismatch
+                SessionManager._handle_input_submit(session, "cancel me")
+                assert.not_nil(prompt_callback)
+                assert.not_nil(Agentic).stop_generation()
+                local completion_callback = assert.not_nil(prompt_callback)
+                completion_callback({ stopReason = "cancelled" }, nil)
+
                 assert.spy(stop_generation_spy).was.called(1)
                 assert.spy(clear_spy).was.called(1)
                 assert.is_false(session.is_generating)
+                assert.equal(2, #written_messages)
+                assert.equal(
+                    "agent_message_chunk",
+                    written_messages[2].sessionUpdate
+                )
+                assert.is_true(
+                    written_messages[2].content.text:find(
+                        "Generation stopped by the user request",
+                        1,
+                        true
+                    ) ~= nil
+                )
+                assert.equal(2, history.message_count)
+                local turn_end =
+                    assert.not_nil(history._pending_records[2]).message
+                assert.equal("turn_end", turn_end.type)
+
+                schedule_stub:revert()
             end
         )
     end)

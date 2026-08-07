@@ -1516,23 +1516,28 @@ describe("agentic.SessionManager", function()
         )
 
         it(
-            "ignores delayed permission effects from a superseded session creation",
+            "cancels a pending permission once when replacing its session",
             function()
+                local PermissionManager =
+                    require("agentic.ui.permission_manager")
                 local permission_callback
-                local on_request_permission
+                local create_session_handlers = {}
                 local create_session_spy = spy.new(
                     function(_self, handlers, _callback)
-                        on_request_permission = handlers.on_request_permission
+                        table.insert(create_session_handlers, handlers)
                     end
                 )
                 local provider_callback = spy.new(function() end)
                 local clear_diff_spy = spy.new(function() end)
                 local status_start_spy = spy.new(function() end)
-                local add_request_spy = spy.new(
-                    function(_self, _request, callback)
-                        permission_callback = callback
-                    end
-                )
+                local writer = {
+                    bufnr = 0,
+                    display_permission_buttons = function()
+                        return 1, 1, { [1] = "allow_once" }
+                    end,
+                    remove_permission_buttons = function() end,
+                    set_on_content_changed = function() end,
+                }
 
                 local session = {
                     _session_create_id = 0,
@@ -1544,44 +1549,61 @@ describe("agentic.SessionManager", function()
                         start = status_start_spy,
                         stop = spy.new(function() end),
                     },
-                    permission_manager = {
-                        current_request = nil,
-                        queue = {},
-                        add_request = add_request_spy,
-                        clear = spy.new(function() end),
-                    },
-                    message_writer = {},
-                    widget = { buf_nrs = { input = 1 } },
-                    _cancel_session = spy.new(function() end),
+                    permission_manager = PermissionManager:new(writer),
+                    widget = { buf_nrs = { input = 0 } },
                     _show_diff_in_buffer = spy.new(function() end),
                     _clear_diff_in_buffer = clear_diff_spy,
                 }
                 setmetatable(session, { __index = SessionManager })
 
-                SessionManager.new_session(session)
-                status_start_spy:reset()
+                SessionManager.new_session(session, { skip_reuse_check = true })
                 local request = {
                     sessionId = "created-session",
                     toolCall = { toolCallId = "tool-1" },
-                    options = {},
+                    options = {
+                        {
+                            optionId = "allow_once",
+                            name = "Allow once",
+                            kind = "allow_once",
+                        },
+                    },
                 }
-                on_request_permission(request, provider_callback)
+                create_session_handlers[1].on_request_permission(
+                    request,
+                    provider_callback
+                )
+                permission_callback = assert.not_nil(
+                    session.permission_manager.current_request
+                ).callback
 
-                assert.equal("function", type(permission_callback))
-                session._session_create_id = session._session_create_id + 1
-                permission_callback("allow_once")
-
-                assert.spy(provider_callback).was.called(0)
-                assert.spy(clear_diff_spy).was.called(0)
-                assert.spy(status_start_spy).was.called(0)
-
-                -- PermissionManager:clear() must still cancel the ACP request
-                -- after replacement, without applying stale UI effects.
-                permission_callback(nil)
+                SessionManager.new_session(session, {
+                    skip_reuse_check = true,
+                })
+                assert.equal(2, #create_session_handlers)
                 assert.spy(provider_callback).was.called(1)
                 assert.is_nil(provider_callback.calls[1][2])
-                assert.spy(clear_diff_spy).was.called(0)
-                assert.spy(status_start_spy).was.called(0)
+
+                local replacement_provider_callback = spy.new(function() end)
+                create_session_handlers[2].on_request_permission(
+                    request,
+                    replacement_provider_callback
+                )
+                local replacement_callback = assert.not_nil(
+                    session.permission_manager.current_request
+                ).callback
+                local clear_diff_count = clear_diff_spy.call_count
+                local status_start_count = status_start_spy.call_count
+
+                -- A delayed cancellation from the old request must not cancel
+                -- the replacement request or apply stale UI effects.
+                permission_callback(nil)
+                permission_callback("allow_once")
+                assert.spy(provider_callback).was.called(1)
+                assert.spy(replacement_provider_callback).was.called(0)
+                assert.equal(clear_diff_count, clear_diff_spy.call_count)
+                assert.equal(status_start_count, status_start_spy.call_count)
+                replacement_callback(nil)
+                assert.spy(replacement_provider_callback).was.called(1)
             end
         )
 
