@@ -41,6 +41,7 @@ local KNOWN_ACP_KINDS = {
 --- @field reconnect_count number
 --- @field transport? agentic.acp.ACPTransportInstance
 --- @field subscribers table<string, agentic.acp.ClientHandlers>
+--- @field _subscriber_generations table<string, number>
 
 --- @class agentic.acp.ACPClient : agentic.acp.ACPClientData
 --- @field _on_ready fun(client: agentic.acp.ACPClient)
@@ -66,6 +67,7 @@ function ACPClient:new(config, on_ready)
     local instance = {
         provider_config = config,
         subscribers = {},
+        _subscriber_generations = {},
         id_counter = 0,
         protocol_version = 1,
         client_info = {
@@ -101,6 +103,10 @@ end
 --- @param session_id string
 --- @param handlers agentic.acp.ClientHandlers
 function ACPClient:_subscribe(session_id, handlers)
+    self._subscriber_generations = self._subscriber_generations or {}
+    self._subscriber_generations[session_id] = (
+        self._subscriber_generations[session_id] or 0
+    ) + 1
     self.subscribers[session_id] = handlers
 end
 
@@ -115,7 +121,20 @@ function ACPClient:__with_subscriber(session_id, callback)
         return
     end
 
+    local generation = self._subscriber_generations
+        and self._subscriber_generations[session_id]
+
     vim.schedule(function()
+        if
+            self.subscribers[session_id] ~= subscriber
+            or (
+                self._subscriber_generations
+                and self._subscriber_generations[session_id] ~= generation
+            )
+        then
+            return
+        end
+
         callback(subscriber)
     end)
 end
@@ -534,6 +553,64 @@ end
 
 --- @protected
 --- @param message_id number
+--- @return fun(option_id: string|nil)
+function ACPClient:__create_permission_responder(message_id)
+    local responded = false
+    return function(option_id)
+        if responded then
+            return
+        end
+        responded = true
+
+        --- @type agentic.acp.RequestPermissionOutcome
+        local outcome = {
+            outcome = {
+                outcome = option_id and "selected" or "cancelled",
+                optionId = option_id,
+            },
+        }
+        self:__send_result(message_id, outcome)
+    end
+end
+
+--- Deliver a permission request while protecting its response from stale
+--- subscriber callbacks. The responder is created before subscriber lookup so
+--- missing sessions still receive the required cancelled result.
+--- @protected
+--- @param message_id number
+--- @param request agentic.acp.RequestPermission
+--- @param callback fun(subscriber: agentic.acp.ClientHandlers, respond: fun(option_id: string|nil))
+function ACPClient:__with_permission_subscriber(message_id, request, callback)
+    local respond = self:__create_permission_responder(message_id)
+    local session_id = request.sessionId
+    local subscriber = self.subscribers[session_id]
+
+    if not subscriber then
+        Logger.debug("No subscriber found for session_id: " .. session_id)
+        respond(nil)
+        return
+    end
+
+    local generation = self._subscriber_generations
+        and self._subscriber_generations[session_id]
+    vim.schedule(function()
+        if
+            self.subscribers[session_id] ~= subscriber
+            or (
+                self._subscriber_generations
+                and self._subscriber_generations[session_id] ~= generation
+            )
+        then
+            respond(nil)
+            return
+        end
+
+        callback(subscriber, respond)
+    end)
+end
+
+--- @protected
+--- @param message_id number
 --- @param request agentic.acp.RequestPermission
 function ACPClient:__handle_request_permission(message_id, request)
     if not request.sessionId or not request.toolCall then
@@ -541,21 +618,14 @@ function ACPClient:__handle_request_permission(message_id, request)
         return
     end
 
-    local session_id = request.sessionId
-
-    self:__with_subscriber(session_id, function(subscriber)
-        -- Every change to this block MUST be reflected in Gemini's ACP Adapter, as it has custom implementation @see gemini_acp_adapter.lua
-        subscriber.on_request_permission(request, function(option_id)
-            --- @type agentic.acp.RequestPermissionOutcome
-            local outcome = {
-                outcome = {
-                    outcome = "selected",
-                    optionId = option_id,
-                },
-            }
-            self:__send_result(message_id, outcome)
-        end)
-    end)
+    self:__with_permission_subscriber(
+        message_id,
+        request,
+        function(subscriber, respond)
+            -- Every change to this block MUST be reflected in Gemini's ACP Adapter, as it has custom implementation @see gemini_acp_adapter.lua
+            subscriber.on_request_permission(request, respond)
+        end
+    )
 end
 
 function ACPClient:stop()
@@ -955,6 +1025,12 @@ function ACPClient:stop_generation(session_id)
         return
     end
 
+    -- Drop callbacks queued before the stop while keeping the session alive.
+    self._subscriber_generations = self._subscriber_generations or {}
+    self._subscriber_generations[session_id] = (
+        self._subscriber_generations[session_id] or 0
+    ) + 1
+
     self:_send_notification("session/cancel", {
         sessionId = session_id,
     })
@@ -968,7 +1044,11 @@ function ACPClient:cancel_session(session_id)
         return
     end
 
-    -- remove subscriber first to avoid handling any further messages
+    -- Invalidate queued subscriber callbacks before removing the subscriber.
+    self._subscriber_generations = self._subscriber_generations or {}
+    self._subscriber_generations[session_id] = (
+        self._subscriber_generations[session_id] or 0
+    ) + 1
     self.subscribers[session_id] = nil
 
     self:_send_notification("session/cancel", {
@@ -1058,6 +1138,7 @@ return ACPClient
 --- | "in_progress"
 --- | "completed"
 --- | "failed"
+--- | "cancelled"
 
 --- @alias agentic.acp.PlanEntryStatus
 --- | "pending"

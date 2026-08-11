@@ -113,29 +113,26 @@ function GeminiACPAdapter:__handle_request_permission(message_id, request)
     -- Gemini also don't send "cancel" tool_call_update, so I have to generate a synthetic one
     local session_id = request.sessionId
 
-    self:__with_subscriber(session_id, function(subscriber)
-        subscriber.on_request_permission(request, function(option_id)
-            if option_id == "cancel" then
-                --- @type agentic.acp.ToolCallUpdate
-                local update = {
-                    sessionUpdate = "tool_call_update",
-                    toolCallId = request.toolCall.toolCallId,
-                    status = "failed",
-                }
+    self:__with_permission_subscriber(
+        message_id,
+        request,
+        function(subscriber, respond)
+            subscriber.on_request_permission(request, function(option_id)
+                if option_id == "cancel" then
+                    --- @type agentic.acp.ToolCallUpdate
+                    local update = {
+                        sessionUpdate = "tool_call_update",
+                        toolCallId = request.toolCall.toolCallId,
+                        status = "failed",
+                    }
 
-                self:__handle_tool_call_update(session_id, update)
-            end
+                    self:__handle_tool_call_update(session_id, update)
+                end
 
-            --- @type agentic.acp.RequestPermissionOutcome
-            local outcome = {
-                outcome = {
-                    outcome = "selected",
-                    optionId = option_id,
-                },
-            }
-            self:__send_result(message_id, outcome)
-        end)
-    end)
+                respond(option_id)
+            end)
+        end
+    )
 end
 
 return GeminiACPAdapter
