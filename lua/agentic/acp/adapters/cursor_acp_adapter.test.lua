@@ -463,6 +463,71 @@ describe("agentic.acp.adapters.CursorACPAdapter", function()
         }, message.body)
     end)
 
+    it(
+        "delivers queued cursor/task updates with a legacy adapter shape",
+        function()
+            local adapter = new_adapter()
+            local handlers, _, on_tool_call_update = new_handlers()
+            adapter.subscribers["session-1"] = handlers
+            adapter._task_tool_inputs["tool-task-legacy"] = {
+                _toolName = "task",
+                description = "Legacy task",
+                prompt = "legacy",
+            }
+            adapter._task_tool_sessions["tool-task-legacy"] = "session-1"
+
+            local scheduled_callbacks = {}
+            local schedule_stub = spy.stub(vim, "schedule")
+            schedule_stub:invokes(function(callback)
+                table.insert(scheduled_callbacks, callback)
+            end)
+
+            adapter:_handle_cursor_task(1, {
+                agentId = "agent-legacy",
+                toolCallId = "tool-task-legacy",
+                description = "Legacy task",
+                prompt = "legacy",
+                finalMessage = "LEGACY_OK",
+                model = "test-model",
+                subagentType = {},
+            })
+
+            assert.equal(1, #scheduled_callbacks)
+            local ok, err = xpcall(function()
+                while #scheduled_callbacks > 0 do
+                    table.remove(scheduled_callbacks, 1)()
+                end
+            end, debug.traceback)
+            schedule_stub:revert()
+            assert.is_true(ok, err)
+            assert.equal(1, on_tool_call_update.call_count)
+        end
+    )
+
+    it(
+        "supports legacy adapter state in public task cleanup and update paths",
+        function()
+            local adapter = setmetatable({
+                provider_config = {},
+                subscribers = {},
+                callbacks = {},
+                transport = { send = function() end },
+            }, CursorACPAdapter)
+
+            assert.has_no_errors(function()
+                adapter:stop_generation("legacy-session")
+                adapter:cancel_session("legacy-session")
+                adapter:__build_tool_call_update({
+                    sessionUpdate = "tool_call_update",
+                    toolCallId = "legacy-task",
+                    status = "completed",
+                })
+            end)
+            assert.same({}, adapter._task_tool_inputs)
+            assert.same({}, adapter._task_tool_sessions)
+        end
+    )
+
     it("clears retained task raw input after terminal task update", function()
         local adapter = new_adapter()
         adapter._task_tool_inputs["tool-task-done"] = {
@@ -482,6 +547,472 @@ describe("agentic.acp.adapters.CursorACPAdapter", function()
 
         assert.is_nil(adapter._task_tool_inputs["tool-task-done"])
     end)
+
+    it(
+        "ignores cursor/task notifications after the owning session stops",
+        function()
+            local adapter = new_adapter()
+            local handlers, _, on_tool_call_update = new_handlers()
+            adapter.subscribers["session-1"] = handlers
+            adapter._task_tool_inputs["tool-task-stopped"] = {
+                _toolName = "task",
+                description = "Stopped task",
+                prompt = "stopped",
+            }
+            adapter._task_tool_sessions["tool-task-stopped"] = "session-1"
+
+            adapter:stop_generation("session-1")
+            adapter:_handle_cursor_task(1, {
+                agentId = "agent-stopped",
+                toolCallId = "tool-task-stopped",
+                description = "Stopped task",
+                prompt = "stopped",
+                finalMessage = "LATE",
+                model = "test-model",
+                subagentType = {},
+            })
+
+            assert.equal(0, on_tool_call_update.call_count)
+        end
+    )
+
+    it(
+        "sends each cursor/task notification only to its owning session",
+        function()
+            local adapter = new_adapter()
+            local handlers_one, _, on_tool_call_update_one = new_handlers()
+            local handlers_two, _, on_tool_call_update_two = new_handlers()
+            adapter.subscribers["session-1"] = handlers_one
+            adapter.subscribers["session-2"] = handlers_two
+            adapter._task_tool_inputs["tool-task-one"] = {
+                _toolName = "task",
+                description = "Task one",
+                prompt = "one",
+            }
+            adapter._task_tool_sessions["tool-task-one"] = "session-1"
+
+            adapter:_handle_cursor_task(1, {
+                agentId = "agent-one",
+                toolCallId = "tool-task-one",
+                description = "Task one",
+                prompt = "one",
+                finalMessage = "ONE",
+                model = "test-model",
+                subagentType = {},
+            })
+
+            local notified = vim.wait(1000, function()
+                return on_tool_call_update_one.call_count == 1
+            end, 10)
+            assert.is_true(notified)
+            assert.equal(1, on_tool_call_update_one.call_count)
+            assert.equal(0, on_tool_call_update_two.call_count)
+            assert.is_nil(adapter._task_tool_sessions["tool-task-one"])
+        end
+    )
+
+    it("delivers a fresh task notification when a tool ID is reused", function()
+        local adapter = new_adapter()
+        local handlers, _, on_tool_call_update = new_handlers()
+        adapter.subscribers["session-1"] = handlers
+        adapter._task_tool_inputs["tool-task-reused"] = {
+            _toolName = "task",
+            description = "Old task",
+            prompt = "old",
+        }
+        adapter._task_tool_sessions["tool-task-reused"] = "session-1"
+
+        adapter:stop_generation("session-1")
+        adapter:_handle_cursor_task(1, {
+            agentId = "agent-old",
+            toolCallId = "tool-task-reused",
+            description = "Old task",
+            prompt = "old",
+            finalMessage = "OLD",
+            model = "test-model",
+            subagentType = {},
+        })
+
+        adapter._task_tool_inputs["tool-task-reused"] = {
+            _toolName = "task",
+            description = "Fresh task",
+            prompt = "fresh",
+        }
+        adapter._task_tool_sessions["tool-task-reused"] = "session-1"
+        adapter:_handle_cursor_task(2, {
+            agentId = "agent-fresh",
+            toolCallId = "tool-task-reused",
+            description = "Fresh task",
+            prompt = "fresh",
+            finalMessage = "FRESH",
+            model = "test-model",
+            subagentType = {},
+        })
+
+        local notified = vim.wait(1000, function()
+            return on_tool_call_update.call_count == 1
+        end, 10)
+        assert.is_true(notified)
+        assert.equal(1, on_tool_call_update.call_count)
+        local call = assert.not_nil(on_tool_call_update.calls[1])
+        local update = assert.not_nil(call[1])
+        assert.same({
+            "Prompt:",
+            "fresh",
+            "",
+            "Final message:",
+            "FRESH",
+        }, update.body)
+    end)
+
+    it("clears task input and session after a cancelled task update", function()
+        local adapter = new_adapter()
+        adapter._task_tool_inputs["tool-task-cancelled"] = {
+            _toolName = "task",
+            description = "Subagent is cancelled",
+            prompt = "Reply OK",
+        }
+        adapter._task_tool_sessions["tool-task-cancelled"] = "session-cancelled"
+
+        adapter:__build_tool_call_update({
+            sessionUpdate = "tool_call_update",
+            toolCallId = "tool-task-cancelled",
+            status = "cancelled",
+            rawOutput = {
+                finalMessage = "Cancelled",
+            },
+        })
+
+        assert.is_nil(adapter._task_tool_inputs["tool-task-cancelled"])
+        assert.is_nil(adapter._task_tool_sessions["tool-task-cancelled"])
+    end)
+
+    it(
+        "clears task state and delivers only fresh task notifications after soft stop",
+        function()
+            local adapter = new_adapter()
+            local handlers, _, on_tool_call_update = new_handlers()
+            adapter.subscribers["session-1"] = handlers
+
+            local scheduled_callbacks = {}
+            local schedule_stub = spy.stub(vim, "schedule")
+            schedule_stub:invokes(function(callback)
+                table.insert(scheduled_callbacks, callback)
+            end)
+
+            adapter:__handle_tool_call("session-1", {
+                sessionUpdate = "tool_call",
+                toolCallId = "tool-task-reused",
+                kind = "other",
+                status = "pending",
+                title = "Task",
+                rawInput = {
+                    _toolName = "task",
+                    description = "Old task",
+                    prompt = "old",
+                },
+            })
+            assert.is_not_nil(adapter._task_tool_inputs["tool-task-reused"])
+            adapter:_handle_cursor_task(1, {
+                agentId = "agent-old",
+                toolCallId = "tool-task-reused",
+                description = "Old task",
+                prompt = "old",
+                finalMessage = "OLD",
+                model = "test-model",
+                subagentType = {},
+            })
+
+            adapter:stop_generation("session-1")
+            assert.is_nil(adapter._task_tool_inputs["tool-task-reused"])
+            assert.is_nil(adapter._task_tool_sessions["tool-task-reused"])
+
+            adapter:__handle_tool_call("session-1", {
+                sessionUpdate = "tool_call",
+                toolCallId = "tool-task-reused",
+                kind = "other",
+                status = "pending",
+                title = "Task",
+                rawInput = {
+                    _toolName = "task",
+                    description = "Fresh task",
+                    prompt = "fresh",
+                },
+            })
+            adapter:_handle_cursor_task(2, {
+                agentId = "agent-fresh",
+                toolCallId = "tool-task-reused",
+                description = "Fresh task",
+                prompt = "fresh",
+                finalMessage = "FRESH",
+                model = "test-model",
+                subagentType = {},
+            })
+
+            for _, callback in ipairs(scheduled_callbacks) do
+                callback()
+            end
+            schedule_stub:revert()
+
+            assert.equal(1, on_tool_call_update.call_count)
+            local call = assert.not_nil(on_tool_call_update.calls[1])
+            local update = assert.not_nil(call[1])
+            assert.same({
+                "Prompt:",
+                "fresh",
+                "",
+                "Final message:",
+                "FRESH",
+            }, update.body)
+        end
+    )
+
+    it(
+        "does not deliver a queued task completion after same-session ID reuse",
+        function()
+            local adapter = new_adapter()
+            local handlers, _, on_tool_call_update = new_handlers()
+            adapter.subscribers["session-1"] = handlers
+
+            local scheduled_callbacks = {}
+            local schedule_stub = spy.stub(vim, "schedule")
+            schedule_stub:invokes(function(callback)
+                table.insert(scheduled_callbacks, callback)
+            end)
+
+            adapter:__handle_tool_call("session-1", {
+                sessionUpdate = "tool_call",
+                toolCallId = "tool-task-reused",
+                kind = "other",
+                status = "pending",
+                title = "Task",
+                rawInput = {
+                    _toolName = "task",
+                    description = "Old task",
+                    prompt = "old",
+                },
+            })
+            local initial_callback = table.remove(scheduled_callbacks, 1)
+            assert.is_not_nil(initial_callback)
+            initial_callback()
+
+            adapter:_handle_cursor_task(1, {
+                agentId = "agent-old",
+                toolCallId = "tool-task-reused",
+                description = "Old task",
+                prompt = "old",
+                finalMessage = "OLD",
+                model = "test-model",
+                subagentType = {},
+            })
+
+            adapter:__handle_tool_call("session-1", {
+                sessionUpdate = "tool_call",
+                toolCallId = "tool-task-reused",
+                kind = "other",
+                status = "pending",
+                title = "Task",
+                rawInput = {
+                    _toolName = "task",
+                    description = "Fresh task",
+                    prompt = "fresh",
+                },
+            })
+            local replacement_callback = table.remove(scheduled_callbacks, 1)
+            assert.is_not_nil(replacement_callback)
+            replacement_callback()
+            adapter:_handle_cursor_task(2, {
+                agentId = "agent-fresh",
+                toolCallId = "tool-task-reused",
+                description = "Fresh task",
+                prompt = "fresh",
+                finalMessage = "FRESH",
+                model = "test-model",
+                subagentType = {},
+            })
+
+            while #scheduled_callbacks > 0 do
+                local callback = table.remove(scheduled_callbacks, 1)
+                callback()
+            end
+            schedule_stub:revert()
+
+            assert.equal(1, on_tool_call_update.call_count)
+            local call = assert.not_nil(on_tool_call_update.calls[1])
+            local update = assert.not_nil(call[1])
+            assert.same({
+                "Prompt:",
+                "fresh",
+                "",
+                "Final message:",
+                "FRESH",
+            }, update.body)
+        end
+    )
+
+    it(
+        "does not route a queued task completion to another session after ID reuse",
+        function()
+            local adapter = new_adapter()
+            local handlers_one, _, on_tool_call_update_one = new_handlers()
+            local handlers_two, _, on_tool_call_update_two = new_handlers()
+            adapter.subscribers["session-1"] = handlers_one
+            adapter.subscribers["session-2"] = handlers_two
+
+            local scheduled_callbacks = {}
+            local schedule_stub = spy.stub(vim, "schedule")
+            schedule_stub:invokes(function(callback)
+                table.insert(scheduled_callbacks, callback)
+            end)
+
+            adapter:__handle_tool_call("session-1", {
+                sessionUpdate = "tool_call",
+                toolCallId = "tool-task-reused",
+                kind = "other",
+                status = "pending",
+                title = "Task",
+                rawInput = {
+                    _toolName = "task",
+                    description = "Old task",
+                    prompt = "old",
+                },
+            })
+            local initial_callback = table.remove(scheduled_callbacks, 1)
+            assert.is_not_nil(initial_callback)
+            initial_callback()
+            adapter:_handle_cursor_task(1, {
+                agentId = "agent-old",
+                toolCallId = "tool-task-reused",
+                description = "Old task",
+                prompt = "old",
+                finalMessage = "OLD",
+                model = "test-model",
+                subagentType = {},
+            })
+
+            adapter:__handle_tool_call("session-2", {
+                sessionUpdate = "tool_call",
+                toolCallId = "tool-task-reused",
+                kind = "other",
+                status = "pending",
+                title = "Task",
+                rawInput = {
+                    _toolName = "task",
+                    description = "Fresh task",
+                    prompt = "fresh",
+                },
+            })
+            local replacement_callback = table.remove(scheduled_callbacks, 1)
+            assert.is_not_nil(replacement_callback)
+            replacement_callback()
+            adapter:_handle_cursor_task(2, {
+                agentId = "agent-fresh",
+                toolCallId = "tool-task-reused",
+                description = "Fresh task",
+                prompt = "fresh",
+                finalMessage = "FRESH",
+                model = "test-model",
+                subagentType = {},
+            })
+
+            while #scheduled_callbacks > 0 do
+                local callback = table.remove(scheduled_callbacks, 1)
+                callback()
+            end
+            schedule_stub:revert()
+
+            assert.equal(0, on_tool_call_update_one.call_count)
+            assert.equal(1, on_tool_call_update_two.call_count)
+        end
+    )
+
+    it(
+        "preserves task ownership for a completed update without raw output",
+        function()
+            local adapter = new_adapter()
+            local handlers, _, on_tool_call_update = new_handlers()
+            adapter.subscribers["session-1"] = handlers
+            adapter._task_tool_inputs["tool-task-no-output"] = {
+                _toolName = "task",
+                description = "No output task",
+                prompt = "prompt",
+            }
+            adapter._task_tool_sessions["tool-task-no-output"] = "session-1"
+
+            adapter:__build_tool_call_update({
+                sessionUpdate = "tool_call_update",
+                toolCallId = "tool-task-no-output",
+                status = "completed",
+            })
+
+            assert.equal(
+                "session-1",
+                adapter._task_tool_sessions["tool-task-no-output"]
+            )
+            adapter:_handle_cursor_task(1, {
+                agentId = "agent-no-output",
+                toolCallId = "tool-task-no-output",
+                description = "No output task",
+                prompt = "prompt",
+                finalMessage = "DONE",
+                model = "test-model",
+                subagentType = {},
+            })
+            local notified = vim.wait(1000, function()
+                return on_tool_call_update.call_count == 1
+            end, 10)
+            assert.is_true(notified)
+        end
+    )
+
+    it(
+        "does not route cursor/task for a duplicate pending ID across sessions",
+        function()
+            local adapter = new_adapter()
+            local handlers_one, _, on_tool_call_update_one = new_handlers()
+            local handlers_two, _, on_tool_call_update_two = new_handlers()
+            adapter.subscribers["session-1"] = handlers_one
+            adapter.subscribers["session-2"] = handlers_two
+
+            adapter:__handle_tool_call("session-1", {
+                sessionUpdate = "tool_call",
+                toolCallId = "tool-task-duplicate",
+                kind = "other",
+                status = "pending",
+                title = "Task",
+                rawInput = {
+                    _toolName = "task",
+                    description = "First task",
+                    prompt = "first",
+                },
+            })
+            adapter:__handle_tool_call("session-2", {
+                sessionUpdate = "tool_call",
+                toolCallId = "tool-task-duplicate",
+                kind = "other",
+                status = "pending",
+                title = "Task",
+                rawInput = {
+                    _toolName = "task",
+                    description = "Second task",
+                    prompt = "second",
+                },
+            })
+
+            adapter:_handle_cursor_task(1, {
+                agentId = "agent-duplicate",
+                toolCallId = "tool-task-duplicate",
+                description = "Ambiguous task",
+                prompt = "ambiguous",
+                finalMessage = "DO NOT ROUTE",
+                model = "test-model",
+                subagentType = {},
+            })
+
+            assert.equal(0, on_tool_call_update_one.call_count)
+            assert.equal(0, on_tool_call_update_two.call_count)
+        end
+    )
 
     it("clears only the cancelled session's retained task inputs", function()
         local adapter = new_adapter()

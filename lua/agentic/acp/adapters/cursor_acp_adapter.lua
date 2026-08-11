@@ -49,6 +49,8 @@ local Logger = require("agentic.utils.logger")
 --- @field _chunk_stream_started table<string, table<string, boolean>> Track whether a chunk stream started per session and chunk type
 --- @field _task_tool_inputs table<string, agentic.acp.CursorTaskRawInput> Track task raw input so completion updates can rebuild a clean task body
 --- @field _task_tool_sessions table<string, string> Track task tool call session IDs for cancel cleanup
+--- @field _task_tool_generations table<string, number> Track task ID generations so queued callbacks cannot cross task reuse
+--- @field _ambiguous_task_tool_ids table<string, boolean> IDs duplicated by pending tasks in different sessions
 local CursorACPAdapter = setmetatable({}, { __index = ACPClient })
 CursorACPAdapter.__index = CursorACPAdapter
 
@@ -67,6 +69,8 @@ function CursorACPAdapter:new(config, on_ready)
     self._chunk_stream_started = {}
     self._task_tool_inputs = {}
     self._task_tool_sessions = {}
+    self._task_tool_generations = {}
+    self._ambiguous_task_tool_ids = {}
 
     return self
 end
@@ -405,14 +409,25 @@ function CursorACPAdapter:_format_task_argument(task, title)
     return fallback ~= "" and fallback or "subagent task"
 end
 
+function CursorACPAdapter:_ensure_task_maps()
+    self._task_tool_inputs = self._task_tool_inputs or {}
+    self._task_tool_sessions = self._task_tool_sessions or {}
+    self._task_tool_generations = self._task_tool_generations or {}
+    self._ambiguous_task_tool_ids = self._ambiguous_task_tool_ids or {}
+end
+
 --- @param tool_call_id string|nil
-function CursorACPAdapter:_clear_task_tool_input(tool_call_id)
+--- @param keep_session boolean|nil
+function CursorACPAdapter:_clear_task_tool_input(tool_call_id, keep_session)
+    self:_ensure_task_maps()
     if not tool_call_id then
         return
     end
 
     self._task_tool_inputs[tool_call_id] = nil
-    self._task_tool_sessions[tool_call_id] = nil
+    if not keep_session then
+        self._task_tool_sessions[tool_call_id] = nil
+    end
 end
 
 --- Overloading create_session to handle slash commands, as cursor sends them before session starts
@@ -575,9 +590,25 @@ function CursorACPAdapter:__handle_tool_call(session_id, update)
         elseif update.rawInput._toolName == "task" then
             local raw_input = update.rawInput
             ---@cast raw_input agentic.acp.CursorTaskRawInput
-            self._task_tool_inputs[update.toolCallId] = raw_input
             self._task_tool_sessions = self._task_tool_sessions or {}
-            self._task_tool_sessions[update.toolCallId] = session_id
+            self._task_tool_generations = self._task_tool_generations or {}
+            self._ambiguous_task_tool_ids = self._ambiguous_task_tool_ids or {}
+            local previous_session = self._task_tool_sessions[update.toolCallId]
+            if previous_session and previous_session ~= session_id then
+                -- Cursor's cursor/task notification has no correlation field
+                -- beyond toolCallId. Never guess when two tabs share an ID;
+                -- preserve the first owner and suppress both completions.
+                self._ambiguous_task_tool_ids[update.toolCallId] = true
+                self._task_tool_generations[update.toolCallId] = (
+                    self._task_tool_generations[update.toolCallId] or 0
+                ) + 1
+            elseif not self._ambiguous_task_tool_ids[update.toolCallId] then
+                self._task_tool_inputs[update.toolCallId] = raw_input
+                self._task_tool_generations[update.toolCallId] = (
+                    self._task_tool_generations[update.toolCallId] or 0
+                ) + 1
+                self._task_tool_sessions[update.toolCallId] = session_id
+            end
             message.kind = "SubAgent"
             message.argument =
                 self:_format_task_argument(raw_input, update.title)
@@ -616,6 +647,7 @@ end
 --- @param update agentic.acp.CursorToolCallUpdate
 --- @return agentic.ui.MessageWriter.ToolCallBase message
 function CursorACPAdapter:__build_tool_call_update(update)
+    self:_ensure_task_maps()
     --- @type agentic.ui.MessageWriter.ToolCallBase
     local message = {
         tool_call_id = update.toolCallId,
@@ -636,9 +668,12 @@ function CursorACPAdapter:__build_tool_call_update(update)
 
     -- Read, execute, and search results arrive in rawOutput
     local rawOutput = update.rawOutput
-    if rawOutput then
-        local task_input = rawget(self._task_tool_inputs, update.toolCallId)
-        if task_input then
+    local task_input = rawget(self._task_tool_inputs, update.toolCallId)
+    local is_ambiguous = self._ambiguous_task_tool_ids
+        and self._ambiguous_task_tool_ids[update.toolCallId]
+    local is_task = task_input ~= nil and not is_ambiguous
+    if is_task then
+        if rawOutput then
             local final_message = extract_task_final_message(rawOutput)
             if final_message then
                 message.kind = "SubAgent"
@@ -648,10 +683,21 @@ function CursorACPAdapter:__build_tool_call_update(update)
                     final_message = final_message,
                 })
             end
-            if update.status == "completed" or update.status == "failed" then
-                self:_clear_task_tool_input(update.toolCallId)
-            end
-        elseif rawOutput.content then
+        end
+        if
+            update.status == "completed"
+            or update.status == "failed"
+            or update.status == "cancelled"
+        then
+            -- Cursor sends cursor/task after a completed tool update, even when
+            -- that update has no rawOutput. Keep only its ownership then.
+            self:_clear_task_tool_input(
+                update.toolCallId,
+                update.status == "completed"
+            )
+        end
+    elseif rawOutput then
+        if rawOutput.content then
             -- read kind: rawOutput.content is the file text
             message.body = self:safe_split(rawOutput.content)
         elseif rawOutput.stdout then
@@ -683,7 +729,14 @@ function CursorACPAdapter:__build_tool_call_update(update)
         message.body = self:extract_content_body(update)
     end
 
-    if update.status == "completed" or update.status == "failed" then
+    if
+        not is_task
+        and (
+            update.status == "completed"
+            or update.status == "failed"
+            or update.status == "cancelled"
+        )
+    then
         self:_clear_task_tool_input(update.toolCallId)
     end
 
@@ -738,6 +791,40 @@ function CursorACPAdapter:_handle_cursor_task(message_id, params)
         return
     end
 
+    if
+        self._ambiguous_task_tool_ids
+        and self._ambiguous_task_tool_ids[params.toolCallId]
+    then
+        Logger.debug(
+            "CursorACPAdapter",
+            "cursor/task for ambiguous toolCallId, ignoring"
+        )
+        self._task_tool_generations = self._task_tool_generations or {}
+        self._task_tool_generations[params.toolCallId] = (
+            self._task_tool_generations[params.toolCallId] or 0
+        ) + 1
+        self:_clear_task_tool_input(params.toolCallId)
+        self._ambiguous_task_tool_ids[params.toolCallId] = nil
+        return
+    end
+
+    local session_id = rawget(self._task_tool_sessions or {}, params.toolCallId)
+    if not session_id then
+        Logger.debug(
+            "CursorACPAdapter",
+            "cursor/task for unknown toolCallId, ignoring"
+        )
+        return
+    end
+
+    -- Legacy/minimal adapter instances may not have this map yet.  Create it
+    -- before scheduling so the callback can safely correlate the update.
+    self._task_tool_generations = self._task_tool_generations or {}
+    local task_generation = rawget(
+        self._task_tool_generations,
+        params.toolCallId
+    ) or 1
+    self._task_tool_generations[params.toolCallId] = task_generation
     local final_message = extract_task_final_message(params)
     local body = self:_build_task_body(params, {
         final_message = final_message,
@@ -752,18 +839,32 @@ function CursorACPAdapter:_handle_cursor_task(message_id, params)
         body = body,
     }
 
-    -- cursor/task doesn't include sessionId, so find the subscriber that owns this tool call
-    for session_id, _ in pairs(self.subscribers) do
-        self:__with_subscriber(session_id, function(subscriber)
-            subscriber.on_tool_call_update(update)
-        end)
-    end
+    -- cursor/task doesn't include sessionId; the tool call map is its owner.
+    self:__with_subscriber(session_id, function(subscriber)
+        -- The notification may have been queued while this ID was reused.
+        -- Generation is the only local correlation available in that case.
+        if
+            rawget(self._task_tool_generations or {}, params.toolCallId)
+            ~= task_generation
+        then
+            return
+        end
+        subscriber.on_tool_call_update(update)
+    end)
 
-    self:_clear_task_tool_input(params.toolCallId)
+    -- Drop the completed input immediately, but leave the generation intact so
+    -- a queued callback can reject a later task reusing this ID.
+    if
+        rawget(self._task_tool_generations or {}, params.toolCallId)
+        == task_generation
+    then
+        self:_clear_task_tool_input(params.toolCallId)
+    end
 end
 
 --- @param session_id string
-function CursorACPAdapter:cancel_session(session_id)
+function CursorACPAdapter:_clear_task_inputs_for_session(session_id)
+    self:_ensure_task_maps()
     --- @type string[]
     local tool_call_ids = {}
     for tool_call_id, task_session_id in pairs(self._task_tool_sessions) do
@@ -773,9 +874,28 @@ function CursorACPAdapter:cancel_session(session_id)
     end
 
     for _, tool_call_id in ipairs(tool_call_ids) do
+        self._task_tool_generations[tool_call_id] = (
+            self._task_tool_generations[tool_call_id] or 0
+        ) + 1
         self:_clear_task_tool_input(tool_call_id)
     end
+end
 
+function CursorACPAdapter:stop_generation(session_id)
+    if not session_id then
+        return
+    end
+
+    self:_clear_task_inputs_for_session(session_id)
+    ACPClient.stop_generation(self, session_id)
+end
+
+function CursorACPAdapter:cancel_session(session_id)
+    if not session_id then
+        return
+    end
+
+    self:_clear_task_inputs_for_session(session_id)
     ACPClient.cancel_session(self, session_id)
 end
 
