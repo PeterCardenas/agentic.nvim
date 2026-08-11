@@ -108,7 +108,7 @@ end
 --- @param status agentic.acp.ToolCallStatus|nil
 --- @return boolean
 local function is_terminal_tool_call_status(status)
-    return status == "completed" or status == "failed"
+    return status == "completed" or status == "failed" or status == "cancelled"
 end
 
 --- @param tracker agentic.ui.MessageWriter.ToolCallBlock
@@ -160,6 +160,8 @@ end
 --- @field extmark_id? integer Range extmark spanning the block
 --- @field decoration_extmark_ids? integer[] IDs of decoration extmarks from ExtmarkBlock
 --- @field fold_text_prefix? string Prefix for fold text display
+--- @field _highlight_generation? integer Invalidates stale scheduled highlights
+--- @field _rendered_diff? boolean Diff content was rendered and is immutable
 
 --- @class agentic.ui.MessageWriter
 --- @field bufnr integer
@@ -175,6 +177,7 @@ end
 --- @field _pending_newline? boolean
 --- @field _chat_folds? agentic.ui.ChatFolds
 --- @field _cmdline_leave_scroll_pending? boolean
+--- @field _highlight_generations table<string, integer>
 --- @field _scroll_input_ns integer
 local MessageWriter = {}
 MessageWriter.__index = MessageWriter
@@ -241,6 +244,7 @@ function MessageWriter:new(bufnr)
     local instance = setmetatable({
         bufnr = bufnr,
         tool_call_blocks = {},
+        _highlight_generations = {},
         _last_message_type = nil,
         _should_auto_scroll = nil,
         _scroll_scheduled = false,
@@ -779,6 +783,9 @@ function MessageWriter:write_tool_call_block(tool_call_block)
             })
 
         self.tool_call_blocks[tool_call_block.tool_call_id] = tool_call_block
+        if tool_call_block.diff ~= nil then
+            tool_call_block._rendered_diff = true
+        end
 
         -- Store fold text prefix for the fold display
         tool_call_block.fold_text_prefix = ExtmarkBlock.BODY_PREFIX
@@ -813,24 +820,39 @@ function MessageWriter:update_tool_call_block(tool_call_block)
     end
 
     -- Some ACP providers don't send the diff on the first tool_call
-    local already_has_diff = tracker.diff ~= nil
-    local previous_body = tracker.body
+    local already_has_diff = tracker._rendered_diff == true
+        or tracker.diff ~= nil
 
     tracker = vim.tbl_deep_extend("force", tracker, tool_call_block)
+    -- Snapshot replacements can queue highlight work. Every replacement
+    -- invalidates callbacks for the previous snapshot, including an empty
+    -- snapshot, so decorations cannot be painted into following blocks.
+    local highlight_generation =
+        self._highlight_generations[tool_call_block.tool_call_id]
+    if tool_call_block.body ~= nil then
+        highlight_generation = (highlight_generation or 0) + 1
+        self._highlight_generations[tool_call_block.tool_call_id] =
+            highlight_generation
+        tracker._highlight_generation = highlight_generation
+    end
 
-    -- Merge body: append new to previous with divider if both exist and are different
-    if
-        previous_body
-        and tool_call_block.body
-        and not vim.deep_equal(previous_body, tool_call_block.body)
-    then
-        local merged = vim.list_extend({}, previous_body)
-        vim.list_extend(merged, { "", "---", "" })
-        vim.list_extend(merged, tool_call_block.body)
-        tracker.body = merged
+    -- ACP tool bodies are snapshots, not append-only updates.
+    if tool_call_block.body then
+        tracker.body = tool_call_block.body
     end
 
     self.tool_call_blocks[tool_call_block.tool_call_id] = tracker
+
+    -- The writer can outlive its chat buffer (for example during session
+    -- teardown). Do not attempt an extmark lookup on a deleted buffer; also
+    -- invalidate any queued highlight callback for this tool call.
+    if not vim.api.nvim_buf_is_valid(self.bufnr) then
+        self._highlight_generations[tool_call_block.tool_call_id] = (
+            self._highlight_generations[tool_call_block.tool_call_id] or 0
+        ) + 1
+        release_terminal_tool_call_payload(tracker)
+        return
+    end
 
     local pos = vim.api.nvim_buf_get_extmark_by_id(
         self.bufnr,
@@ -876,7 +898,10 @@ function MessageWriter:update_tool_call_block(tool_call_block)
     self:_with_modifiable_and_notify_change(function(bufnr)
         -- Diff blocks don't change after the initial render
         -- only update status highlights - don't replace content
-        if already_has_diff then
+        if
+            already_has_diff
+            or (tool_call_block.body == nil and tool_call_block.diff == nil)
+        then
             if old_end_row > vim.api.nvim_buf_line_count(bufnr) then
                 Logger.debug("Footer line index out of bounds", {
                     old_end_row = old_end_row,
@@ -922,6 +947,13 @@ function MessageWriter:update_tool_call_block(tool_call_block)
             new_lines
         )
 
+        -- A diff may first arrive on an update. Once its replacement has
+        -- actually been written, freeze it just like an initially rendered
+        -- diff, before terminal payload release clears tracker.diff.
+        if tracker.diff ~= nil then
+            tracker._rendered_diff = true
+        end
+
         local new_end_row = start_row + #new_lines - 1
 
         pcall(
@@ -933,12 +965,34 @@ function MessageWriter:update_tool_call_block(tool_call_block)
         )
 
         vim.schedule(function()
-            if vim.api.nvim_buf_is_valid(bufnr) then
+            -- The buffer validity check must precede every buffer API call: the
+            -- update may be queued while the chat buffer is being destroyed.
+            if not vim.api.nvim_buf_is_valid(bufnr) then
+                return
+            end
+
+            local current = self.tool_call_blocks[tool_call_block.tool_call_id]
+            local current_pos = current
+                and vim.api.nvim_buf_get_extmark_by_id(
+                    bufnr,
+                    NS_TOOL_BLOCKS,
+                    current.extmark_id,
+                    { details = true }
+                )
+            local current_start = current_pos and current_pos[1]
+            local current_details = current_pos and current_pos[3]
+            local current_end = current_details and current_details.end_row
+            if
+                highlight_generation
+                and self._highlight_generations[tool_call_block.tool_call_id] == highlight_generation
+                and current_start
+                and current_end
+            then
                 self:_apply_block_highlights(
                     bufnr,
-                    start_row,
-                    new_end_row,
-                    tracker.kind,
+                    current_start,
+                    current_end,
+                    current.kind,
                     highlight_ranges
                 )
             end

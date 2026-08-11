@@ -113,7 +113,7 @@ Provider sends "tool_call_update"
   -> MessageWriter:update_tool_call_block(partial)
      1. Looks up tracker = tool_call_blocks[id]
      2. Deep-merges via tbl_deep_extend("force", tracker, partial)
-     3. Appends body (if both old and new exist and differ)
+     3. Replaces the body snapshot when a new body is provided
      4. Locates block position via range extmark
      5. Diff already rendered: refresh decorations + status only
         (content frozen to prevent flicker)
@@ -123,9 +123,9 @@ Provider sends "tool_call_update"
 **Phase 3 — final `tool_call_update` with terminal status**
 
 ```
-Same as Phase 2, but status = "completed" | "failed"
+Same as Phase 2, but status = "completed" | "failed" | "cancelled"
   -> Visual status icon updates to final state
-  -> If "failed": PermissionManager removes pending request
+  -> If "failed" or "cancelled": PermissionManager removes pending request
 ```
 
 ## Key design rules for adapters
@@ -135,8 +135,15 @@ Same as Phase 2, but status = "completed" | "failed"
 - **Diffs are immutable after first render:** Once a diff is written to the
   buffer, content is frozen. Only status/decorations refresh on subsequent
   updates.
-- **Body accumulates:** Multiple updates with different body content get
-  concatenated with `---` dividers, not replaced.
+- **Body snapshots replace:** Generic tool-call updates replace the prior body
+  when a new body is provided; they do not accumulate provider deltas.
+- **Mistral raw-output deltas:** The Mistral adapter is responsible for
+  provider-specific delta aggregation and keeps a provider-local aggregate
+  keyed by session ID and `toolCallId`, preserving update order within each
+  session and clearing it on `completed`, `failed`, or `cancelled`. When raw
+  output contains both streams, fields are rendered in deterministic `stdout`
+  then `stderr` order; this is field order, not a claim about emission
+  chronology.
 - **Extmarks as position anchors:** Range extmark in `NS_TOOL_BLOCKS`
   auto-adjusts when buffer content shifts. Single source of truth for block
   position.

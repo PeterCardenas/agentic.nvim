@@ -13,6 +13,7 @@ Theme.HL_GROUPS = {
     STATUS_PENDING = "AgenticStatusPending",
     STATUS_COMPLETED = "AgenticStatusCompleted",
     STATUS_FAILED = "AgenticStatusFailed",
+    STATUS_CANCELLED = "AgenticStatusCancelled",
     CODE_BLOCK_FENCE = "AgenticCodeBlockFence",
     WIN_BAR_TITLE = "AgenticTitle",
 
@@ -61,6 +62,7 @@ local status_hl = {
     in_progress = Theme.HL_GROUPS.STATUS_PENDING, -- pending and in_progress should look the same, to avoid too many colors, added initially because of Codex, but not limited to it
     completed = Theme.HL_GROUPS.STATUS_COMPLETED,
     failed = Theme.HL_GROUPS.STATUS_FAILED,
+    cancelled = Theme.HL_GROUPS.STATUS_CANCELLED,
 }
 
 local spinner_hl = {
@@ -142,6 +144,7 @@ function Theme.setup()
         { Theme.HL_GROUPS.STATUS_PENDING, { bg = COLORS.status_pending_bg } },
         { Theme.HL_GROUPS.STATUS_COMPLETED, { bg = COLORS.status_completed_bg } },
         { Theme.HL_GROUPS.STATUS_FAILED, { bg = COLORS.status_failed_bg } },
+        { Theme.HL_GROUPS.STATUS_CANCELLED, { link = "Comment" } },
         { Theme.HL_GROUPS.CODE_BLOCK_FENCE, { link = "Directory" } },
 
         -- Title highlight

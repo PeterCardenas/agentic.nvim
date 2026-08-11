@@ -93,6 +93,7 @@
 --- @field pending? string
 --- @field completed? string
 --- @field failed? string
+--- @field cancelled? string
 --- @class (partial) agentic.PartialUserConfig.DiagnosticIcons: agentic.UserConfig.DiagnosticIcons
 --- @class (partial) agentic.PartialUserConfig.PermissionIcons: agentic.UserConfig.PermissionIcons
 --- @class (partial) agentic.PartialUserConfig.ChatIcons: agentic.UserConfig.ChatIcons
@@ -355,6 +356,7 @@ local ConfigDefault = {
         pending = "󰔛",
         completed = "✔",
         failed = "",
+        cancelled = "󰜺",
     },
 
     --- Icons used for diagnostics in the context panel

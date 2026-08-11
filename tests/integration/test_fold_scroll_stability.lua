@@ -446,7 +446,7 @@ describe("Fold scroll stability", function()
     )
 
     it(
-        "renders multiple claude-style updates in one block with at most two folds",
+        "renders the latest tool body snapshot in one block with at most two folds",
         function()
             --- @diagnostic disable-next-line: inject-field
             Config.folding.tool_calls.preview = true
@@ -531,10 +531,11 @@ describe("Fold scroll stability", function()
                 false
             )
 
-            assert.is_true(vim.tbl_contains(body, "preparing command"))
-            assert.is_true(vim.tbl_contains(body, "stdout 1"))
-            assert.is_true(vim.tbl_contains(body, "stderr 1"))
             assert.is_true(vim.tbl_contains(body, "exit code: 0"))
+            assert.is_true(vim.tbl_contains(body, "done 1"))
+            assert.is_false(vim.tbl_contains(body, "preparing command"))
+            assert.is_false(vim.tbl_contains(body, "stdout 1"))
+            assert.is_false(vim.tbl_contains(body, "stderr 1"))
 
             local separator_count = 0
             for _, line in ipairs(body) do
@@ -542,7 +543,7 @@ describe("Fold scroll stability", function()
                     separator_count = separator_count + 1
                 end
             end
-            assert.equal(3, separator_count)
+            assert.equal(0, separator_count)
 
             local outer_fold_starts = {}
             local max_level = 0

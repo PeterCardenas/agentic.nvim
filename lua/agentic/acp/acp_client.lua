@@ -432,7 +432,13 @@ end
 --- @param update agentic.acp.ToolCallMessage|agentic.acp.ToolCallUpdate
 --- @return string[]|nil body
 function ACPClient:extract_content_body(update)
-    local content = update.content and update.content[1]
+    -- `content` is a snapshot field: omitted means no replacement, while an
+    -- explicitly empty collection means replace the previous body with none.
+    if type(update.content) == "table" and #update.content == 0 then
+        return {}
+    end
+
+    local content = type(update.content) == "table" and update.content[1]
 
     if not content or content.type ~= "content" or not content.content then
         return nil

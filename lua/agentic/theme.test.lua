@@ -2,6 +2,13 @@ local assert = require("tests.helpers.assert")
 local Theme = require("agentic.theme")
 
 describe("agentic.theme", function()
+    it("maps cancelled tool calls to a neutral status highlight", function()
+        assert.equal(
+            Theme.HL_GROUPS.STATUS_CANCELLED,
+            Theme.get_status_hl_group("cancelled")
+        )
+    end)
+
     describe("setup", function()
         it(
             "defines neutral body highlights for thought and tool call text",
@@ -44,5 +51,11 @@ describe("agentic.theme", function()
                 assert.is_falsy(tool_call_hl.undercurl)
             end
         )
+
+        it("defines a cancelled status icon", function()
+            local Config = require("agentic.config")
+            assert.is_not_nil(Config.status_icons.cancelled)
+            assert.is_false(Config.status_icons.cancelled == "")
+        end)
     end)
 end)

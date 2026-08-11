@@ -97,7 +97,11 @@ function OpenCodeACPAdapter:__handle_tool_call_update(session_id, update)
         message.kind = "SubAgent"
     end
 
-    if update.status == "completed" or update.status == "failed" then
+    if
+        update.status == "completed"
+        or update.status == "failed"
+        or update.status == "cancelled"
+    then
         if
             update.kind == "other"
             and update.rawInput

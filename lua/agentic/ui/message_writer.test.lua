@@ -821,6 +821,46 @@ describe("agentic.ui.MessageWriter", function()
         end)
     end)
 
+    describe("tool call status rendering", function()
+        it(
+            "renders cancelled status with its icon and neutral highlight",
+            function()
+                local Theme = require("agentic.theme")
+                local status_ns =
+                    vim.api.nvim_create_namespace("agentic_status_footer")
+
+                writer:write_tool_call_block({
+                    tool_call_id = "cancelled-status",
+                    status = "cancelled",
+                    kind = "execute",
+                    argument = "ls",
+                })
+
+                local extmarks = vim.api.nvim_buf_get_extmarks(
+                    bufnr,
+                    status_ns,
+                    0,
+                    -1,
+                    { details = true }
+                )
+                local footer
+                for _, mark in ipairs(extmarks) do
+                    local details = mark[4]
+                    if details and details.virt_text then
+                        footer = details
+                        break
+                    end
+                end
+
+                footer = assert.not_nil(footer)
+                assert.same({
+                    { " 󰜺 cancelled ", Theme.HL_GROUPS.STATUS_CANCELLED },
+                }, footer.virt_text)
+                assert.equal("overlay", footer.virt_text_pos)
+            end
+        )
+    end)
+
     describe("block highlights", function()
         it(
             "uses a dedicated highlight group for non-diff tool call bodies",
@@ -1172,43 +1212,32 @@ describe("agentic.ui.MessageWriter", function()
             assert.is_true(#body > 2)
         end)
 
-        it(
-            "leaves placeholder text untouched and formats only JSON segments on update",
-            function()
-                local placeholder = "I'm going to fetch this"
-                local long_value = string.rep("v", 100)
-                local json_text = '{"key":"' .. long_value .. '","x":42}'
+        it("formats the replacement JSON body on update", function()
+            local placeholder = "I'm going to fetch this"
+            local long_value = string.rep("v", 100)
+            local json_text = '{"key":"' .. long_value .. '","x":42}'
 
-                local block = make_tool_call_block(
-                    "json-stream",
-                    "in_progress",
-                    { placeholder }
-                )
-                writer:write_tool_call_block(block)
+            local block = make_tool_call_block(
+                "json-stream",
+                "in_progress",
+                { placeholder }
+            )
+            writer:write_tool_call_block(block)
 
-                writer:update_tool_call_block({
-                    tool_call_id = "json-stream",
-                    status = "in_progress",
-                    body = { json_text },
-                })
+            writer:update_tool_call_block({
+                tool_call_id = "json-stream",
+                status = "in_progress",
+                body = { json_text },
+            })
 
-                local tracker = writer.tool_call_blocks["json-stream"]
-                tracker = assert.not_nil(tracker)
-                local body = assert.not_nil(tracker.body)
-                assert.equal(placeholder, body[1])
-
-                local separator_idx
-                for i, line in ipairs(body) do
-                    if line == "---" then
-                        separator_idx = i
-                        break
-                    end
-                end
-
-                separator_idx = assert.not_nil(separator_idx)
-                assert.is_true(#body - separator_idx > 1)
-            end
-        )
+            local tracker = writer.tool_call_blocks["json-stream"]
+            tracker = assert.not_nil(tracker)
+            local body = assert.not_nil(tracker.body)
+            assert.equal("{", body[1])
+            assert.is_false(vim.tbl_contains(body, placeholder))
+            assert.is_false(vim.tbl_contains(body, "---"))
+            assert.is_true(#body > 1)
+        end)
 
         it("leaves malformed JSON unchanged", function()
             local malformed = "{" .. string.rep("not valid json ", 10) .. "}"
@@ -1221,11 +1250,192 @@ describe("agentic.ui.MessageWriter", function()
             tracker = assert.not_nil(tracker)
             assert.same({ malformed }, tracker.body)
         end)
+
+        it(
+            "preserves omitted body snapshots but clears explicit empty snapshots",
+            function()
+                writer:write_tool_call_block(
+                    make_tool_call_block(
+                        "body-presence",
+                        "in_progress",
+                        { "initial" }
+                    )
+                )
+
+                writer:update_tool_call_block({
+                    tool_call_id = "body-presence",
+                    status = "in_progress",
+                })
+                assert.same(
+                    { "initial" },
+                    assert.not_nil(writer.tool_call_blocks["body-presence"]).body
+                )
+
+                writer:update_tool_call_block({
+                    tool_call_id = "body-presence",
+                    status = "in_progress",
+                    body = {},
+                })
+                assert.same(
+                    {},
+                    assert.not_nil(writer.tool_call_blocks["body-presence"]).body
+                )
+            end
+        )
+
+        it(
+            "replaces an initial tool body without stale dividers or trailing lines",
+            function()
+                writer:write_tool_call_block(
+                    make_tool_call_block(
+                        "body-replace",
+                        "in_progress",
+                        { "first line", "second line", "third line" }
+                    )
+                )
+
+                writer:update_tool_call_block({
+                    tool_call_id = "body-replace",
+                    status = "in_progress",
+                    body = { "updated" },
+                })
+
+                local tracker =
+                    assert.not_nil(writer.tool_call_blocks["body-replace"])
+                assert.same({ "updated" }, tracker.body)
+                assert.same({
+                    " execute(ls) ",
+                    "````console",
+                    "updated",
+                    "````",
+                    "",
+                    "",
+                    "",
+                }, vim.api.nvim_buf_get_lines(
+                    bufnr,
+                    0,
+                    -1,
+                    false
+                ))
+
+                writer:update_tool_call_block({
+                    tool_call_id = "body-replace",
+                    status = "in_progress",
+                    body = {},
+                })
+
+                tracker =
+                    assert.not_nil(writer.tool_call_blocks["body-replace"])
+                assert.same({}, tracker.body)
+                assert.same({
+                    " execute(ls) ",
+                    "",
+                    "",
+                    "",
+                }, vim.api.nvim_buf_get_lines(
+                    bufnr,
+                    0,
+                    -1,
+                    false
+                ))
+            end
+        )
     end)
 
     describe("terminal tool call payload release", function()
         it(
-            "keeps rendered body lines but releases retained body on completion",
+            "renders the first update diff once when the initial block had no diff",
+            function()
+                writer:write_tool_call_block({
+                    tool_call_id = "late-first-diff",
+                    status = "in_progress",
+                    kind = "edit",
+                    argument = "lua/example.lua",
+                })
+
+                writer:update_tool_call_block({
+                    tool_call_id = "late-first-diff",
+                    status = "completed",
+                    diff = { old = { "old A" }, new = { "new A" } },
+                })
+                local rendered = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+                assert.is_true(vim.tbl_contains(rendered, "new A"))
+                assert.is_true(
+                    assert.not_nil(writer.tool_call_blocks["late-first-diff"])._rendered_diff
+                )
+
+                writer:update_tool_call_block({
+                    tool_call_id = "late-first-diff",
+                    status = "completed",
+                    diff = { old = { "old B" }, new = { "new B" } },
+                })
+                assert.same(
+                    rendered,
+                    vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+                )
+            end
+        )
+
+        it("releases retained body on cancellation", function()
+            writer:write_tool_call_block({
+                tool_call_id = "release-cancelled",
+                status = "in_progress",
+                kind = "execute",
+                argument = "printf",
+                body = { "output" },
+            })
+
+            writer:update_tool_call_block({
+                tool_call_id = "release-cancelled",
+                status = "cancelled",
+                body = { "cancelled" },
+            })
+
+            local tracker =
+                assert.not_nil(writer.tool_call_blocks["release-cancelled"])
+            assert.is_nil(tracker.body)
+        end)
+
+        it(
+            "keeps a rendered diff immutable after terminal payload release",
+            function()
+                writer:write_tool_call_block({
+                    tool_call_id = "immutable-diff",
+                    status = "in_progress",
+                    kind = "edit",
+                    argument = "lua/example.lua",
+                    diff = {
+                        old = { "old A" },
+                        new = { "new A" },
+                    },
+                })
+                writer:update_tool_call_block({
+                    tool_call_id = "immutable-diff",
+                    status = "completed",
+                })
+                local before = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+
+                writer:update_tool_call_block({
+                    tool_call_id = "immutable-diff",
+                    status = "completed",
+                    diff = {
+                        old = { "old B" },
+                        new = { "new B" },
+                    },
+                })
+
+                assert.same(
+                    before,
+                    vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+                )
+                local tracker =
+                    assert.not_nil(writer.tool_call_blocks["immutable-diff"])
+                assert.is_true(tracker._rendered_diff)
+            end
+        )
+
+        it(
+            "replaces rendered body lines and releases retained body on completion",
             function()
                 Config.folding = {
                     tool_calls = {
@@ -1252,7 +1462,7 @@ describe("agentic.ui.MessageWriter", function()
                 })
 
                 local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-                assert.is_true(vim.tbl_contains(lines, "line 1"))
+                assert.is_false(vim.tbl_contains(lines, "line 1"))
                 assert.is_true(vim.tbl_contains(lines, "done"))
 
                 local tracker =
@@ -1262,7 +1472,243 @@ describe("agentic.ui.MessageWriter", function()
         )
 
         it(
-            "keeps rendered diff lines but releases retained diff on failure",
+            "releases terminal payload without extmark lookup after buffer deletion",
+            function()
+                writer:write_tool_call_block({
+                    tool_call_id = "deleted-before-update",
+                    status = "in_progress",
+                    kind = "execute",
+                    argument = "printf",
+                    body = { "initial" },
+                })
+                vim.api.nvim_buf_delete(bufnr, { force = true })
+
+                local ok, err = xpcall(function()
+                    writer:update_tool_call_block({
+                        tool_call_id = "deleted-before-update",
+                        status = "completed",
+                        body = { "terminal" },
+                    })
+                end, debug.traceback)
+                assert.is_true(ok, err)
+                local tracker = assert.not_nil(
+                    writer.tool_call_blocks["deleted-before-update"]
+                )
+                assert.is_nil(tracker.body)
+            end
+        )
+
+        it("does not access a deleted buffer from queued highlights", function()
+            local scheduled = {}
+            local schedule_stub = spy.stub(vim, "schedule")
+            schedule_stub:invokes(function(callback)
+                table.insert(scheduled, callback)
+            end)
+
+            writer:write_tool_call_block({
+                tool_call_id = "deleted-buffer",
+                status = "in_progress",
+                kind = "execute",
+                argument = "printf",
+                body = { "initial" },
+            })
+            scheduled = {}
+            writer:update_tool_call_block({
+                tool_call_id = "deleted-buffer",
+                status = "in_progress",
+                body = { "updated" },
+            })
+            vim.api.nvim_buf_delete(bufnr, { force = true })
+
+            assert.is_true(#scheduled > 0)
+            local ok, err = xpcall(function()
+                for _, callback in ipairs(scheduled) do
+                    callback()
+                end
+            end, debug.traceback)
+            schedule_stub:revert()
+            assert.is_true(ok, err)
+        end)
+
+        it(
+            "keeps queued body highlights when a later update only changes status",
+            function()
+                local scheduled = {}
+                local schedule_stub = spy.stub(vim, "schedule")
+                schedule_stub:invokes(function(callback)
+                    table.insert(scheduled, callback)
+                end)
+
+                writer:write_tool_call_block({
+                    tool_call_id = "status-highlight",
+                    status = "in_progress",
+                    kind = "execute",
+                    argument = "printf",
+                    body = { "initial" },
+                })
+                scheduled = {}
+                writer:update_tool_call_block({
+                    tool_call_id = "status-highlight",
+                    status = "in_progress",
+                    body = { "updated" },
+                })
+                writer:update_tool_call_block({
+                    tool_call_id = "status-highlight",
+                    status = "completed",
+                })
+
+                local apply = spy.on(writer, "_apply_block_highlights")
+                for _, callback in ipairs(scheduled) do
+                    callback()
+                end
+                schedule_stub:revert()
+
+                assert.equal(1, apply.call_count)
+                apply:revert()
+            end
+        )
+
+        it(
+            "uses the current range when an earlier block shifts before drain",
+            function()
+                local scheduled = {}
+                local schedule_stub = spy.stub(vim, "schedule")
+                schedule_stub:invokes(function(callback)
+                    table.insert(scheduled, callback)
+                end)
+
+                writer:write_tool_call_block({
+                    tool_call_id = "earlier-block",
+                    status = "in_progress",
+                    kind = "execute",
+                    argument = "printf",
+                    body = { "one" },
+                })
+                writer:write_tool_call_block({
+                    tool_call_id = "shifted-block",
+                    status = "in_progress",
+                    kind = "execute",
+                    argument = "printf",
+                    body = { "two" },
+                })
+                scheduled = {}
+                writer:update_tool_call_block({
+                    tool_call_id = "shifted-block",
+                    status = "in_progress",
+                    body = { "highlight me" },
+                })
+                writer:update_tool_call_block({
+                    tool_call_id = "earlier-block",
+                    status = "in_progress",
+                    body = { "one", "another line" },
+                })
+
+                local apply = spy.on(writer, "_apply_block_highlights")
+                for _, callback in ipairs(scheduled) do
+                    callback()
+                end
+                schedule_stub:revert()
+
+                local shifted =
+                    assert.not_nil(writer.tool_call_blocks["shifted-block"])
+                local mark = vim.api.nvim_buf_get_extmark_by_id(
+                    bufnr,
+                    vim.api.nvim_create_namespace("agentic_tool_blocks"),
+                    assert.not_nil(shifted.extmark_id),
+                    { details = true }
+                )
+                local found_current_range = false
+                for _, call in ipairs(apply.calls) do
+                    if call[3] == mark[1] then
+                        found_current_range = true
+                    end
+                end
+                assert.is_true(found_current_range)
+                apply:revert()
+            end
+        )
+
+        it(
+            "does not let stale scheduled highlights escape a shortened snapshot",
+            function()
+                local scheduled = {}
+                local schedule_stub = spy.stub(vim, "schedule")
+                schedule_stub:invokes(function(callback)
+                    table.insert(scheduled, callback)
+                end)
+
+                writer:write_tool_call_block({
+                    tool_call_id = "snapshot-highlights",
+                    status = "in_progress",
+                    kind = "execute",
+                    argument = "printf",
+                    body = { "initial" },
+                })
+                writer:write_tool_call_block({
+                    tool_call_id = "adjacent-block",
+                    status = "in_progress",
+                    kind = "execute",
+                    argument = "printf",
+                    body = { "adjacent" },
+                })
+
+                writer:update_tool_call_block({
+                    tool_call_id = "snapshot-highlights",
+                    status = "in_progress",
+                    body = { "long 1", "long 2", "long 3" },
+                })
+                writer:update_tool_call_block({
+                    tool_call_id = "snapshot-highlights",
+                    status = "in_progress",
+                    body = {},
+                })
+
+                for _, callback in ipairs(scheduled) do
+                    callback()
+                end
+                schedule_stub:revert()
+
+                local diff_ns =
+                    vim.api.nvim_create_namespace("agentic_diff_highlights")
+                local block = assert.not_nil(
+                    writer.tool_call_blocks["snapshot-highlights"]
+                )
+                local block_mark = vim.api.nvim_buf_get_extmark_by_id(
+                    bufnr,
+                    vim.api.nvim_create_namespace("agentic_tool_blocks"),
+                    block.extmark_id,
+                    { details = true }
+                )
+                local end_row = assert.not_nil(block_mark[3]).end_row
+                local adjacent =
+                    assert.not_nil(writer.tool_call_blocks["adjacent-block"])
+                local adjacent_mark = vim.api.nvim_buf_get_extmark_by_id(
+                    bufnr,
+                    vim.api.nvim_create_namespace("agentic_tool_blocks"),
+                    adjacent.extmark_id,
+                    { details = true }
+                )
+                local adjacent_start = adjacent_mark[1]
+                for _, mark in
+                    ipairs(
+                        vim.api.nvim_buf_get_extmarks(
+                            bufnr,
+                            diff_ns,
+                            0,
+                            -1,
+                            { details = true }
+                        )
+                    )
+                do
+                    assert.is_false(
+                        mark[2] > end_row and mark[2] < adjacent_start
+                    )
+                end
+            end
+        )
+
+        it(
+            "keeps rendered diff immutable while tracker metadata is latest",
             function()
                 writer:write_tool_call_block({
                     tool_call_id = "release-diff",
@@ -1274,18 +1720,28 @@ describe("agentic.ui.MessageWriter", function()
                         new = { "local value = 2" },
                     },
                 })
+                local before = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
 
                 writer:update_tool_call_block({
                     tool_call_id = "release-diff",
-                    status = "failed",
+                    status = "in_progress",
+                    diff = {
+                        old = { "latest old" },
+                        new = { "latest new" },
+                    },
+                    body = { "latest body" },
                 })
 
                 local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+                assert.same(before, lines)
                 assert.is_true(vim.tbl_contains(lines, "local value = 2"))
 
                 local tracker =
                     assert.not_nil(writer.tool_call_blocks["release-diff"])
-                assert.is_nil(tracker.diff)
+                assert.equal("in_progress", tracker.status)
+                assert.same({ "latest old" }, tracker.diff.old)
+                assert.same({ "latest new" }, tracker.diff.new)
+                assert.same({ "latest body" }, tracker.body)
             end
         )
     end)
