@@ -2501,6 +2501,91 @@ describe("agentic.SessionManager", function()
             schedule_stub:revert()
         end)
 
+        it(
+            "does not persist a late diff after rendered diff payload release",
+            function()
+                local update_tool_call = spy.new(function() end)
+                local history_update = spy.new(function() end)
+                local session = make_session({
+                    ["tc-diff"] = {
+                        kind = "edit",
+                        status = "completed",
+                        _rendered_diff = true,
+                    },
+                })
+                session.message_writer.update_tool_call_block = update_tool_call
+                session.chat_history.update_tool_call = history_update
+
+                SessionManager._on_tool_call_update(session, {
+                    tool_call_id = "tc-diff",
+                    status = "completed",
+                    diff = { old = { "late" }, new = { "late" } },
+                })
+
+                local persisted = assert.not_nil(history_update.calls[1][3])
+                assert.is_nil(persisted.diff)
+            end
+        )
+
+        it(
+            "records the first live update diff, but not a later diff",
+            function()
+                local history_update = spy.new(function() end)
+                local session = make_session({
+                    ["tc-live"] = {
+                        kind = "edit",
+                        status = "in_progress",
+                    },
+                })
+                local update_tool_call = spy.new(function(_writer, update)
+                    if update.diff then
+                        session.message_writer.tool_call_blocks["tc-live"]._rendered_diff =
+                            true
+                    end
+                end)
+                session.message_writer.update_tool_call_block = update_tool_call
+                session.chat_history.update_tool_call = history_update
+
+                SessionManager._on_tool_call_update(session, {
+                    tool_call_id = "tc-live",
+                    status = "completed",
+                    diff = { old = { "A old" }, new = { "A new" } },
+                })
+                assert.is_not_nil(history_update.calls[1][3].diff)
+
+                SessionManager._on_tool_call_update(session, {
+                    tool_call_id = "tc-live",
+                    status = "completed",
+                    diff = { old = { "B old" }, new = { "B new" } },
+                })
+                assert.is_nil(history_update.calls[2][3].diff)
+            end
+        )
+
+        it("persists a later diff when metadata was never rendered", function()
+            local update_tool_call = spy.new(function() end)
+            local history_update = spy.new(function() end)
+            local session = make_session({
+                ["tc-diff"] = {
+                    kind = "edit",
+                    status = "in_progress",
+                    diff = { old = { "metadata" }, new = { "only" } },
+                    _rendered_diff = false,
+                },
+            })
+            session.message_writer.update_tool_call_block = update_tool_call
+            session.chat_history.update_tool_call = history_update
+
+            SessionManager._on_tool_call_update(session, {
+                tool_call_id = "tc-diff",
+                status = "in_progress",
+                diff = { old = { "later" }, new = { "diff" } },
+            })
+
+            local persisted = assert.not_nil(history_update.calls[1][3])
+            assert.same({ old = { "later" }, new = { "diff" } }, persisted.diff)
+        end)
+
         it("calls checktime for each file-mutating kind", function()
             for _, kind in ipairs({
                 "edit",
@@ -2522,6 +2607,23 @@ describe("agentic.SessionManager", function()
 
                 assert.spy(checktime_stub).was.called(1)
             end
+        end)
+
+        it("cleans permission state when a tool call is cancelled", function()
+            local remove_request = spy.new(function() end)
+            local session = make_session({
+                ["tc-1"] = { kind = "execute", status = "in_progress" },
+            })
+            session.permission_manager.remove_request_by_tool_call_id =
+                remove_request
+
+            SessionManager._on_tool_call_update(
+                session,
+                { tool_call_id = "tc-1", status = "cancelled" }
+            )
+
+            assert.spy(remove_request).was.called(1)
+            assert.equal("tc-1", remove_request.calls[1][2])
         end)
 
         it("does not call checktime for failed tool calls", function()

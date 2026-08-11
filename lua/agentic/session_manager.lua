@@ -941,11 +941,22 @@ end
 function SessionManager:_on_tool_call_update(tool_call_update)
     local is_terminal = tool_call_update.status == "completed"
         or tool_call_update.status == "failed"
+        or tool_call_update.status == "cancelled"
     local is_rejection = tool_call_update.status == "failed"
 
     if is_terminal then
         self:_clear_diff_in_buffer(tool_call_update.tool_call_id, is_rejection)
     end
+
+    -- A rendered diff is intentionally immutable. Capture whether this tool
+    -- call already had the displayed diff before the writer updates tracker
+    -- metadata, so history never records a later diff that was not shown.
+    local tracker_before_update = rawget(
+        self.message_writer.tool_call_blocks,
+        tool_call_update.tool_call_id
+    )
+    local had_rendered_diff = tracker_before_update
+        and tracker_before_update._rendered_diff == true
 
     self.message_writer:update_tool_call_block(tool_call_update)
 
@@ -955,13 +966,15 @@ function SessionManager:_on_tool_call_update(tool_call_update)
         tool_call_id = tool_call_update.tool_call_id,
         status = tool_call_update.status,
         body = tool_call_update.body,
-        diff = tool_call_update.diff,
         -- Some adapters (e.g. claude-agent-acp) enrich kind/argument on
         -- tool_call_update rather than the initial tool_call. Include them
         -- so chat history reflects the enriched values on session restore.
         kind = tool_call_update.kind,
         argument = tool_call_update.argument,
     }
+    if not had_rendered_diff then
+        tool_call.diff = tool_call_update.diff
+    end
 
     self.chat_history:update_tool_call(tool_call_update.tool_call_id, tool_call)
 
@@ -970,8 +983,8 @@ function SessionManager:_on_tool_call_update(tool_call_update)
         self:_clear_diff_in_buffer(tool_call_update.tool_call_id, is_rejection)
     end
 
-    -- Remove the permission request if the tool call failed before user granted it
-    if tool_call_update.status == "failed" then
+    -- Remove the permission request if the tool call ended before user granted it
+    if is_terminal and tool_call_update.status ~= "completed" then
         self.permission_manager:remove_request_by_tool_call_id(
             tool_call_update.tool_call_id
         )
