@@ -7,6 +7,200 @@ local Config = require("agentic.config")
 local Logger = require("agentic.utils.logger")
 local SessionManager = require("agentic.session_manager")
 
+describe("_handle_model_change config reapplication", function()
+    local function config_option(id, current_value, values)
+        local options = {}
+        for _, value in ipairs(values) do
+            table.insert(options, {
+                value = value,
+                name = value,
+                description = "",
+            })
+        end
+
+        return {
+            id = id,
+            category = "test",
+            currentValue = current_value,
+            description = id,
+            name = id,
+            options = options,
+        }
+    end
+
+    local function make_session(provider_config)
+        local calls = {}
+        local agent = {
+            provider_config = provider_config,
+            set_config_option = function(
+                _,
+                session_id,
+                config_id,
+                value,
+                callback
+            )
+                table.insert(calls, {
+                    session_id,
+                    config_id,
+                    value,
+                    callback,
+                })
+            end,
+        }
+        local session = {
+            session_id = "session",
+            agent = agent,
+            _handle_new_config_options = function() end,
+        }
+        setmetatable(session, { __index = SessionManager })
+        return session, calls
+    end
+
+    it(
+        "reapplies only explicit model-change options, not provider defaults",
+        function()
+            local session, calls = make_session({
+                default_config_options = {
+                    model = "default-model",
+                    provider = "default-provider",
+                    thought_level = "high",
+                },
+                model_change_config_options = {
+                    thought_level = "high",
+                },
+            })
+
+            SessionManager._handle_model_change(
+                session,
+                "selected-model",
+                false
+            )
+            calls[1][4]({
+                configOptions = {
+                    config_option(
+                        "model",
+                        "selected-model",
+                        { "selected-model" }
+                    ),
+                    config_option("provider", "other-provider", {
+                        "other-provider",
+                        "default-provider",
+                    }),
+                    config_option("thought_level", "low", { "low", "high" }),
+                },
+            }, nil)
+
+            assert.equal(2, #calls)
+            assert.equal("model", calls[1][2])
+            assert.equal("thought_level", calls[2][2])
+            assert.equal("high", calls[2][3])
+        end
+    )
+
+    it(
+        "disables model-change reapplication with an explicit empty map",
+        function()
+            local session, calls = make_session({
+                default_config_options = {
+                    model = "default-model",
+                    provider = "default-provider",
+                    thought_level = "high",
+                },
+                model_change_config_options = {},
+            })
+
+            SessionManager._handle_model_change(
+                session,
+                "selected-model",
+                false
+            )
+            calls[1][4]({
+                configOptions = {
+                    config_option(
+                        "model",
+                        "selected-model",
+                        { "selected-model" }
+                    ),
+                    config_option("provider", "other-provider", {
+                        "other-provider",
+                        "default-provider",
+                    }),
+                    config_option("thought_level", "low", { "low", "high" }),
+                },
+            }, nil)
+
+            assert.equal(1, #calls)
+        end
+    )
+
+    it(
+        "falls back to non-model defaults when no explicit map is present",
+        function()
+            local session, calls = make_session({
+                default_config_options = {
+                    model = "default-model",
+                    provider = "default-provider",
+                    thought_level = "high",
+                },
+            })
+
+            SessionManager._handle_model_change(
+                session,
+                "selected-model",
+                false
+            )
+            local config_options = {
+                config_option("model", "selected-model", { "selected-model" }),
+                config_option("provider", "other-provider", {
+                    "other-provider",
+                    "default-provider",
+                }),
+                config_option("thought_level", "low", { "low", "high" }),
+            }
+            calls[1][4]({ configOptions = config_options }, nil)
+
+            assert.equal(2, #calls)
+            assert.equal("provider", calls[2][2])
+            calls[2][4]({ configOptions = config_options }, nil)
+
+            assert.equal(3, #calls)
+            assert.equal("thought_level", calls[3][2])
+        end
+    )
+    it(
+        "reapplies configured dependent options after changing provider",
+        function()
+            local session, calls = make_session({
+                model_change_config_options = {
+                    provider = "provider-b",
+                    model = "model-b",
+                    thought_level = "high",
+                },
+            })
+
+            SessionManager._handle_config_option_change(
+                session,
+                "provider",
+                "provider-b"
+            )
+            calls[1][4]({
+                configOptions = {
+                    config_option("provider", "provider-b", {
+                        "provider-a",
+                        "provider-b",
+                    }),
+                    config_option("model", "model-a", { "model-a", "model-b" }),
+                    config_option("thought_level", "low", { "low", "high" }),
+                },
+            }, nil)
+
+            assert.equal(2, #calls)
+            assert.equal("thought_level", calls[2][2])
+            assert.equal("high", calls[2][3])
+        end
+    )
+end)
+
 --- @param mode_id string
 --- @return agentic.acp.CurrentModeUpdate
 local function mode_update(mode_id)

@@ -175,7 +175,7 @@ function AgentConfigOptions:set_options(configOptions)
 
         if option.category == "mode" then
             self.mode = option
-        elseif option.category == "model" then
+        elseif option.id == "model" then
             self.model = option
         elseif option.category == "thought_level" then
             self.thought_level = option

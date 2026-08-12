@@ -261,6 +261,10 @@ property:
 - `default_config_options` (table<string, string>, optional) - Default session
   config options to apply after session creation (for example `model`,
   `reasoning`, `fast`)
+- `model_change_config_options` (table<string, string>, optional) - The exact
+  config options to reapply after an interactive model selection. If omitted,
+  the non-model entries from `default_config_options` are reapplied for
+  backward compatibility. Set it to `{}` to disable reapplication.
 
 > [!NOTE]  
 > Customizing a provider only requires specifying the fields you want to
@@ -310,6 +314,11 @@ options) instead of the provider's default:
         -- Model is set first, then dependent options are validated and applied
         default_config_options = {
           model = "gpt-5.3-codex",
+          reasoning = "high",
+          fast = "true",
+        },
+        -- Reapply only these options after an interactive model selection.
+        model_change_config_options = {
           reasoning = "high",
           fast = "true",
         },

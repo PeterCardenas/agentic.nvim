@@ -758,6 +758,14 @@ local function build_default_config_apply_order(default_config_options)
     end
 
     table.sort(ordered_ids, function(a, b)
+        if a == "provider" then
+            return true
+        end
+
+        if b == "provider" then
+            return false
+        end
+
         if a == "model" then
             return true
         end
@@ -1383,5 +1391,6 @@ return ACPClient
 --- @field default_mode? string Default mode ID to set on session creation
 --- @field default_model? string Default model ID to set on session creation
 --- @field default_config_options? table<string, string|nil> Default config options to set on session creation (model-dependent options are re-evaluated after model changes)
+--- @field model_change_config_options? table<string, string|nil> Config options to reapply after an interactive model change; an empty table disables reapplication
 --- @field auto_approve? boolean Automatically approve all permission requests
 --- @field mcp_servers? agentic.acp.McpServer[] MCP servers to connect on session creation

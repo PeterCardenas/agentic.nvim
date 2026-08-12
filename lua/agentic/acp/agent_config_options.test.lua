@@ -35,7 +35,7 @@ describe("agentic.acp.AgentConfigOptions", function()
 
     --- @type agentic.acp.ConfigOption
     local model_option = {
-        id = "model-1",
+        id = "model",
         category = "model",
         currentValue = "claude-sonnet",
         description = "Model selection",
@@ -45,6 +45,27 @@ describe("agentic.acp.AgentConfigOptions", function()
                 value = "claude-sonnet",
                 name = "Sonnet",
                 description = "Fast model",
+            },
+        },
+    }
+
+    --- @type agentic.acp.ConfigOption
+    local provider_option = {
+        id = "provider",
+        category = "model",
+        currentValue = "provider-a",
+        description = "Provider selection",
+        name = "Provider",
+        options = {
+            {
+                value = "provider-a",
+                name = "Provider A",
+                description = "First provider",
+            },
+            {
+                value = "provider-b",
+                name = "Provider B",
+                description = "Second provider",
             },
         },
     }
@@ -103,9 +124,20 @@ describe("agentic.acp.AgentConfigOptions", function()
             local model = assert.not_nil(config_options.model)
             local thought_level = assert.not_nil(config_options.thought_level)
             assert.equal("mode-1", mode.id)
-            assert.equal("model-1", model.id)
+            assert.equal("model", model.id)
             assert.equal("thought-1", thought_level.id)
         end)
+
+        it(
+            "identifies the model by id when provider shares its category",
+            function()
+                config_options:set_options({ model_option, provider_option })
+
+                local model = assert.not_nil(config_options.model)
+                assert.equal("model", model.id)
+                assert.equal("provider", config_options.all_options.provider.id)
+            end
+        )
 
         it("does nothing when configOptions is nil", function()
             config_options:set_options(nil)

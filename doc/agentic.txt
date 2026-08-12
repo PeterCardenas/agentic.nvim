@@ -229,6 +229,7 @@ acp_providers ~
   Customize built-in providers or add new ACP-compatible providers.
   Each entry supports: `name`, `command`, `args`, `env`,
   `default_mode`, `default_model`, `default_config_options`,
+  `model_change_config_options`,
 
   `default_mode`   Start every session in this mode (e.g.,
                    `"bypassPermissions"`). Use <S-Tab> in the
@@ -241,6 +242,12 @@ acp_providers ~
                    creation. Model is applied first, then dependent
                    options are validated against current provider
                    config options.
+  `model_change_config_options`
+                   Reapply exactly these config options after an
+                   interactive model selection. If omitted, the
+                   non-model entries from `default_config_options` are
+                   reapplied for backward compatibility. Use `{}` to
+                   disable reapplication.
 
 >lua
   --- @type agentic.PartialUserConfig
@@ -257,6 +264,10 @@ acp_providers ~
         -- Cursor parameterized options are enabled automatically.
         default_config_options = {
           model = "gpt-5.3-codex",
+          reasoning = "high",
+          fast = "true",
+        },
+        model_change_config_options = {
           reasoning = "high",
           fast = "true",
         },

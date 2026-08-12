@@ -1097,7 +1097,12 @@ function SessionManager:_handle_model_change(model_id, is_legacy)
                 return
             end
 
-            local defaults = self.agent.provider_config.default_config_options
+            -- nil preserves the legacy fallback; an empty table intentionally
+            -- disables reapplication after an interactive model change.
+            local model_change_config_options =
+                self.agent.provider_config.model_change_config_options
+            local defaults = model_change_config_options
+                or self.agent.provider_config.default_config_options
             if type(defaults) ~= "table" or vim.tbl_isempty(defaults) then
                 Logger.notify(
                     "Model changed to: " .. model_id,
@@ -1110,7 +1115,10 @@ function SessionManager:_handle_model_change(model_id, is_legacy)
             --- @type table<string, string>
             local dependent_defaults = {}
             for config_id, value in pairs(defaults) do
-                if config_id ~= "model" and type(value) == "string" then
+                if
+                    (model_change_config_options ~= nil or config_id ~= "model")
+                    and type(value) == "string"
+                then
                     dependent_defaults[config_id] = value
                 end
             end
@@ -1192,8 +1200,50 @@ function SessionManager:_handle_config_option_change(config_id, config_value)
                 return
             end
 
-            if result and result.configOptions then
-                self:_handle_new_config_options(result.configOptions)
+            local latest_config_options = result and result.configOptions or nil
+            if latest_config_options then
+                self:_handle_new_config_options(latest_config_options)
+            end
+
+            if config_id == "provider" and latest_config_options then
+                local model_change_config_options =
+                    self.agent.provider_config.model_change_config_options
+                local defaults = model_change_config_options
+                    or self.agent.provider_config.default_config_options
+                --- @type table<string, string>
+                local dependent_defaults = {}
+
+                if type(defaults) == "table" then
+                    for dependent_id, value in pairs(defaults) do
+                        if
+                            dependent_id ~= "provider"
+                            and dependent_id ~= "model"
+                            and type(value) == "string"
+                        then
+                            dependent_defaults[dependent_id] = value
+                        end
+                    end
+                end
+
+                if not vim.tbl_isempty(dependent_defaults) then
+                    self:_apply_default_config_options(
+                        dependent_defaults,
+                        latest_config_options,
+                        function(_applied_result, apply_err)
+                            if apply_err then
+                                Logger.notify(
+                                    string.format(
+                                        "Provider changed, but failed to apply dependent options: %s",
+                                        apply_err.message
+                                            or vim.inspect(apply_err)
+                                    ),
+                                    vim.log.levels.WARN,
+                                    { title = "Agentic Config changed" }
+                                )
+                            end
+                        end
+                    )
+                end
             end
 
             Logger.notify(

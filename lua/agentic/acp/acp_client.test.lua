@@ -30,6 +30,57 @@ end
 
 describe("agentic.acp.ACPClient", function()
     it(
+        "applies the provider before the model in default config options",
+        function()
+            local applied_config_ids = {}
+            local client = new_client()
+            client.provider_config.default_config_options = {
+                provider = "applied",
+                model = "gpt-5-6-terra",
+                thought_level = "medium",
+            }
+            rawset(client, "_send_request", function(_, method, _, callback)
+                assert.equal("session/new", method)
+                callback({
+                    sessionId = "session-1",
+                    configOptions = {
+                        {
+                            id = "provider",
+                            currentValue = "initial",
+                            options = { { value = "applied" } },
+                        },
+                        {
+                            id = "model",
+                            currentValue = "initial",
+                            options = { { value = "gpt-5-6-terra" } },
+                        },
+                        {
+                            id = "thought_level",
+                            currentValue = "initial",
+                            options = { { value = "medium" } },
+                        },
+                    },
+                }, nil)
+            end)
+            rawset(
+                client,
+                "set_config_option",
+                function(_, _, config_id, _, callback)
+                    table.insert(applied_config_ids, config_id)
+                    callback(nil, nil)
+                end
+            )
+
+            client:create_session({}, function() end)
+
+            assert.same(
+                { "provider", "model", "thought_level" },
+                applied_config_ids
+            )
+        end
+    )
+
+    it(
         "responds to queued permissions when a soft stop invalidates delivery",
         function()
             local sent_messages = {}
