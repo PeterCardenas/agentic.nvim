@@ -49,7 +49,6 @@ agentic-session-restore	agentic.txt	/*agentic-session-restore*
 agentic-slash-commands	agentic.txt	/*agentic-slash-commands*
 agentic-spinner-chars	agentic.txt	/*agentic-spinner-chars*
 agentic-status-icons	agentic.txt	/*agentic-status-icons*
-agentic-system-context	agentic.txt	/*agentic-system-context*
 agentic-usage	agentic.txt	/*agentic-usage*
 agentic.add_buffer_diagnostics()	agentic.txt	/*agentic.add_buffer_diagnostics()*
 agentic.add_current_line_diagnostics()	agentic.txt	/*agentic.add_current_line_diagnostics()*

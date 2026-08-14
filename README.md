@@ -718,24 +718,6 @@ You can change where sessions are stored:
 - Agent thinking/reasoning blocks
 - Session metadata (timestamp, title)
 
-### System Information
-
-Agentic automatically includes environment and project information in the first
-message of each session:
-
-- Platform information (OS, version, architecture)
-- Shell and Neovim version
-- Current date
-- Git repository status (if applicable):
-  - Current branch
-  - Changed files
-  - Recent commits (last 3)
-- Project root path
-
-This helps the AI Agent understand the context of the current project without
-having to run additional commands or grep through files, the goals is to reduce
-time for the first response.
-
 ### Event Hooks
 
 Agentic.nvim provides hooks that let you respond to specific events during the

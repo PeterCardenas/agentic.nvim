@@ -626,12 +626,6 @@ under the current project's session directory. Call
 project. Legacy session files are migrated to JSONL during setup and
 backed up under `_jsonl_migration_backups/{timestamp}/` first.
 
-System information ~
-                                             *agentic-system-context*
-The first message of each session automatically includes platform
-info, shell/Neovim version, date, git status, and project root.
-This reduces time to first response by providing immediate context.
-
 Event hooks ~
                                                      *agentic-hooks*
 >lua

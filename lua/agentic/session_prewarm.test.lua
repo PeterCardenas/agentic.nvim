@@ -36,6 +36,27 @@ describe("agentic.session_prewarm", function()
             end
         )
 
+        it(
+            "does not recreate a restored non-first one-message session",
+            function()
+                local session = {
+                    _is_first_message = false,
+                    is_generating = false,
+                    chat_history = { messages = {}, message_count = 1 },
+                    file_list = empty_list(),
+                    code_selection = empty_list(),
+                    diagnostics_list = empty_list(),
+                    todo_list = empty_list(),
+                }
+
+                assert.is_false(
+                    SessionPrewarm._can_recreate_prewarmed_session(
+                        session --[[@as agentic.SessionManager]]
+                    )
+                )
+            end
+        )
+
         it("ignores stale live messages without lightweight count", function()
             local session = {
                 _is_first_message = true,

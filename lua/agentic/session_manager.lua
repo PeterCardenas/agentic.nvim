@@ -117,7 +117,7 @@ end
 --- @field session_id? string
 --- @field tab_page_id integer
 --- @field provider_name agentic.UserConfig.ProviderName
---- @field _is_first_message boolean Whether this is the first message in the session, used to add system info only once
+--- @field _is_first_message boolean Whether the first user turn is still pending; also marks sessions eligible for prewarming
 --- @field is_generating boolean
 --- @field _turn_start_time? number High-resolution timestamp (from vim.uv.hrtime) when the current turn started
 --- @field _pending_input? string Prompt text queued while session was initializing
@@ -1460,14 +1460,9 @@ function SessionManager:_handle_input_submit(input_text)
         })
     end
 
-    -- Add system info on first message only (after user text so resume picker shows the prompt)
+    -- Mark the first message as handled after recording the user text
     if self._is_first_message then
         self._is_first_message = false
-
-        table.insert(prompt, {
-            type = "text",
-            text = self:_get_system_info(),
-        })
     end
 
     --- The message to be written to the chat widget
@@ -2294,71 +2289,6 @@ function SessionManager:_handle_new_config_options(new_config_options)
     -- Startup config options arrive outside the session-update path, so custom
     -- function headers need an explicit refresh to pick up model/runtime state.
     self:schedule_header_refresh()
-end
-
-function SessionManager:_get_system_info()
-    local _ = self
-    local os_name = vim.uv.os_uname().sysname
-    local os_version = vim.uv.os_uname().release
-    local os_machine = vim.uv.os_uname().machine
-    local shell = os.getenv("SHELL")
-    local neovim_version = tostring(vim.version())
-    local today = os.date("%Y-%m-%d")
-
-    local res = string.format(
-        [[
-- Platform: %s-%s-%s
-- Shell: %s
-- Editor: Neovim %s
-- Current date: %s]],
-        os_name,
-        os_version,
-        os_machine,
-        shell,
-        neovim_version,
-        today
-    )
-
-    local project_root = vim.uv.cwd()
-
-    local git_root = vim.fs.root(project_root or 0, ".git")
-    if git_root then
-        project_root = git_root
-        res = res .. "\n- This is a Git repository."
-
-        local branch =
-            vim.fn.system("git rev-parse --abbrev-ref HEAD"):gsub("\n", "")
-        if vim.v.shell_error == 0 and branch ~= "" then
-            res = res .. string.format("\n- Current branch: %s", branch)
-        end
-
-        local changed = vim.fn.system("git status --porcelain"):gsub("\n$", "")
-        if vim.v.shell_error == 0 and changed ~= "" then
-            local files = vim.split(changed, "\n")
-            res = res .. "\n- Changed files:"
-            for _, file in ipairs(files) do
-                res = res .. "\n  - " .. file
-            end
-        end
-
-        local commits = vim.fn
-            .system("git log -3 --oneline --format='%h (%ar) %an: %s'")
-            :gsub("\n$", "")
-        if vim.v.shell_error == 0 and commits ~= "" then
-            local commit_lines = vim.split(commits, "\n")
-            res = res .. "\n- Recent commits:"
-            for _, commit in ipairs(commit_lines) do
-                res = res .. "\n  - " .. commit
-            end
-        end
-    end
-
-    if project_root then
-        res = res .. string.format("\n- Project root: %s", project_root)
-    end
-
-    res = "<environment_info>\n" .. res .. "\n</environment_info>"
-    return res
 end
 
 function SessionManager:destroy()

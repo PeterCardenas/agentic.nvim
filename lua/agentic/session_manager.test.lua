@@ -2995,6 +2995,57 @@ describe("agentic.SessionManager", function()
         end)
     end)
 
+    describe("_handle_input_submit first prompt", function()
+        it(
+            "sends only user text and marks the first message handled",
+            function()
+                local sent_prompt
+                local session = {
+                    session_id = "test-session",
+                    tab_page_id = 1,
+                    _is_first_message = true,
+                    _history_to_send = nil,
+                    _replace_session = false,
+                    todo_list = { close_if_all_completed = function() end },
+                    chat_history = { title = "", add_message = function() end },
+                    code_selection = {
+                        is_empty = function()
+                            return true
+                        end,
+                    },
+                    file_list = {
+                        is_empty = function()
+                            return true
+                        end,
+                    },
+                    diagnostics_list = {
+                        is_empty = function()
+                            return true
+                        end,
+                    },
+                    agent = {
+                        provider_config = { name = "Test Provider" },
+                        send_prompt = function(_, _, prompt)
+                            sent_prompt = prompt
+                        end,
+                    },
+                    message_writer = {
+                        record_prompt_position = function() end,
+                        write_message = function() end,
+                        enable_auto_scroll = function() end,
+                    },
+                    status_animation = { start = function() end },
+                }
+                setmetatable(session, { __index = SessionManager })
+
+                SessionManager._handle_input_submit(session, "hello")
+
+                assert.same({ { type = "text", text = "hello" } }, sent_prompt)
+                assert.is_false(session._is_first_message)
+            end
+        )
+    end)
+
     describe("_handle_input_submit selected code chat formatting", function()
         it(
             "uses four-backtick fences for selected code in the chat message",
