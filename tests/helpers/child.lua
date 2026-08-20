@@ -12,6 +12,7 @@ local MiniTest = require("mini.test")
 --- @field fn table
 --- @field lua fun(code: string, args: table|nil)
 --- @field type_keys fun(...: string)
+--- @field wait_for_buffer_text fun(self: tests.helpers.Child, bufnr: number, marker: string, timeout_ms: number): boolean
 
 --- @class tests.helpers.ChildModule
 local M = {}
@@ -47,6 +48,22 @@ function M.new()
         ]])
 
         child.api.nvim_eval("1")
+    end
+
+    --- Wait for asynchronous terminal output from the parent process.
+    --- @param bufnr number
+    --- @param marker string
+    --- @param timeout_ms number
+    --- @return boolean found
+    function child:wait_for_buffer_text(bufnr, marker, timeout_ms)
+        for _ = 1, math.floor(timeout_ms / 10) do
+            local lines = self.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+            if table.concat(lines, "\\n"):find(marker, 1, true) ~= nil then
+                return true
+            end
+            vim.uv.sleep(10)
+        end
+        return false
     end
 
     return child

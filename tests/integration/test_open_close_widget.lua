@@ -203,10 +203,16 @@ end)()
     it(
         "restores a hidden terminal buffer when toggling from only widget windows",
         function()
-            local result = child.lua([[
-            vim.cmd("terminal sh -c 'printf preserved; sleep 10'")
-            vim.cmd("sleep 300m")
-            local terminal_bufnr = vim.api.nvim_get_current_buf()
+            child.lua(
+                [[vim.cmd("terminal sh -c 'sleep 0.5; printf preserved; sleep 10'")]]
+            )
+            local terminal_bufnr = child.api.nvim_get_current_buf()
+            assert.is_true(
+                child:wait_for_buffer_text(terminal_bufnr, "preserved", 5000)
+            )
+            local result = child.lua(string.format(
+                [[
+            local terminal_bufnr = %d
             local terminal_job_id = vim.b[terminal_bufnr].terminal_job_id
 
             -- Some terminal integrations set filetype=terminal in addition to
@@ -239,7 +245,9 @@ end)()
                 lines = lines,
                 window_count = window_count,
             }
-        ]])
+        ]],
+                terminal_bufnr
+            ))
 
             assert.is_true(result.terminal_valid)
             assert.equal(result.terminal_bufnr, result.current_bufnr)
@@ -252,13 +260,18 @@ end)()
     it(
         "creates a scratch fallback instead of using an unrelated alternate terminal",
         function()
-            local result = child.lua([[
+            child.lua(
+                [[vim.cmd("terminal sh -c 'sleep 0.5; printf unrelated; sleep 10'")]]
+            )
+            local terminal_bufnr = child.api.nvim_get_current_buf()
+            assert.is_true(
+                child:wait_for_buffer_text(terminal_bufnr, "unrelated", 5000)
+            )
+            local result = child.lua(string.format(
+                [[
             local ChatWidget = require("agentic.ui.chat_widget")
             local widget = ChatWidget:new(vim.api.nvim_get_current_tabpage(), function() end)
-
-            vim.cmd("terminal sh -c 'printf unrelated; sleep 10'")
-            vim.cmd("sleep 300m")
-            local terminal_bufnr = vim.api.nvim_get_current_buf()
+            local terminal_bufnr = %d
             local terminal_job_id = vim.b[terminal_bufnr].terminal_job_id
             vim.bo[terminal_bufnr].filetype = "terminal"
 
@@ -287,7 +300,9 @@ end)()
                 fallback_buftype = fallback_buftype,
                 terminal_win_count = terminal_win_count,
             }
-        ]])
+        ]],
+                terminal_bufnr
+            ))
 
             assert.equal(result.terminal_bufnr, result.alt_bufnr)
             assert.is_not.equal(result.terminal_bufnr, result.fallback_bufnr)

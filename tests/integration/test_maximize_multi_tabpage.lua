@@ -596,10 +596,16 @@ describe("Maximize toggle with multiple tabpages", function()
     it(
         "round-trips a wipe-on-close terminal window through maximize",
         function()
-            local result = child.lua([[
-            vim.cmd("terminal sh -c 'printf preserved; sleep 10'")
-            vim.cmd("sleep 300m")
-            local terminal_bufnr = vim.api.nvim_get_current_buf()
+            child.lua(
+                [[vim.cmd("terminal sh -c 'sleep 0.5; printf preserved; sleep 10'")]]
+            )
+            local terminal_bufnr = child.api.nvim_get_current_buf()
+            assert.is_true(
+                child:wait_for_buffer_text(terminal_bufnr, "preserved", 5000)
+            )
+            local result = child.lua(string.format(
+                [[
+            local terminal_bufnr = %d
             local terminal_job_id = vim.b[terminal_bufnr].terminal_job_id
             vim.bo[terminal_bufnr].filetype = "terminal"
             vim.bo[terminal_bufnr].bufhidden = "wipe"
@@ -637,7 +643,9 @@ describe("Maximize toggle with multiple tabpages", function()
                 current_bufnr = current_bufnr,
                 lines = lines,
             }
-        ]])
+        ]],
+                terminal_bufnr
+            ))
 
             assert.is_true(result.maximized)
             assert.is_true(result.valid_while_maximized)
