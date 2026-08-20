@@ -20,7 +20,8 @@ end
 --- Load selected session, cancel current, and restore in continue mode
 --- @param session_id string
 --- @param tab_page_id integer
-local function do_restore(session_id, tab_page_id)
+--- @param sessions_folder string
+local function do_restore(session_id, tab_page_id, sessions_folder)
     if not vim.api.nvim_tabpage_is_valid(tab_page_id) then
         return
     end
@@ -68,7 +69,7 @@ local function do_restore(session_id, tab_page_id)
 
             session.widget:show()
         end)
-    end)
+    end, sessions_folder)
 end
 
 --- @param parsed table|nil
@@ -135,8 +136,9 @@ local function build_preview_lines(parsed, fallback_title)
 end
 
 --- @param fixed_session_id string|nil
+--- @param sessions_folder string
 --- @return table
-local function create_session_previewer(fixed_session_id)
+local function create_session_previewer(fixed_session_id, sessions_folder)
     --- @diagnostic disable-next-line: unresolved-require
     local builtin = require("fzf-lua.previewer.builtin")
     local previewer = builtin.base:extend()
@@ -225,7 +227,7 @@ local function create_session_previewer(fixed_session_id)
             if self.win and self.win.update_preview_title then
                 self.win:update_preview_title(title)
             end
-        end)
+        end, sessions_folder)
     end
 
     return previewer
@@ -236,7 +238,14 @@ end
 --- @param on_choice fun(choice: table|nil) Callback when user selects an item
 --- @param on_delete fun(choice: table)|nil Callback when user requests deletion
 --- @param initial_items table[]|nil Items already loaded for the first render
-local function show_fzf_picker(build_items, on_choice, on_delete, initial_items)
+--- @param sessions_folder string Folder containing the sessions
+local function show_fzf_picker(
+    build_items,
+    on_choice,
+    on_delete,
+    initial_items,
+    sessions_folder
+)
     local fzf = load_fzf_lua()
     local first_items = initial_items
     local has_used_initial_items = false
@@ -363,7 +372,7 @@ local function show_fzf_picker(build_items, on_choice, on_delete, initial_items)
             col = 0.5,
         },
         previewer = function()
-            return create_session_previewer(nil)
+            return create_session_previewer(nil, sessions_folder)
         end,
         fzf_opts = fzf_opts,
         actions = actions,
@@ -371,8 +380,9 @@ local function show_fzf_picker(build_items, on_choice, on_delete, initial_items)
 end
 
 --- Build session items from disk.
+--- @param sessions_folder string
 --- @return table[] items
-local function build_session_items()
+local function build_session_items(sessions_folder)
     local items = {}
     ChatHistory.list_sessions(function(sessions)
         for _, s in ipairs(sessions) do
@@ -384,27 +394,31 @@ local function build_session_items()
                 session_id = s.session_id,
             })
         end
-    end)
+    end, sessions_folder)
     return items
 end
 
 --- Show session picker and restore selected session
 --- @param tab_page_id integer
 function SessionRestore.show_picker(tab_page_id)
-    local initial_items = build_session_items()
+    if not vim.api.nvim_tabpage_is_valid(tab_page_id) then
+        return
+    end
+    local sessions_folder = ChatHistory.get_sessions_folder(tab_page_id)
+    local initial_items = build_session_items(sessions_folder)
     if #initial_items == 0 then
         Logger.notify("No saved sessions found", vim.log.levels.INFO)
         return
     end
 
     show_fzf_picker(function(callback)
-        callback(build_session_items())
+        callback(build_session_items(sessions_folder))
     end, function(choice)
         if not choice then
             return
         end
 
-        do_restore(choice.session_id, tab_page_id)
+        do_restore(choice.session_id, tab_page_id, sessions_folder)
     end, function(choice)
         ChatHistory.delete_session(choice.session_id, function(err)
             if err then
@@ -415,8 +429,8 @@ function SessionRestore.show_picker(tab_page_id)
                 return
             end
             Logger.notify("Session deleted", vim.log.levels.INFO)
-        end)
-    end, initial_items)
+        end, sessions_folder)
+    end, initial_items, sessions_folder)
 end
 
 --- Replay stored messages to the UI

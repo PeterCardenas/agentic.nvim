@@ -1429,6 +1429,7 @@ describe("agentic.SessionManager", function()
                 assert.same({
                     kind = "messages",
                     messages = loaded.messages,
+                    sessions_folder = loaded._sessions_folder,
                 }, session._history_replay_source)
                 assert.spy(assert.not_nil(replay_stub)).was.called(1)
             end
@@ -1506,6 +1507,33 @@ describe("agentic.SessionManager", function()
                 assert.is_true(SessionManager.has_messages(session))
             end
         )
+
+        it("continues persistence in the loaded project folder", function()
+            local ChatHistory = require("agentic.ui.chat_history")
+            local loaded = create_loaded_history()
+            local loaded_folder = loaded._sessions_folder
+            assert.not_nil(git_root_stub):returns("/test/other-project")
+            local session = {
+                _restoring = false,
+                _replace_session = false,
+                _history_replay_source = nil,
+                _history_to_send = nil,
+                _is_first_message = true,
+                chat_history = ChatHistory:new(),
+                message_writer = {},
+                new_session = function(self, opts)
+                    self.chat_history.session_id = "temporary-new-session"
+                    opts.on_created()
+                end,
+            }
+            setmetatable(session, { __index = SessionManager })
+
+            SessionManager.restore_from_history(session, loaded, {
+                replace_session = true,
+            })
+
+            assert.equal(loaded_folder, session.chat_history._sessions_folder)
+        end)
     end)
 
     describe("new_session", function()

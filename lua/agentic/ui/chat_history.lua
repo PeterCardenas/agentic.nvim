@@ -44,6 +44,7 @@ local ToolCallBody = require("agentic.utils.tool_call_body")
 --- @class agentic.ui.ChatHistory.ReplaySource
 --- @field kind "jsonl"|"messages"
 --- @field session_id? string
+--- @field sessions_folder? string
 --- @field messages? agentic.ui.ChatHistory.Message[]
 
 --- @class agentic.ui.ChatHistory.MigrationResult
@@ -63,6 +64,7 @@ local ToolCallBody = require("agentic.utils.tool_call_body")
 --- @field message_count integer
 --- @field title string
 --- @field _pending_records table[]
+--- @field _sessions_folder string
 --- @field _meta_written boolean
 --- @field _loaded_from_disk boolean
 --- @field _event_write_error? string
@@ -83,7 +85,8 @@ function ChatHistory.format_turn_end(timestamp, duration)
 end
 
 --- @return agentic.ui.ChatHistory history
-function ChatHistory:new()
+--- @param sessions_folder? string
+function ChatHistory:new(sessions_folder)
     local now = os.time()
     --- @type agentic.ui.ChatHistory
     local instance = setmetatable({
@@ -95,6 +98,7 @@ function ChatHistory:new()
         message_count = 0,
         title = "",
         _pending_records = {},
+        _sessions_folder = sessions_folder or ChatHistory.get_sessions_folder(),
         _meta_written = false,
         _loaded_from_disk = false,
         _event_write_error = nil,
@@ -102,28 +106,55 @@ function ChatHistory:new()
     return instance
 end
 
-function ChatHistory.get_project_folder()
-    local cwd = FileSystem.get_git_root()
-    local normalized = cwd:gsub("[/\\%s:]", "_"):gsub("^_+", "")
-    local hash = vim.fn.sha256(cwd):sub(1, 8)
+--- @param tab_page_id integer|nil
+--- @return string cwd
+local function get_valid_tab_cwd(tab_page_id)
+    if tab_page_id and vim.api.nvim_tabpage_is_valid(tab_page_id) then
+        local tab_number = vim.api.nvim_tabpage_get_number(tab_page_id)
+        local winid = vim.api.nvim_tabpage_get_win(tab_page_id)
+        return vim.fn.getcwd(winid, tab_number)
+    end
+    return vim.fn.getcwd()
+end
+
+--- @param tab_page_id integer|nil
+function ChatHistory.get_project_folder(tab_page_id)
+    local cwd = get_valid_tab_cwd(tab_page_id)
+    local project_root = FileSystem.get_git_root(cwd)
+    local normalized = project_root:gsub("[/\\%s:]", "_"):gsub("^_+", "")
+    local hash = vim.fn.sha256(project_root):sub(1, 8)
     return normalized .. "_" .. hash
 end
 
+--- @param tab_page_id integer|nil
 --- @return string folder_path
-function ChatHistory.get_sessions_folder()
-    local session_restore = Config.session_restore or {}
-    local base = session_restore.storage_path
-        or vim.fs.joinpath(vim.fn.stdpath("cache"), "agentic", "sessions")
-    return vim.fs.joinpath(base, ChatHistory.get_project_folder())
-end
-
---- @return string folder_path
-function ChatHistory.get_sessions_root()
+function ChatHistory.get_sessions_root(tab_page_id)
     local session_restore = Config.session_restore or {}
     local folder_path = session_restore.storage_path
         or vim.fs.joinpath(vim.fn.stdpath("cache"), "agentic", "sessions")
     --- @cast folder_path string
-    return folder_path
+    if vim.fn.isabsolutepath(folder_path) ~= 1 then
+        folder_path =
+            vim.fs.joinpath(get_valid_tab_cwd(tab_page_id), folder_path)
+    end
+    return vim.fn.fnamemodify(folder_path, ":p")
+end
+
+--- @param tab_page_id integer|nil
+--- @return string folder_path
+local function get_sessions_folder_for_project(project_folder, tab_page_id)
+    return vim.fs.joinpath(
+        ChatHistory.get_sessions_root(tab_page_id),
+        project_folder
+    )
+end
+
+--- @param tab_page_id integer|nil
+function ChatHistory.get_sessions_folder(tab_page_id)
+    return get_sessions_folder_for_project(
+        ChatHistory.get_project_folder(tab_page_id),
+        tab_page_id
+    )
 end
 
 --- @param session_id string
@@ -157,6 +188,18 @@ function ChatHistory.get_metadata_file_path(session_id)
         ChatHistory.get_sessions_folder(),
         session_id .. ".meta.json"
     )
+end
+
+--- @param session_id string
+--- @return string file_path
+function ChatHistory:_get_jsonl_file_path(session_id)
+    return vim.fs.joinpath(self._sessions_folder, session_id .. ".jsonl")
+end
+
+--- @param session_id string
+--- @return string file_path
+function ChatHistory:_get_metadata_file_path(session_id)
+    return vim.fs.joinpath(self._sessions_folder, session_id .. ".meta.json")
 end
 
 --- @param parsed table|nil
@@ -290,8 +333,9 @@ local function decode_session_metadata(content, session_id)
 end
 
 --- @param callback fun(metadata: agentic.ui.ChatHistory.SessionMeta|nil, err: string|nil)
-local function read_session_metadata(session_id, callback)
-    local metadata_path = ChatHistory.get_metadata_file_path(session_id)
+local function read_session_metadata(session_id, sessions_folder, callback)
+    local metadata_path =
+        vim.fs.joinpath(sessions_folder, session_id .. ".meta.json")
 
     local metadata_file = vim.uv.fs_stat(metadata_path)
     if not metadata_file then
@@ -308,7 +352,7 @@ local function read_session_metadata(session_id, callback)
             return
         end
         read_file_async(
-            ChatHistory.get_jsonl_file_path(session_id),
+            vim.fs.joinpath(sessions_folder, session_id .. ".jsonl"),
             function(jsonl_content)
                 if
                     not jsonl_content
@@ -413,10 +457,7 @@ function ChatHistory:_append_record(record)
         return false, "JSON encoding error"
     end
 
-    return append_line_sync(
-        ChatHistory.get_jsonl_file_path(self.session_id),
-        encoded
-    )
+    return append_line_sync(self:_get_jsonl_file_path(self.session_id), encoded)
 end
 
 --- @return table record
@@ -444,7 +485,7 @@ function ChatHistory:_write_meta_record()
         return false, "JSON encoding error"
     end
     local success, err = write_file_atomic_sync(
-        ChatHistory.get_metadata_file_path(self.session_id),
+        self:_get_metadata_file_path(self.session_id),
         encoded
     )
     if success then
@@ -558,8 +599,8 @@ end
 --- @param content string
 --- @return agentic.ui.ChatHistory|nil history
 --- @return string|nil err
-local function parse_jsonl_history(session_id, content)
-    local history = ChatHistory:new()
+local function parse_jsonl_history(session_id, content, sessions_folder)
+    local history = ChatHistory:new(sessions_folder)
     history.session_id = session_id
     history.messages = {}
     history.message_count = 0
@@ -632,21 +673,26 @@ local function apply_metadata(history, metadata, requested_session_id)
 end
 
 --- @param session_id string
+--- @param sessions_folder? string
 --- @return agentic.ui.ChatHistory|nil history
 --- @return string|nil err
-function ChatHistory.load_sync(session_id)
-    local metadata =
-        read_json_file_sync(ChatHistory.get_metadata_file_path(session_id))
+function ChatHistory.load_sync(session_id, sessions_folder)
+    sessions_folder = sessions_folder or ChatHistory.get_sessions_folder()
+    local metadata = read_json_file_sync(
+        vim.fs.joinpath(sessions_folder, session_id .. ".meta.json")
+    )
     if not metadata then
         return nil, "Invalid session metadata"
     end
 
-    local content = read_file_sync(ChatHistory.get_jsonl_file_path(session_id))
+    local content =
+        read_file_sync(vim.fs.joinpath(sessions_folder, session_id .. ".jsonl"))
     if not content then
         return nil, "Failed to read file"
     end
 
-    local history, err = parse_jsonl_history(session_id, content)
+    local history, err =
+        parse_jsonl_history(session_id, content, sessions_folder)
     if history then
         if not apply_metadata(history, metadata, session_id) then
             return nil, "Invalid session metadata"
@@ -657,34 +703,44 @@ end
 
 --- @param session_id string
 --- @param callback fun(history: agentic.ui.ChatHistory|nil, err: string|nil)
-function ChatHistory.load(session_id, callback)
-    read_session_metadata(session_id, function(metadata, metadata_err)
-        if not metadata then
-            callback(nil, metadata_err or "Invalid session metadata")
-            return
-        end
-
-        read_file_async(
-            ChatHistory.get_jsonl_file_path(session_id),
-            function(content)
-                if not content then
-                    callback(nil, "Failed to read file")
-                    return
-                end
-
-                local history, err = parse_jsonl_history(session_id, content)
-                if not history then
-                    callback(nil, err)
-                    return
-                end
-                if not apply_metadata(history, metadata, session_id) then
-                    callback(nil, "Invalid session metadata")
-                    return
-                end
-                callback(history, nil)
+--- @param sessions_folder? string
+function ChatHistory.load(session_id, callback, sessions_folder)
+    sessions_folder = sessions_folder or ChatHistory.get_sessions_folder()
+    read_session_metadata(
+        session_id,
+        sessions_folder,
+        function(metadata, metadata_err)
+            if not metadata then
+                callback(nil, metadata_err or "Invalid session metadata")
+                return
             end
-        )
-    end)
+
+            read_file_async(
+                vim.fs.joinpath(sessions_folder, session_id .. ".jsonl"),
+                function(content)
+                    if not content then
+                        callback(nil, "Failed to read file")
+                        return
+                    end
+
+                    local history, err = parse_jsonl_history(
+                        session_id,
+                        content,
+                        sessions_folder
+                    )
+                    if not history then
+                        callback(nil, err)
+                        return
+                    end
+                    if not apply_metadata(history, metadata, session_id) then
+                        callback(nil, "Invalid session metadata")
+                        return
+                    end
+                    callback(history, nil)
+                end
+            )
+        end
+    )
 end
 
 --- @param callback fun(err: string|nil)|nil
@@ -726,10 +782,18 @@ end
 --- @return agentic.ui.ChatHistory.ReplaySource source
 function ChatHistory:get_replay_source()
     if self._loaded_from_disk then
-        return { kind = "messages", messages = self.messages }
+        return {
+            kind = "messages",
+            messages = self.messages,
+            sessions_folder = self._sessions_folder,
+        }
     end
     if self.session_id then
-        return { kind = "jsonl", session_id = self.session_id }
+        return {
+            kind = "jsonl",
+            session_id = self.session_id,
+            sessions_folder = self._sessions_folder,
+        }
     end
     return { kind = "messages", messages = self.messages }
 end
@@ -747,7 +811,8 @@ function ChatHistory.collect_messages(source)
         return source.messages or {}, nil
     end
     if source.session_id then
-        local history, err = ChatHistory.load_sync(source.session_id)
+        local history, err =
+            ChatHistory.load_sync(source.session_id, source.sessions_folder)
         if not history then
             return nil, err or "Failed to load chat history"
         end
@@ -785,7 +850,10 @@ function ChatHistory:append_replay_source(source)
         return true, nil, {}
     end
 
-    local path = ChatHistory.get_jsonl_file_path(source.session_id)
+    local path = vim.fs.joinpath(
+        source.sessions_folder or ChatHistory.get_sessions_folder(),
+        source.session_id .. ".jsonl"
+    )
     if vim.fn.filereadable(path) == 0 then
         return false, "Replay source not found"
     end
@@ -870,10 +938,12 @@ end
 
 --- @param session_id string
 --- @param callback fun(err: string|nil)|nil
-function ChatHistory.delete_session(session_id, callback)
+--- @param sessions_folder? string
+function ChatHistory.delete_session(session_id, callback, sessions_folder)
+    sessions_folder = sessions_folder or ChatHistory.get_sessions_folder()
     local paths = {
-        ChatHistory.get_jsonl_file_path(session_id),
-        ChatHistory.get_metadata_file_path(session_id),
+        vim.fs.joinpath(sessions_folder, session_id .. ".jsonl"),
+        vim.fs.joinpath(sessions_folder, session_id .. ".meta.json"),
     }
     local ok = true
     local err = nil
@@ -896,8 +966,9 @@ function ChatHistory.delete_session(session_id, callback)
 end
 
 --- @param callback fun(sessions: agentic.ui.ChatHistory.SessionMeta[])
-function ChatHistory.list_sessions(callback)
-    local folder = ChatHistory.get_sessions_folder()
+--- @param sessions_folder? string
+function ChatHistory.list_sessions(callback, sessions_folder)
+    local folder = sessions_folder or ChatHistory.get_sessions_folder()
     local sessions = {}
     if vim.fn.isdirectory(folder) == 0 then
         callback(sessions)

@@ -116,6 +116,38 @@ describe("SessionRestore", function()
     end)
 
     describe("show_picker", function()
+        it(
+            "does nothing for an invalid tab without resolving sessions",
+            function()
+                local folder_stub = spy.stub(ChatHistory, "get_sessions_folder")
+
+                SessionRestore.show_picker(-1)
+
+                assert.equal(0, #folder_stub.calls)
+                assert.equal(0, #chat_history_list_stub.calls)
+                assert.equal(0, #logger_notify_stub.calls)
+                assert.equal(0, #vim_ui_select_stub.calls)
+                folder_stub:revert()
+            end
+        )
+
+        it("passes one captured folder to all picker operations", function()
+            local folder = "/target/sessions"
+            local folder_stub = spy.stub(ChatHistory, "get_sessions_folder")
+            folder_stub:returns(folder)
+            setup_list_stub(test_sessions)
+
+            SessionRestore.show_picker(1)
+            local first_list = assert.not_nil(chat_history_list_stub.calls[1])
+            assert.equal(folder, first_list[2])
+            local callback, items = get_ui_select_call(1)
+            callback(items[1])
+            local load_call = assert.not_nil(chat_history_load_stub.calls[1])
+            assert.equal(folder, load_call[3])
+
+            folder_stub:revert()
+        end)
+
         it("notifies and skips picker when no sessions exist", function()
             setup_list_stub({})
 
@@ -347,6 +379,8 @@ describe("SessionRestore", function()
         it(
             "loads preview content through the asynchronous history callback",
             function()
+                local folder_stub = spy.stub(ChatHistory, "get_sessions_folder")
+                folder_stub:returns("/target/sessions")
                 setup_list_stub()
                 local preview_callback = nil
                 chat_history_load_stub:invokes(function(_session_id, callback)
@@ -387,6 +421,9 @@ describe("SessionRestore", function()
                 local instance = previewer:new({}, {}, {})
                 instance:populate_preview_buf("session-1\tFirst chat")
 
+                local preview_load_call =
+                    assert.not_nil(chat_history_load_stub.calls[1])
+                assert.equal("/target/sessions", preview_load_call[3])
                 local load_preview = assert.not_nil(preview_callback)
                 local preview_buf = assert.not_nil(instance._preview_buf)
                 local preview_win = vim.api.nvim_open_win(preview_buf, false, {
@@ -425,6 +462,7 @@ describe("SessionRestore", function()
                     messages = {},
                 })
                 package.loaded["fzf-lua.previewer.builtin"] = nil
+                folder_stub:revert()
             end
         )
 

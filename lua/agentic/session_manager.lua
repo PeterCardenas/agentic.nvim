@@ -219,7 +219,8 @@ function SessionManager:new(tab_page_id, provider_name)
     self.agent = agent
     self._is_creating_session = true
 
-    self.chat_history = ChatHistory:new()
+    self.chat_history =
+        ChatHistory:new(ChatHistory.get_sessions_folder(tab_page_id))
 
     self.widget = ChatWidget:new(tab_page_id, function(input_text)
         self:_handle_input_submit(input_text)
@@ -2020,7 +2021,8 @@ function SessionManager:_cancel_session()
     self.permission_manager:clear()
     SlashCommands.setCommands(self.widget.buf_nrs.input, {})
 
-    self.chat_history = ChatHistory:new()
+    self.chat_history =
+        ChatHistory:new(ChatHistory.get_sessions_folder(self.tab_page_id))
     self._history_to_send = nil
     self._history_replay_source = nil
 end
@@ -2311,7 +2313,10 @@ function SessionManager:restore_from_history(history, opts)
     self._history_replay_source = replay_source
     self._history_to_send = nil
     self._is_first_message = false
-    self.chat_history = ChatHistory:new()
+    local sessions_folder = opts.replace_session
+            and replay_source.sessions_folder
+        or ChatHistory.get_sessions_folder(self.tab_page_id)
+    self.chat_history = ChatHistory:new(sessions_folder)
     self.chat_history.title = history.title
 
     -- In continue mode, remember original identity to restore after new_session

@@ -220,26 +220,31 @@ end
 --- For bare repos, returns the bare repo directory.
 --- All worktrees of the same repo resolve to the same directory.
 --- Falls back to cwd if not in a git repo.
+--- @param cwd string|nil
 --- @return string root_dir
-function FileSystem.get_git_root()
-    local cwd = vim.uv.cwd() or ""
+function FileSystem.get_git_root(cwd)
+    local resolved_cwd = cwd or vim.uv.cwd() or ""
+    --- @cast resolved_cwd string
 
     -- --git-common-dir returns the shared .git dir:
     --   regular repo: ".git" (relative)
     --   worktree: "/path/to/main-repo/.git" (absolute)
     --   bare repo: "." (relative)
     local common_dir = vim.fn.system(
-        "git -C " .. vim.fn.shellescape(cwd) .. " rev-parse --git-common-dir"
+        "git -C "
+            .. vim.fn.shellescape(resolved_cwd)
+            .. " rev-parse --git-common-dir"
     )
     if vim.v.shell_error ~= 0 or common_dir == "" then
-        return cwd
+        return resolved_cwd
     end
 
     common_dir = vim.trim(common_dir)
 
     -- Make absolute if relative
     if not vim.startswith(common_dir, "/") then
-        common_dir = vim.fn.fnamemodify(vim.fs.joinpath(cwd, common_dir), ":p")
+        common_dir =
+            vim.fn.fnamemodify(vim.fs.joinpath(resolved_cwd, common_dir), ":p")
         -- Remove trailing slash added by :p
         common_dir = common_dir:gsub("/$", "")
     end

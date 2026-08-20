@@ -8,6 +8,10 @@ describe("ChatHistory", function()
     local ChatHistory
     local temp_dir
     local original_storage_path
+    --- @type integer|nil
+    local target_tab
+    --- @type string|nil
+    local target_cwd
     --- @type TestStub|nil
     local git_root_stub
 
@@ -33,6 +37,15 @@ describe("ChatHistory", function()
             git_root_stub:revert()
             git_root_stub = nil
         end
+        if target_tab and vim.api.nvim_tabpage_is_valid(target_tab) then
+            vim.api.nvim_set_current_tabpage(target_tab)
+            vim.cmd("tabclose")
+        end
+        target_tab = nil
+        if target_cwd then
+            vim.fn.delete(target_cwd, "rf")
+            target_cwd = nil
+        end
         vim.fn.delete(temp_dir, "rf")
         local Config = require("agentic.config")
         Config.session_restore.storage_path = original_storage_path
@@ -48,9 +61,217 @@ describe("ChatHistory", function()
             assert.truthy(path:find(project_folder, 1, true))
             assert.truthy(path:match("session%-abc%.jsonl$"))
         end)
+
+        it(
+            "uses Neovim absolute-path detection for platform-native paths",
+            function()
+                local Config = require("agentic.config")
+                local absolute_path =
+                    vim.fn.fnamemodify("platform-sessions", ":p")
+                Config.session_restore.storage_path = absolute_path
+                local is_absolute_stub = spy.stub(vim.fn, "isabsolutepath")
+                is_absolute_stub:returns(1)
+
+                local root = ChatHistory.get_sessions_root()
+
+                local call = assert.not_nil(is_absolute_stub.calls[1])
+                assert.equal(absolute_path, call[1])
+                assert.equal(absolute_path, root)
+                is_absolute_stub:revert()
+            end
+        )
+
+        it("captures a relative storage path as an absolute path", function()
+            local Config = require("agentic.config")
+            Config.session_restore.storage_path = "relative-sessions"
+
+            local history = ChatHistory:new()
+
+            assert.equal("/", history._sessions_folder:sub(1, 1))
+            assert.equal("/", ChatHistory.get_sessions_root():sub(1, 1))
+        end)
+
+        it("resolves persistence from the target tab project", function()
+            local current_tab = vim.api.nvim_get_current_tabpage()
+            target_cwd = vim.fn.tempname()
+            vim.fn.mkdir(target_cwd, "p")
+            vim.cmd("tabnew")
+            target_tab = vim.api.nvim_get_current_tabpage()
+            vim.cmd("tcd " .. vim.fn.fnameescape(target_cwd))
+            vim.api.nvim_set_current_tabpage(current_tab)
+            assert.not_nil(git_root_stub):invokes(function(cwd)
+                return cwd or TEST_CWD
+            end)
+            local Config = require("agentic.config")
+            Config.session_restore.storage_path = "relative-sessions"
+
+            local folder = ChatHistory.get_sessions_folder(target_tab)
+
+            local normalized_target =
+                target_cwd:gsub("[/\\%s:]", "_"):gsub("^_+", "")
+            vim.api.nvim_set_current_tabpage(target_tab)
+            vim.cmd("tabclose")
+            target_tab = nil
+            vim.fn.delete(target_cwd, "rf")
+            target_cwd = nil
+            assert.truthy(folder:find(normalized_target, 1, true))
+        end)
     end)
 
     describe("message operations", function()
+        it(
+            "loads with one root lookup and writes to the loaded folder",
+            function()
+                local folder =
+                    vim.fs.joinpath(temp_dir, ChatHistory.get_project_folder())
+                vim.fn.mkdir(folder, "p")
+                local meta =
+                    io.open(vim.fs.joinpath(folder, "loaded.meta.json"), "w")
+                if not meta then
+                    error("failed to create metadata")
+                end
+                meta:write(vim.json.encode({
+                    session_id = "loaded",
+                    title = "Loaded",
+                    created_at = 1,
+                    updated_at = 1,
+                }))
+                meta:close()
+                local events =
+                    io.open(vim.fs.joinpath(folder, "loaded.jsonl"), "w")
+                if not events then
+                    error("failed to create events")
+                end
+                events:write(vim.json.encode({
+                    type = "message",
+                    message = { type = "user", text = "hi" },
+                }))
+                events:close()
+                local stub = git_root_stub
+                if not stub then
+                    error("git root stub unavailable")
+                end
+                stub:reset()
+                local history = assert.not_nil(ChatHistory.load_sync("loaded"))
+                assert.equal(1, stub.call_count)
+                local root = "/changed/project"
+                stub:invokes(function()
+                    return root
+                end)
+                history:add_message({ type = "user", text = "later" })
+                assert.is_not_nil(
+                    vim.uv.fs_stat(vim.fs.joinpath(folder, "loaded.jsonl"))
+                )
+            end
+        )
+
+        it(
+            "keeps instance persistence bound to its construction project",
+            function()
+                local root = TEST_CWD
+                assert.not_nil(git_root_stub):invokes(function()
+                    return root
+                end)
+                local history = ChatHistory:new()
+                history.session_id = "stable-project"
+                local original_path =
+                    vim.fs.joinpath(temp_dir, ChatHistory.get_project_folder())
+                root = "/later/project"
+                history:add_message({
+                    type = "user",
+                    text = "stable",
+                    timestamp = os.time(),
+                    provider_name = "test-provider",
+                })
+
+                local later_path =
+                    vim.fs.joinpath(temp_dir, ChatHistory.get_project_folder())
+                root = TEST_CWD
+                assert.is_not_nil(
+                    vim.uv.fs_stat(
+                        vim.fs.joinpath(original_path, "stable-project.jsonl")
+                    )
+                )
+                assert.is_not_nil(
+                    vim.uv.fs_stat(
+                        vim.fs.joinpath(
+                            original_path,
+                            "stable-project.meta.json"
+                        )
+                    )
+                )
+                assert.is_nil(
+                    vim.uv.fs_stat(
+                        vim.fs.joinpath(later_path, "stable-project.jsonl")
+                    )
+                )
+            end
+        )
+
+        it(
+            "isolates histories constructed under different project roots",
+            function()
+                local root = TEST_CWD
+                assert.not_nil(git_root_stub):invokes(function()
+                    return root
+                end)
+                local first = ChatHistory:new()
+                first.session_id = "first-project"
+                root = "/other/project"
+                local second = ChatHistory:new()
+                second.session_id = "second-project"
+                root = "/third/project"
+                first:add_message({
+                    type = "user",
+                    text = "first",
+                    timestamp = os.time(),
+                    provider_name = "test",
+                })
+                second:add_message({
+                    type = "user",
+                    text = "second",
+                    timestamp = os.time(),
+                    provider_name = "test",
+                })
+                root = TEST_CWD
+                assert.is_not_nil(
+                    vim.uv.fs_stat(
+                        ChatHistory.get_jsonl_file_path("first-project")
+                    )
+                )
+                root = "/other/project"
+                assert.is_not_nil(
+                    vim.uv.fs_stat(
+                        ChatHistory.get_jsonl_file_path("second-project")
+                    )
+                )
+            end
+        )
+
+        it(
+            "resolves the project root once per instance while static paths stay dynamic",
+            function()
+                local root = TEST_CWD
+                assert.not_nil(git_root_stub):invokes(function()
+                    return root
+                end)
+                local history = ChatHistory:new()
+                history.session_id = "cached-root"
+                root = "/later/project"
+                history:add_message({
+                    type = "user",
+                    text = "cached",
+                    timestamp = os.time(),
+                    provider_name = "test",
+                })
+                history:save(function() end)
+                assert.equal(1, assert.not_nil(git_root_stub).call_count)
+                local dynamic_path = ChatHistory.get_jsonl_file_path("static")
+                assert.truthy(dynamic_path:find("later_project", 1, true))
+                assert.equal(2, assert.not_nil(git_root_stub).call_count)
+            end
+        )
+
         it("keeps live messages empty and tracks count cheaply", function()
             local history = ChatHistory:new()
 
@@ -560,6 +781,119 @@ describe("ChatHistory", function()
             local first_loaded_message = assert.not_nil(loaded.messages[1])
             assert.equal("Test message", first_loaded_message.text)
         end)
+
+        it(
+            "collects replay messages from the source project after a project switch",
+            function()
+                local root_stub = assert.not_nil(git_root_stub)
+                local project_a = TEST_CWD
+                local project_b = "/test/project-b"
+                root_stub:returns(project_a)
+                local history = ChatHistory:new()
+                vim.fn.mkdir(history._sessions_folder, "p")
+                history.session_id = "replay-project"
+                history:add_message({
+                    type = "user",
+                    text = "From project A",
+                    timestamp = 1704067200,
+                    provider_name = "test",
+                })
+                history:save(function(err)
+                    assert.is_nil(err)
+                end)
+                local source = history:get_replay_source()
+
+                root_stub:returns(project_b)
+                local messages, err = ChatHistory.collect_messages(source)
+
+                assert.is_nil(err)
+                local collected_messages = assert.not_nil(messages)
+                local message = assert.not_nil(collected_messages[1])
+                assert.equal("From project A", message.text)
+            end
+        )
+
+        it(
+            "keeps metadata and events in the captured project during async load",
+            function()
+                local session_id = "project-switch"
+                local function write(path, value)
+                    vim.fn.mkdir(vim.fn.fnamemodify(path, ":h"), "p")
+                    local file = assert.not_nil(io.open(path, "w"))
+                    file:write(vim.json.encode(value))
+                    file:close()
+                end
+
+                local root_stub = assert.not_nil(git_root_stub)
+                local project_a = ChatHistory.get_sessions_folder()
+                root_stub:returns("/test/project-b")
+                local project_b = ChatHistory.get_sessions_folder()
+                root_stub:returns(TEST_CWD)
+
+                write(vim.fs.joinpath(project_a, session_id .. ".meta.json"), {
+                    session_id = session_id,
+                    title = "Project A",
+                    created_at = 1704067200,
+                    updated_at = 1704067201,
+                })
+                write(vim.fs.joinpath(project_a, session_id .. ".jsonl"), {
+                    type = "message",
+                    message = {
+                        type = "user",
+                        text = "From project A",
+                        timestamp = 1704067200,
+                        provider_name = "test",
+                    },
+                })
+                write(vim.fs.joinpath(project_b, session_id .. ".jsonl"), {
+                    type = "message",
+                    message = {
+                        type = "user",
+                        text = "From project B",
+                        timestamp = 1704067200,
+                        provider_name = "test",
+                    },
+                })
+
+                local root_calls = 0
+                root_stub:invokes(function()
+                    root_calls = root_calls + 1
+                    return root_calls == 1 and TEST_CWD or "/test/project-b"
+                end)
+                local loaded = nil
+                local done = false
+                ChatHistory.load(session_id, function(history)
+                    loaded = history
+                    done = true
+                end)
+                vim.wait(1000, function()
+                    return done
+                end)
+
+                assert.equal(1, root_calls)
+                assert.is_not_nil(loaded)
+                --- @cast loaded agentic.ui.ChatHistory
+                assert.equal("Project A", loaded.title)
+                local first_message = assert.not_nil(loaded.messages[1])
+                assert.equal("From project A", first_message.text)
+
+                root_stub:returns("/test/project-b")
+                loaded:add_message({
+                    type = "user",
+                    text = "Written to project A",
+                    timestamp = 1704067202,
+                    provider_name = "test",
+                })
+                local project_a_events = vim.fn.readfile(
+                    vim.fs.joinpath(project_a, session_id .. ".jsonl")
+                )
+                assert.equal(2, #project_a_events)
+                local project_b_events = vim.fn.readfile(
+                    vim.fs.joinpath(project_b, session_id .. ".jsonl")
+                )
+                assert.equal(1, #project_b_events)
+            end
+        )
 
         it("coalesces streamed agent chunks when loading JSONL", function()
             local path = ChatHistory.get_jsonl_file_path("jsonl-load-test")
