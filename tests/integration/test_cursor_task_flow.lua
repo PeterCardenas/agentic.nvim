@@ -19,6 +19,9 @@ local function setup_child()
     ]])
 
     child.lua([[
+        local Config = require("agentic.config")
+        Config.session_restore.storage_path = vim.fn.tempname()
+        vim.fn.mkdir(Config.session_restore.storage_path, "p")
         require("agentic").setup({
             provider = "cursor-acp",
             acp_providers = {
@@ -31,11 +34,6 @@ local function setup_child()
                 },
             },
         })
-    ]])
-    child.lua([[
-        local Config = require("agentic.config")
-        Config.session_restore.storage_path = vim.fn.tempname()
-        vim.fn.mkdir(Config.session_restore.storage_path, "p")
     ]])
 end
 

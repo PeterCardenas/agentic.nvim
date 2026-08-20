@@ -19,11 +19,11 @@ local function setup_child()
         package.loaded["agentic.acp.acp_health"] = ACPHealthMock
     ]])
 
-    child.lua([[ require("agentic").setup() ]])
     child.lua([[
         local Config = require("agentic.config")
         Config.session_restore.storage_path = vim.fn.tempname()
         vim.fn.mkdir(Config.session_restore.storage_path, "p")
+        require("agentic").setup()
     ]])
 end
 
