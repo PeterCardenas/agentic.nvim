@@ -89,6 +89,7 @@ local function calculate_dynamic_height(winid, max_height, position, min_height)
 
     local text_height = vim.api.nvim_win_text_height(winid, {
         start_row = 0,
+        start_vcol = 0,
     }).all
     local padding = get_dynamic_window_padding(position)
 

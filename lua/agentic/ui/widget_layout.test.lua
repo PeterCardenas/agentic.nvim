@@ -97,6 +97,60 @@ describe("WidgetLayout", function()
     end)
 
     describe("calculate_input_max_height", function()
+        --- @type integer?
+        local bufnr
+        --- @type integer?
+        local winid
+
+        after_each(function()
+            if winid and vim.api.nvim_win_is_valid(winid) then
+                vim.api.nvim_win_close(winid, true)
+            end
+            if bufnr and vim.api.nvim_buf_is_valid(bufnr) then
+                vim.api.nvim_buf_delete(bufnr, { force = true })
+            end
+            winid = nil
+            bufnr = nil
+        end)
+
+        it(
+            "resizes a scrolled wrapped prompt using its full text height",
+            function()
+                bufnr = vim.api.nvim_create_buf(false, true)
+                winid = vim.api.nvim_open_win(bufnr, true, {
+                    relative = "editor",
+                    width = 20,
+                    height = 5,
+                    row = 0,
+                    col = 0,
+                })
+                vim.wo[winid].wrap = true
+                vim.wo[winid].smoothscroll = true
+                vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {
+                    string.rep("x", 100),
+                })
+                vim.api.nvim_win_call(winid, function()
+                    vim.fn.winrestview({ topline = 1, skipcol = 20 })
+                end)
+                local view = vim.api.nvim_win_call(winid, function()
+                    return vim.fn.winsaveview()
+                end)
+                assert.is_true(view.skipcol > 0)
+
+                local expected_height = vim.api.nvim_win_text_height(winid, {
+                    start_row = 0,
+                    start_vcol = 0,
+                }).all + 1
+                local win_nrs = { input = winid }
+                WidgetLayout.resize_input(win_nrs, "left", 10)
+
+                assert.equal(
+                    expected_height,
+                    vim.api.nvim_win_get_height(winid)
+                )
+            end
+        )
+
         it("caps prompt height at sixty percent of Vim height", function()
             local max_height = WidgetLayout.calculate_input_max_height(3)
             local expected = math.max(3, math.floor(vim.o.lines * 0.6))
