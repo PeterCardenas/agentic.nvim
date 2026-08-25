@@ -216,7 +216,7 @@ describe("agentic.SessionManager", function()
             }
         end
 
-        local function make_session(events)
+        local function make_session(events, is_generating)
             local write_message_chunk = spy.new(function(_writer, update)
                 table.insert(
                     events,
@@ -231,19 +231,66 @@ describe("agentic.SessionManager", function()
                 table.insert(events, "history:" .. msg.type .. ":" .. msg.text)
             end)
             local render_header = spy.new(function() end)
+            local start_animation = spy.new(function() end)
 
             local session = {
+                is_generating = is_generating or false,
                 agent = { provider_config = { name = "test-provider" } },
                 chat_history = { append_agent_text = append_agent_text },
                 message_writer = {
                     write_message_chunk = write_message_chunk,
                 },
-                status_animation = { start = function() end },
+                status_animation = { start = start_animation },
                 widget = { render_header = render_header },
             }
             setmetatable(session, { __index = SessionManager })
-            return session, write_message_chunk, append_agent_text
+            return session,
+                write_message_chunk,
+                append_agent_text,
+                start_animation
         end
+
+        it("renders unsolicited chunks without starting animation", function()
+            local events = {}
+            local session, _, _, start_animation = make_session(events, false)
+            local schedule_stub = spy.stub(vim, "schedule")
+            schedule_stub:invokes(function(callback)
+                callback()
+            end)
+
+            SessionManager._on_session_update(
+                session,
+                message_update("agent_message_chunk", "late answer")
+            )
+            SessionManager._on_session_update(
+                session,
+                message_update("agent_thought_chunk", "late thought")
+            )
+
+            assert.spy(start_animation).was.called(0)
+            schedule_stub:revert()
+        end)
+
+        it("starts animation for chunks during the foreground turn", function()
+            local events = {}
+            local session, _, _, start_animation = make_session(events, true)
+            local schedule_stub = spy.stub(vim, "schedule")
+            schedule_stub:invokes(function(callback)
+                callback()
+            end)
+
+            SessionManager._on_session_update(
+                session,
+                message_update("agent_message_chunk", "answer")
+            )
+            SessionManager._on_session_update(
+                session,
+                message_update("agent_thought_chunk", "thinking")
+            )
+
+            assert.spy(start_animation).was.called(2)
+            schedule_stub:revert()
+        end)
 
         it(
             "coalesces adjacent message chunks before a non-text update",

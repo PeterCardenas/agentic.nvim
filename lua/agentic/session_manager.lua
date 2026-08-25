@@ -150,6 +150,12 @@ end
 local SessionManager = {}
 SessionManager.__index = SessionManager
 
+local function start_animation_if_owned(session, mode)
+    if session.is_generating or session._is_creating_session then
+        session.status_animation:start(mode)
+    end
+end
+
 --- Generate the welcome header for a new session
 --- @param provider_name string
 --- @param session_id string|nil
@@ -465,11 +471,11 @@ function SessionManager:_on_session_update(update)
                 })
             end
         end
-        self.status_animation:start("generating")
+        start_animation_if_owned(self, "generating")
     elseif update.sessionUpdate == "agent_thought_chunk" then
         --- @cast update agentic.acp.AgentThoughtChunk
         self.message_writer:write_message_chunk(update)
-        self.status_animation:start("thinking")
+        start_animation_if_owned(self, "thinking")
 
         local content_text = update.content and update.content.text
         if content_text then
@@ -743,7 +749,7 @@ function SessionManager:_handle_cursor_ask_question(ctx)
             not self.permission_manager.current_request
             and #self.permission_manager.queue == 0
         then
-            self.status_animation:start("generating")
+            start_animation_if_owned(self, "generating")
         end
     end
 
@@ -925,7 +931,7 @@ function SessionManager:_handle_cursor_create_plan(ctx)
             not self.permission_manager.current_request
             and #self.permission_manager.queue == 0
         then
-            self.status_animation:start("generating")
+            start_animation_if_owned(self, "generating")
         end
     end
 
@@ -1013,7 +1019,7 @@ function SessionManager:_on_tool_call_update(tool_call_update)
         not self.permission_manager.current_request
         and #self.permission_manager.queue == 0
     then
-        self.status_animation:start("generating")
+        start_animation_if_owned(self, "generating")
     end
 end
 
@@ -1764,7 +1770,7 @@ function SessionManager:new_session(opts)
             }
 
             self.message_writer:write_tool_call_block(tool_call)
-            self.status_animation:start("generating")
+            start_animation_if_owned(self, "generating")
             self.chat_history:add_message(tool_msg)
         end,
 
@@ -1812,7 +1818,7 @@ function SessionManager:new_session(opts)
                     not self.permission_manager.current_request
                     and #self.permission_manager.queue == 0
                 then
-                    self.status_animation:start("generating")
+                    start_animation_if_owned(self, "generating")
                 end
             end
 
