@@ -2177,18 +2177,16 @@ function SessionManager:uses_provider(provider_name)
         )
 end
 
+--- @return boolean has_user_message
+function SessionManager:has_user_message()
+    return self.chat_history ~= nil
+        and ChatHistory.has_user_messages(self.chat_history)
+end
+
+--- Compatibility alias; the historical name now means has a user/nonblank message.
 ---@return boolean
 function SessionManager:has_messages()
-    if self.chat_history == nil then
-        return false
-    end
-    if
-        self.chat_history.message_count
-        and self.chat_history.message_count > 0
-    then
-        return true
-    end
-    return self.chat_history.messages ~= nil and #self.chat_history.messages > 0
+    return self:has_user_message()
 end
 
 ---@param provider_name agentic.UserConfig.ProviderName
@@ -2202,7 +2200,7 @@ function SessionManager:get_new_session_reuse_reason(provider_name)
         return "creating"
     end
 
-    if self.session_id ~= nil and not SessionManager.has_messages(self) then
+    if self.session_id ~= nil and not SessionManager.has_user_message(self) then
         return "blank"
     end
 
@@ -2324,6 +2322,7 @@ function SessionManager:restore_from_history(history, opts)
         or ChatHistory.get_sessions_folder(self.tab_page_id)
     self.chat_history = ChatHistory:new(sessions_folder)
     self.chat_history.title = history.title
+    self.chat_history.has_user_message = ChatHistory.has_user_messages(history)
 
     -- In continue mode, remember original identity to restore after new_session
     local original_session_id = opts.replace_session and history.session_id
@@ -2381,7 +2380,6 @@ function SessionManager:restore_from_history(history, opts)
             then
                 self.chat_history.message_count = history.message_count
             end
-
             self._restoring = false
             SessionRestore.replay_messages_from_source(
                 self.message_writer,

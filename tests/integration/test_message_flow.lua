@@ -361,3 +361,89 @@ describe("Tool call - enriched argument preserved in chat history", function()
         end
     )
 end)
+
+--- Return persistence state from the child Neovim process.
+local function get_persistence_state()
+    return child.lua([[
+        local ChatHistory = require("agentic.ui.chat_history")
+        local folder = ChatHistory.get_sessions_folder()
+        local jsonl = ChatHistory.get_jsonl_file_path("mock-session-001")
+        local metadata = ChatHistory.get_metadata_file_path("mock-session-001")
+        local listed = {}
+        ChatHistory.list_sessions(function(sessions)
+            for _, session in ipairs(sessions) do
+                table.insert(listed, session.session_id)
+            end
+        end, folder)
+        local records = {}
+        local file = io.open(jsonl, "r")
+        if file then
+            for line in file:lines() do
+                table.insert(records, vim.json.decode(line))
+            end
+            file:close()
+        end
+        return {
+            jsonl = vim.uv.fs_stat(jsonl) ~= nil,
+            metadata = vim.uv.fs_stat(metadata) ~= nil,
+            listed = listed,
+            records = records,
+        }
+    ]])
+end
+
+describe("ChatHistory persistence lifecycle", function()
+    before_each(function()
+        setup_child()
+    end)
+
+    after_each(function()
+        child.lua([[
+            local Config = require("agentic.config")
+            vim.fn.delete(Config.session_restore.storage_path, "rf")
+        ]])
+        child.stop()
+    end)
+
+    it(
+        "does not persist a newly created session or agent-only event",
+        function()
+            open_widget_and_wait()
+
+            local initial = get_persistence_state()
+            assert.is_false(initial.jsonl)
+            assert.is_false(initial.metadata)
+            assert.equal(0, #initial.listed)
+
+            inject_tool_call("tool-before-prompt", "execute", "Terminal")
+            local after_event = get_persistence_state()
+            assert.is_false(after_event.jsonl)
+            assert.is_false(after_event.metadata)
+            assert.equal(0, #after_event.listed)
+        end
+    )
+
+    it("persists the user record before response and turn records", function()
+        open_widget_and_wait()
+        inject_tool_call("tool-before-prompt", "execute", "Terminal")
+        submit_prompt("hello")
+        complete_prompt()
+        vim.uv.sleep(100)
+        child.lua([[ vim.cmd("redraw") ]])
+        child.api.nvim_eval("1")
+
+        local state = get_persistence_state()
+        assert.is_true(state.jsonl)
+        assert.is_true(state.metadata)
+        assert.equal(1, #state.listed)
+        assert.equal(SESSION_ID, state.listed[1])
+        assert.equal(3, #state.records)
+        assert.equal("message", state.records[1].type)
+        assert.equal("tool_call", state.records[1].message.type)
+        assert.equal("message", state.records[2].type)
+        assert.equal("user", state.records[2].message.type)
+        assert.equal("hello", state.records[2].message.text)
+        assert.equal("message", state.records[3].type)
+        assert.equal("turn_end", state.records[3].message.type)
+    end)
+end)

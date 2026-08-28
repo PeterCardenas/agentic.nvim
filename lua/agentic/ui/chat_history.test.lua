@@ -183,6 +183,7 @@ describe("ChatHistory", function()
                     timestamp = os.time(),
                     provider_name = "test-provider",
                 })
+                history:save()
 
                 local later_path =
                     vim.fs.joinpath(temp_dir, ChatHistory.get_project_folder())
@@ -307,6 +308,12 @@ describe("ChatHistory", function()
             local history = ChatHistory:new()
             history.session_id = "tool-jsonl"
             history:add_message({
+                type = "user",
+                text = "run tool",
+                timestamp = 1704067200,
+                provider_name = "test-provider",
+            })
+            history:add_message({
                 type = "tool_call",
                 tool_call_id = "tc-large",
                 status = "completed",
@@ -325,8 +332,8 @@ describe("ChatHistory", function()
 
             local records =
                 vim.fn.readfile(ChatHistory.get_jsonl_file_path("tool-jsonl"))
-            local message_record = vim.json.decode(records[1])
-            local update_record = vim.json.decode(records[2])
+            local message_record = vim.json.decode(records[2])
+            local update_record = vim.json.decode(records[3])
             assert.is_true(#message_record.message.body <= 4)
             assert.is_true(#update_record.update.body <= 4)
         end)
@@ -334,11 +341,94 @@ describe("ChatHistory", function()
 
     describe("save and load", function()
         it(
+            "does not persist a session until the user sends a message",
+            function()
+                local history = ChatHistory:new()
+                history.session_id = "agent-only"
+                history:append_agent_text({
+                    type = "agent",
+                    text = "unsolicited",
+                    provider_name = "test-provider",
+                })
+
+                --- @type string|nil
+                local save_error = "not called"
+                history:save(function(err)
+                    save_error = err
+                end)
+
+                assert.is_nil(save_error)
+                assert.is_nil(
+                    vim.uv.fs_stat(
+                        ChatHistory.get_jsonl_file_path("agent-only")
+                    )
+                )
+                assert.is_nil(
+                    vim.uv.fs_stat(
+                        ChatHistory.get_metadata_file_path("agent-only")
+                    )
+                )
+            end
+        )
+
+        it(
+            "uses an empty replay source before the user sends a message",
+            function()
+                local history = ChatHistory:new()
+                history.session_id = "blank-replay"
+                history:append_agent_text({
+                    type = "agent",
+                    text = "unsolicited",
+                    provider_name = "test-provider",
+                })
+
+                assert.same({
+                    kind = "messages",
+                    messages = {},
+                }, history:get_replay_source())
+            end
+        )
+
+        it("flushes earlier events when the user sends a message", function()
+            local history = ChatHistory:new()
+            history.session_id = "user-started"
+            history:append_agent_text({
+                type = "agent",
+                text = "unsolicited",
+                provider_name = "test-provider",
+            })
+            history:add_message({
+                type = "user",
+                text = "hello",
+                timestamp = 1704067200,
+                provider_name = "test-provider",
+            })
+            history:save()
+
+            local records =
+                vim.fn.readfile(ChatHistory.get_jsonl_file_path("user-started"))
+            assert.equal(2, #records)
+            assert.equal("agent", vim.json.decode(records[1]).message.type)
+            assert.equal("user", vim.json.decode(records[2]).message.type)
+            assert.is_not_nil(
+                vim.uv.fs_stat(
+                    ChatHistory.get_metadata_file_path("user-started")
+                )
+            )
+        end)
+
+        it(
             "writes metadata separately from full-fidelity JSONL events",
             function()
                 local history = ChatHistory:new()
                 history.session_id = "split-save"
                 history.title = "Split save"
+                history:add_message({
+                    type = "user",
+                    text = "run tool",
+                    timestamp = 1704067200,
+                    provider_name = "test-provider",
+                })
                 history:add_message({
                     type = "tool_call",
                     tool_call_id = "tool-1",
@@ -365,13 +455,13 @@ describe("ChatHistory", function()
 
                 assert.equal("split-save", metadata.session_id)
                 assert.equal("Split save", metadata.title)
-                assert.equal(2, #records)
-                assert.equal("message", vim.json.decode(records[1]).type)
+                assert.equal(3, #records)
+                assert.equal("message", vim.json.decode(records[2]).type)
                 assert.equal(
                     "tool_call_update",
-                    vim.json.decode(records[2]).type
+                    vim.json.decode(records[3]).type
                 )
-                assert.equal(3, #vim.json.decode(records[1]).message.body)
+                assert.equal(3, #vim.json.decode(records[2]).message.body)
             end
         )
 
@@ -381,6 +471,12 @@ describe("ChatHistory", function()
                 local history = ChatHistory:new()
                 history.session_id = "split-load"
                 history.title = "Split load"
+                history:add_message({
+                    type = "user",
+                    text = "run tool",
+                    timestamp = 1704067200,
+                    provider_name = "test-provider",
+                })
                 history:add_message({
                     type = "tool_call",
                     tool_call_id = "tool-2",
@@ -400,8 +496,8 @@ describe("ChatHistory", function()
                 assert.is_not_nil(loaded)
                 --- @cast loaded agentic.ui.ChatHistory
                 assert.equal("Split load", loaded.title)
-                assert.equal(1, #loaded.messages)
-                local tool_call = assert.not_nil(loaded.messages[1])
+                assert.equal(2, #loaded.messages)
+                local tool_call = assert.not_nil(loaded.messages[2])
                 assert.equal("completed", tool_call.status)
                 assert.equal(2, #tool_call.body)
             end
@@ -571,6 +667,7 @@ describe("ChatHistory", function()
                 timestamp = 1704067200,
                 provider_name = "test-provider",
             })
+            history:save()
 
             assert.is_not_nil(
                 vim.uv.fs_stat(ChatHistory.get_jsonl_file_path("ordered-save"))
@@ -588,6 +685,268 @@ describe("ChatHistory", function()
                 )
             )
         end)
+
+        it(
+            "keeps later events queued after the first user append fails",
+            function()
+                local original_append_record = ChatHistory._append_record
+                local append_attempt = 0
+                local append_stub = spy.stub(ChatHistory, "_append_record")
+                append_stub:invokes(function(history, record)
+                    append_attempt = append_attempt + 1
+                    if append_attempt == 2 then
+                        return false, "append failed"
+                    end
+                    return original_append_record(history, record)
+                end)
+
+                local history = ChatHistory:new()
+                history.session_id = "failed-first-user"
+                vim.fn.delete(
+                    ChatHistory.get_jsonl_file_path("failed-first-user")
+                )
+                vim.fn.delete(
+                    ChatHistory.get_metadata_file_path("failed-first-user")
+                )
+                history:add_message({
+                    type = "user",
+                    text = "message",
+                    timestamp = 1704067200,
+                    provider_name = "test-provider",
+                })
+                history:append_agent_text({
+                    type = "agent",
+                    text = "response",
+                    provider_name = "test-provider",
+                })
+
+                assert.equal(1, #history._pending_records)
+                assert.equal(
+                    "agent",
+                    assert.not_nil(history._pending_records[1]).message.type
+                )
+                assert.is_nil(
+                    vim.uv.fs_stat(
+                        ChatHistory.get_metadata_file_path("failed-first-user")
+                    )
+                )
+
+                append_stub:revert()
+                --- @type string|nil
+                local save_err = "not called"
+                history:save(function(err)
+                    save_err = err
+                end)
+
+                assert.is_nil(save_err)
+                assert.equal(0, #history._pending_records)
+                assert.is_nil(history._event_write_error)
+                local records = vim.fn.readfile(
+                    ChatHistory.get_jsonl_file_path("failed-first-user")
+                )
+                assert.equal(2, #records)
+                assert.equal("user", vim.json.decode(records[1]).message.type)
+                assert.equal("agent", vim.json.decode(records[2]).message.type)
+                assert.is_not_nil(
+                    vim.uv.fs_stat(
+                        ChatHistory.get_metadata_file_path("failed-first-user")
+                    )
+                )
+            end
+        )
+
+        it(
+            "retains pending records when the real append write fails",
+            function()
+                local open_stub = spy.stub(io, "open")
+                open_stub:invokes(function(path, mode)
+                    if mode == "a" then
+                        return {
+                            write = function()
+                                return nil, "simulated write failure"
+                            end,
+                            close = function()
+                                return true
+                            end,
+                        }
+                    end
+                    return open_stub._original_fn(path, mode)
+                end)
+
+                local history = ChatHistory:new()
+                history.session_id = "real-write-failure"
+                history:add_message({
+                    type = "user",
+                    text = "message",
+                    timestamp = 1704067200,
+                    provider_name = "test-provider",
+                })
+
+                local save_err = nil
+                history:save(function(err)
+                    save_err = err
+                end)
+
+                assert.equal("write failed: simulated write failure", save_err)
+                assert.equal(1, #history._pending_records)
+                assert.is_not_nil(history._event_write_error)
+                assert.is_nil(
+                    vim.uv.fs_stat(
+                        ChatHistory.get_metadata_file_path("real-write-failure")
+                    )
+                )
+                open_stub:revert()
+
+                history:save(function(err)
+                    save_err = err
+                end)
+                assert.is_nil(save_err)
+                assert.equal(0, #history._pending_records)
+                assert.is_nil(history._event_write_error)
+                local records = vim.fn.readfile(
+                    ChatHistory.get_jsonl_file_path("real-write-failure")
+                )
+                assert.equal(1, #records)
+                assert.equal(
+                    "message",
+                    vim.json.decode(records[1]).message.text
+                )
+                assert.is_not_nil(
+                    vim.uv.fs_stat(
+                        ChatHistory.get_metadata_file_path("real-write-failure")
+                    )
+                )
+            end
+        )
+
+        it(
+            "does not mistake an identical preexisting tail for a committed append",
+            function()
+                local history = ChatHistory:new()
+                history.session_id = "preexisting-close-failure"
+                local path = ChatHistory.get_jsonl_file_path(history.session_id)
+                vim.fn.mkdir(vim.fn.fnamemodify(path, ":h"), "p")
+                local record = vim.json.encode({
+                    type = "message",
+                    message = {
+                        type = "user",
+                        text = "message",
+                        timestamp = 1704067200,
+                        provider_name = "test-provider",
+                    },
+                })
+                local existing = assert.not_nil(io.open(path, "w"))
+                existing:write(record)
+                existing:close()
+
+                local open_stub = spy.stub(io, "open")
+                open_stub:invokes(function(open_path, mode)
+                    if open_path == path and mode == "a" then
+                        local file = open_stub._original_fn(open_path, mode)
+                        return {
+                            write = function(_, content)
+                                return file:write(content)
+                            end,
+                            close = function()
+                                return nil, "simulated close failure"
+                            end,
+                        }
+                    end
+                    return open_stub._original_fn(open_path, mode)
+                end)
+
+                history:add_message({
+                    type = "user",
+                    text = "message",
+                    timestamp = 1704067200,
+                    provider_name = "test-provider",
+                })
+                local save_err = nil
+                history:save(function(err)
+                    save_err = err
+                end)
+                assert.truthy(save_err)
+                assert.equal(1, #history._pending_records)
+                open_stub:revert()
+
+                history:save(function(err)
+                    save_err = err
+                end)
+                assert.is_nil(save_err)
+                local records = vim.fn.readfile(path)
+                assert.equal(2, #records)
+                assert.equal(record, records[1])
+                assert.equal(record, records[2])
+            end
+        )
+
+        it(
+            "recognizes a committed append at the baseline offset when close reports failure",
+            function()
+                local open_stub = spy.stub(io, "open")
+                open_stub:invokes(function(path, mode)
+                    local file = open_stub._original_fn(path, mode)
+                    if mode == "a" and file then
+                        return {
+                            write = function(_, content)
+                                return file:write(content)
+                            end,
+                            close = function()
+                                file:close()
+                                return nil, "simulated close failure"
+                            end,
+                        }
+                    end
+                    return file
+                end)
+
+                local history = ChatHistory:new()
+                history.session_id = "real-close-failure"
+                local path = ChatHistory.get_jsonl_file_path(history.session_id)
+                vim.fn.mkdir(vim.fn.fnamemodify(path, ":h"), "p")
+                local existing = assert.not_nil(io.open(path, "w"))
+                existing:write(vim.json.encode({
+                    type = "message",
+                    message = { type = "agent", text = "prior" },
+                    timestamp = 1,
+                    provider_name = "test-provider",
+                }))
+                existing:close()
+                history:add_message({
+                    type = "user",
+                    text = "message",
+                    timestamp = 1704067200,
+                    provider_name = "test-provider",
+                })
+                local save_err = nil
+                history:save(function(err)
+                    save_err = err
+                end)
+                assert.is_nil(save_err)
+                assert.equal(0, #history._pending_records)
+                assert.is_nil(history._event_write_error)
+                assert.is_not_nil(
+                    vim.uv.fs_stat(
+                        ChatHistory.get_metadata_file_path("real-close-failure")
+                    )
+                )
+                open_stub:revert()
+
+                history:save(function(err)
+                    save_err = err
+                end)
+                assert.is_nil(save_err)
+                local records = vim.fn.readfile(
+                    ChatHistory.get_jsonl_file_path("real-close-failure")
+                )
+                assert.equal(2, #records)
+                assert.equal("prior", vim.json.decode(records[1]).message.text)
+                assert.equal(
+                    "message",
+                    vim.json.decode(records[2]).message.text
+                )
+            end
+        )
 
         it("does not write metadata when event append fails", function()
             local append_stub = spy.stub(ChatHistory, "_append_record")
@@ -1287,6 +1646,76 @@ describe("ChatHistory", function()
             end)
 
             assert.equal(0, #sessions)
+        end)
+
+        it(
+            "retries a failed replay flush without duplicating queued records",
+            function()
+                local source_id = "replay-source"
+                vim.fn.mkdir(ChatHistory.get_sessions_folder(), "p")
+                local source_path = ChatHistory.get_jsonl_file_path(source_id)
+                local source = assert.not_nil(io.open(source_path, "w"))
+                source:write(vim.json.encode({
+                    type = "message",
+                    message = { type = "user", text = "hello" },
+                }) .. "\n")
+                source:write(vim.json.encode({
+                    type = "message",
+                    message = { type = "agent", text = "world" },
+                }) .. "\n")
+                source:close()
+
+                local history = ChatHistory:new()
+                history.session_id = "replay-destination"
+                local original_append = history._append_record
+                local append = spy.stub(history, "_append_record")
+                append:invokes(function(self, record)
+                    if record.message and record.message.type == "agent" then
+                        return false, "write failed"
+                    end
+                    return original_append(self, record)
+                end)
+                --- @type agentic.ui.ChatHistory.ReplaySource
+                local source_spec = { kind = "jsonl", session_id = source_id }
+                local ok = history:append_replay_source(source_spec)
+                assert.is_false(ok)
+                append:revert()
+
+                ok = history:append_replay_source(source_spec)
+                assert.is_true(ok)
+                assert.equal(0, #history._pending_records)
+                local records = vim.fn.readfile(
+                    ChatHistory.get_jsonl_file_path("replay-destination")
+                )
+                assert.equal(2, #records)
+                assert.equal("user", vim.json.decode(records[1]).message.type)
+                assert.equal("agent", vim.json.decode(records[2]).message.type)
+            end
+        )
+
+        it("writes queued event records before metadata", function()
+            local history = ChatHistory:new()
+            history.session_id = "metadata-order"
+            history.has_user_message = true
+            table.insert(history._pending_records, {
+                type = "message",
+                message = { type = "user", text = "hello" },
+            })
+            local calls = {}
+            local append = spy.stub(history, "_append_record")
+            local meta = spy.stub(history, "_write_meta_record")
+            append:invokes(function()
+                table.insert(calls, "event")
+                return true, nil
+            end)
+            meta:invokes(function()
+                table.insert(calls, "metadata")
+                return true, nil
+            end)
+            history:save(function() end)
+            append:revert()
+            meta:revert()
+            assert.same(calls, { "event", "metadata" })
         end)
 
         it("ignores legacy split files at runtime", function()

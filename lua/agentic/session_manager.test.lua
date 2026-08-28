@@ -770,6 +770,46 @@ describe("agentic.SessionManager", function()
             assert.truthy(msg:match("[Gg]enerating"))
         end)
 
+        it("switches providers before the user sends a message", function()
+            local AgentInstance = require("agentic.acp.agent_instance")
+            local ChatHistory = require("agentic.ui.chat_history")
+            local mock_new_agent = {
+                provider_config = { name = "New Provider" },
+                create_session = spy.new(function() end),
+            }
+            get_instance_stub = spy.stub(AgentInstance, "get_instance")
+            get_instance_stub:invokes(function(_provider, on_ready)
+                on_ready(mock_new_agent)
+                return mock_new_agent
+            end)
+
+            local history = ChatHistory:new()
+            history.session_id = "blank-session"
+            history:append_agent_text({
+                type = "agent",
+                text = "unsolicited",
+                provider_name = "Old Provider",
+            })
+            local session = {
+                is_generating = false,
+                session_id = "blank-session",
+                agent = {
+                    cancel_session = spy.new(function() end),
+                    provider_config = { name = "Old Provider" },
+                },
+                permission_manager = { clear = function() end },
+                todo_list = { clear = function() end },
+                chat_history = history,
+                new_session = spy.new(function() end),
+            }
+
+            SessionManager.switch_provider(session, "new-provider")
+
+            assert.spy(notify_stub).was.called(0)
+            assert.spy(get_instance_stub).was.called(1)
+            assert.spy(session.new_session).was.called(1)
+        end)
+
         it(
             "soft cancels old session without clearing widget/history",
             function()
@@ -904,6 +944,7 @@ describe("agentic.SessionManager", function()
 
                 assert.equal(0, #session.chat_history.messages)
                 assert.equal(1, session.chat_history.message_count)
+                assert.is_true(session.chat_history.has_user_message)
                 assert.equal("new", session.chat_history.session_id)
                 assert.equal(new_created_at, session.chat_history.created_at)
                 assert.is_true(
@@ -1043,6 +1084,7 @@ describe("agentic.SessionManager", function()
                     timestamp = 1704067200,
                     provider_name = "Old",
                 })
+                old_history:save()
 
                 local AgentInstance = require("agentic.acp.agent_instance")
                 local mock_new_agent = {
@@ -1122,6 +1164,7 @@ describe("agentic.SessionManager", function()
                     timestamp = 1704067200,
                     provider_name = "Old",
                 })
+                old_history:save()
 
                 local AgentInstance = require("agentic.acp.agent_instance")
                 local mock_new_agent = {
@@ -1260,7 +1303,32 @@ describe("agentic.SessionManager", function()
     end)
 
     describe("get_new_session_reuse_reason", function()
-        it("uses message_count when live messages are not retained", function()
+        it(
+            "uses the user marker when live messages are not retained",
+            function()
+                local session = {
+                    session_id = "session-1",
+                    agent = {
+                        provider_config = Config.acp_providers["claude-acp"],
+                    },
+                    chat_history = {
+                        messages = {},
+                        message_count = 1,
+                        has_user_message = true,
+                    },
+                    _is_creating_session = false,
+                }
+
+                assert.is_nil(
+                    SessionManager.get_new_session_reuse_reason(
+                        session,
+                        "claude-acp"
+                    )
+                )
+            end
+        )
+
+        it("reuses sessions that only received agent messages", function()
             local session = {
                 session_id = "session-1",
                 agent = {
@@ -1269,11 +1337,13 @@ describe("agentic.SessionManager", function()
                 chat_history = {
                     messages = {},
                     message_count = 1,
+                    has_user_message = false,
                 },
                 _is_creating_session = false,
             }
 
-            assert.is_nil(
+            assert.equal(
+                "blank",
                 SessionManager.get_new_session_reuse_reason(
                     session,
                     "claude-acp"
@@ -1518,6 +1588,82 @@ describe("agentic.SessionManager", function()
         )
 
         it(
+            "persists the destination marker for an empty custom continue source",
+            function()
+                local ChatHistory = require("agentic.ui.chat_history")
+                local loaded = create_loaded_history()
+                local custom_history = setmetatable({
+                    has_user_message = true,
+                    get_replay_source = function()
+                        return { kind = "messages", messages = {} }
+                    end,
+                }, { __index = loaded })
+                local session = {
+                    _restoring = false,
+                    _replace_session = false,
+                    _history_replay_source = nil,
+                    _history_to_send = nil,
+                    _is_first_message = true,
+                    chat_history = ChatHistory:new(),
+                    message_writer = {},
+                    new_session = function(self, opts)
+                        self.chat_history.session_id = "custom-continue"
+                        opts.on_created()
+                    end,
+                }
+                setmetatable(session, { __index = SessionManager })
+                SessionManager.restore_from_history(session, custom_history, {
+                    replace_session = true,
+                })
+                assert.is_true(session.chat_history.has_user_message)
+                assert.is_not_nil(
+                    vim.uv.fs_stat(
+                        ChatHistory.get_metadata_file_path(
+                            "old-restore-session"
+                        )
+                    )
+                )
+            end
+        )
+
+        it(
+            "persists the destination marker for an empty custom fork source",
+            function()
+                local ChatHistory = require("agentic.ui.chat_history")
+                local loaded = create_loaded_history()
+                local custom_history = setmetatable({
+                    has_user_message = true,
+                    get_replay_source = function()
+                        return { kind = "messages", messages = {} }
+                    end,
+                }, { __index = loaded })
+                local session = {
+                    _restoring = false,
+                    _replace_session = false,
+                    _history_replay_source = nil,
+                    _history_to_send = nil,
+                    _is_first_message = true,
+                    chat_history = ChatHistory:new(),
+                    message_writer = {},
+                    new_session = function(self, opts)
+                        self.chat_history.session_id = "custom-fork"
+                        opts.on_created()
+                    end,
+                }
+                setmetatable(session, { __index = SessionManager })
+                SessionManager.restore_from_history(session, custom_history, {
+                    replace_session = false,
+                })
+                assert.is_true(session.chat_history.has_user_message)
+                assert.is_not_nil(
+                    vim.uv.fs_stat(
+                        ChatHistory.get_metadata_file_path("custom-fork")
+                    )
+                )
+            end
+        )
+
+        it(
             "keeps continue-mode restored live history non-blank without retaining transcript",
             function()
                 local ChatHistory = require("agentic.ui.chat_history")
@@ -1551,7 +1697,8 @@ describe("agentic.SessionManager", function()
                     loaded.message_count,
                     session.chat_history.message_count
                 )
-                assert.is_true(SessionManager.has_messages(session))
+                assert.is_true(session.chat_history.has_user_message)
+                assert.is_true(SessionManager.has_user_message(session))
             end
         )
 

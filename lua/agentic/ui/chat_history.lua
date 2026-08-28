@@ -62,12 +62,14 @@ local ToolCallBody = require("agentic.utils.tool_call_body")
 --- @field updated_at integer
 --- @field messages agentic.ui.ChatHistory.Message[] Compatibility field; live sessions keep this empty.
 --- @field message_count integer
+--- @field has_user_message boolean
 --- @field title string
 --- @field _pending_records table[]
 --- @field _sessions_folder string
 --- @field _meta_written boolean
 --- @field _loaded_from_disk boolean
 --- @field _event_write_error? string
+--- @field _replay_progress table<string, integer>
 local ChatHistory = {}
 ChatHistory.__index = ChatHistory
 
@@ -96,12 +98,14 @@ function ChatHistory:new(sessions_folder)
         updated_at = now,
         messages = {},
         message_count = 0,
+        has_user_message = false,
         title = "",
         _pending_records = {},
         _sessions_folder = sessions_folder or ChatHistory.get_sessions_folder(),
         _meta_written = false,
         _loaded_from_disk = false,
         _event_write_error = nil,
+        _replay_progress = {},
     }, self)
     return instance
 end
@@ -115,6 +119,19 @@ local function get_valid_tab_cwd(tab_page_id)
         return vim.fn.getcwd(winid, tab_number)
     end
     return vim.fn.getcwd()
+end
+
+--- @return boolean
+function ChatHistory:has_user_messages()
+    if self.has_user_message then
+        return true
+    end
+    for _, message in ipairs(self.messages or {}) do
+        if message.type == "user" then
+            return true
+        end
+    end
+    return false
 end
 
 --- @param tab_page_id integer|nil
@@ -429,17 +446,48 @@ local function append_line_sync(path, line)
         end
     end
 
+    local baseline_stat = vim.uv.fs_stat(path)
+    local baseline_size = baseline_stat and baseline_stat.size or 0
+    local expected = baseline_size == 0 and line or "\n" .. line
+
     local file, open_err = io.open(path, "a")
     if not file then
         return false, tostring(open_err)
     end
 
-    local stat = vim.uv.fs_stat(path)
-    if stat and stat.size > 0 then
-        file:write("\n")
+    if baseline_size > 0 then
+        local ok, err = file:write("\n")
+        if not ok then
+            file:close()
+            return false, "write failed: " .. tostring(err or "unknown error")
+        end
     end
-    file:write(line)
-    file:close()
+
+    local ok, err = file:write(line)
+    if not ok then
+        file:close()
+        return false, "write failed: " .. tostring(err or "unknown error")
+    end
+
+    local close_ok, close_err = file:close()
+    if not close_ok then
+        local committed_file = io.open(path, "r")
+        if committed_file then
+            local final_stat = vim.uv.fs_stat(path)
+            local committed = final_stat
+                and final_stat.size == baseline_size + #expected
+            if committed and committed_file:seek("set", baseline_size) then
+                committed = committed_file:read(#expected) == expected
+            else
+                committed = false
+            end
+            committed_file:close()
+            if committed then
+                return true, nil
+            end
+        end
+        return false, "close failed: " .. tostring(close_err or "unknown error")
+    end
     return true, nil
 end
 
@@ -448,15 +496,12 @@ end
 --- @return string|nil err
 function ChatHistory:_append_record(record)
     if not self.session_id then
-        table.insert(self._pending_records, record)
-        return true, nil
+        return false, "No session_id set"
     end
-
     local ok, encoded = pcall(vim.json.encode, record)
     if not ok then
         return false, "JSON encoding error"
     end
-
     return append_line_sync(self:_get_jsonl_file_path(self.session_id), encoded)
 end
 
@@ -478,7 +523,7 @@ end
 --- @return string|nil err
 function ChatHistory:_write_meta_record()
     if not self.session_id then
-        return true, nil
+        return false, "No session_id set"
     end
     local ok, encoded = pcall(vim.json.encode, self:_meta_record())
     if not ok then
@@ -497,23 +542,38 @@ end
 --- @return boolean success
 --- @return string|nil err
 function ChatHistory:_flush_pending_records()
-    if not self.session_id then
-        return false, "No session_id set"
+    if not self.session_id or not self.has_user_message then
+        return true, nil
     end
-    for _, record in ipairs(self._pending_records) do
+    local pending_records = self._pending_records
+    for index, record in ipairs(pending_records) do
         local ok, err = self:_append_record(record)
         if not ok then
+            self._pending_records = vim.list_slice(pending_records, index)
             return false, err
         end
     end
     self._pending_records = {}
-    if not self._meta_written then
-        local meta_ok, meta_err = self:_write_meta_record()
-        if not meta_ok then
-            return false, meta_err
-        end
-    end
     return true, nil
+end
+
+--- All records enter here; this is the sole persistence coordinator.
+--- @param record table
+--- @return boolean success
+--- @return string|nil err
+function ChatHistory:_ingest_record(record)
+    table.insert(self._pending_records, record)
+    if record.type == "message" and record.message.type == "user" then
+        self.has_user_message = true
+    end
+    if not self.session_id or not self.has_user_message then
+        return true, nil
+    end
+    local ok, err = self:_flush_pending_records()
+    if ok then
+        self._event_write_error = nil
+    end
+    return ok, err
 end
 
 --- @param msg agentic.ui.ChatHistory.Message
@@ -524,18 +584,10 @@ function ChatHistory:add_message(msg)
         type = "message",
         message = msg,
     }
-    local ok, err = self:_append_record(record)
+    local ok, err = self:_ingest_record(record)
     if not ok then
         self._event_write_error = err or "Failed to append chat history"
-        table.insert(self._pending_records, record)
         Logger.debug("Failed to append chat history message:", err)
-    elseif not self._meta_written then
-        local meta_ok, meta_err = self:_write_meta_record()
-        if not meta_ok then
-            self._event_write_error = meta_err
-                or "Failed to write session metadata"
-            Logger.debug("Failed to write session metadata:", meta_err)
-        end
     end
 end
 
@@ -552,18 +604,10 @@ function ChatHistory:update_tool_call(tool_call_id, update)
         tool_call_id = tool_call_id,
         update = update,
     }
-    local ok, err = self:_append_record(record)
+    local ok, err = self:_ingest_record(record)
     if not ok then
         self._event_write_error = err or "Failed to append chat history update"
-        table.insert(self._pending_records, record)
         Logger.debug("Failed to append chat history tool update:", err)
-    elseif not self._meta_written then
-        local meta_ok, meta_err = self:_write_meta_record()
-        if not meta_ok then
-            self._event_write_error = meta_err
-                or "Failed to write session metadata"
-            Logger.debug("Failed to write session metadata:", meta_err)
-        end
     end
 end
 
@@ -604,6 +648,7 @@ local function parse_jsonl_history(session_id, content, sessions_folder)
     history.session_id = session_id
     history.messages = {}
     history.message_count = 0
+    history.has_user_message = false
     history._meta_written = true
     local parsed_message_count = 0
 
@@ -621,6 +666,9 @@ local function parse_jsonl_history(session_id, content, sessions_folder)
             then
                 append_replayed_message(history.messages, record.message)
                 parsed_message_count = parsed_message_count + 1
+                if record.message.type == "user" then
+                    history.has_user_message = true
+                end
             elseif
                 record.type == "tool_call_update"
                 and type(record.tool_call_id) == "string"
@@ -753,21 +801,22 @@ function ChatHistory:save(callback)
         return
     end
 
-    if self._event_write_error then
+    if not self.has_user_message then
         if callback then
-            callback(self._event_write_error)
+            callback(nil)
         end
         return
     end
 
-    local ok, err
-    if self.message_count == 0 and #self._pending_records == 0 then
-        ok, err = self:_write_meta_record()
-    else
-        ok, err = self:_flush_pending_records()
-    end
+    local ok, err = self:_flush_pending_records()
     if ok then
+        self._event_write_error = nil
         ok, err = self:_write_meta_record()
+        if not ok then
+            self._event_write_error = err or "Failed to write session metadata"
+        end
+    else
+        self._event_write_error = err or self._event_write_error
     end
 
     if callback then
@@ -787,6 +836,9 @@ function ChatHistory:get_replay_source()
             messages = self.messages,
             sessions_folder = self._sessions_folder,
         }
+    end
+    if not self.has_user_message then
+        return { kind = "messages", messages = {} }
     end
     if self.session_id then
         return {
@@ -858,37 +910,46 @@ function ChatHistory:append_replay_source(source)
         return false, "Replay source not found"
     end
 
-    if self.session_id and not self._meta_written then
-        local meta_ok, meta_err = self:_write_meta_record()
-        if not meta_ok then
-            return false, meta_err
+    local source_key = path
+    local progress = self._replay_progress[source_key] or 0
+    if progress > 0 and #self._pending_records > 0 then
+        local flushed, flush_err = self:_flush_pending_records()
+        if not flushed then
+            return false, flush_err
         end
     end
 
     local messages = {}
+    local record_index = 0
     for line in io.lines(path) do
         if line ~= "" then
+            record_index = record_index + 1
             local ok, record = pcall(vim.json.decode, line)
             if not ok or type(record) ~= "table" then
                 return false, "JSONL decode error"
             end
 
-            if record.type == "message" then
-                self.message_count = self.message_count + 1
-                append_replayed_message(messages, record.message)
-                local append_ok, append_err = self:_append_record(record)
-                if not append_ok then
-                    return false, append_err
-                end
-            elseif record.type == "tool_call_update" then
-                apply_tool_call_update(
-                    messages,
-                    record.tool_call_id,
-                    record.update
-                )
-                local append_ok, append_err = self:_append_record(record)
-                if not append_ok then
-                    return false, append_err
+            if record_index > progress then
+                -- Progress tracks records accepted into the destination queue;
+                -- retries must not enqueue a record twice after a flush failure.
+                self._replay_progress[source_key] = record_index
+                if record.type == "message" then
+                    self.message_count = self.message_count + 1
+                    append_replayed_message(messages, record.message)
+                    local append_ok, append_err = self:_ingest_record(record)
+                    if not append_ok then
+                        return false, append_err
+                    end
+                elseif record.type == "tool_call_update" then
+                    apply_tool_call_update(
+                        messages,
+                        record.tool_call_id,
+                        record.update
+                    )
+                    local append_ok, append_err = self:_ingest_record(record)
+                    if not append_ok then
+                        return false, append_err
+                    end
                 end
             end
         end
