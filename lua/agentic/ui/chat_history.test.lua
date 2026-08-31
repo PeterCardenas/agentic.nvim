@@ -819,6 +819,63 @@ describe("ChatHistory", function()
             end
         )
 
+        it("rolls back a partially written append before retrying", function()
+            local history = ChatHistory:new()
+            history.session_id = "partial-write-failure"
+            local path = ChatHistory.get_jsonl_file_path(history.session_id)
+            vim.fn.mkdir(vim.fn.fnamemodify(path, ":h"), "p")
+            local existing_record = vim.json.encode({
+                type = "message",
+                message = {
+                    type = "agent",
+                    text = "prior",
+                    provider_name = "test-provider",
+                },
+            })
+            local existing = assert.not_nil(io.open(path, "w"))
+            existing:write(existing_record)
+            existing:close()
+
+            local open_stub = spy.stub(io, "open")
+            open_stub:invokes(function(open_path, mode)
+                local file = open_stub._original_fn(open_path, mode)
+                if open_path == path and mode == "a" and file then
+                    local write_count = 0
+                    return {
+                        write = function(_, content)
+                            write_count = write_count + 1
+                            if write_count == 2 then
+                                file:write(content:sub(1, 12))
+                                return nil, "simulated partial write"
+                            end
+                            return file:write(content)
+                        end,
+                        close = function()
+                            return file:close()
+                        end,
+                    }
+                end
+                return file
+            end)
+
+            history:add_message({
+                type = "user",
+                text = "message",
+                timestamp = 1704067200,
+                provider_name = "test-provider",
+            })
+
+            assert.equal(1, #history._pending_records)
+            assert.same({ existing_record }, vim.fn.readfile(path))
+            open_stub:revert()
+
+            history:save()
+            local records = vim.fn.readfile(path)
+            assert.equal(2, #records)
+            assert.equal(existing_record, records[1])
+            assert.equal("message", vim.json.decode(records[2]).message.text)
+        end)
+
         it(
             "does not mistake an identical preexisting tail for a committed append",
             function()

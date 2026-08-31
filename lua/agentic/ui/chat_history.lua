@@ -434,6 +434,35 @@ write_file_atomic_sync = function(path, content)
 end
 
 --- @param path string
+--- @param size integer
+--- @param existed boolean
+--- @return boolean success
+--- @return string|nil err
+local function restore_file_size_sync(path, size, existed)
+    if not existed then
+        local _, remove_err = os.remove(path)
+        if vim.uv.fs_stat(path) == nil then
+            return true, nil
+        end
+        return false, tostring(remove_err)
+    end
+
+    local fd, open_err = vim.uv.fs_open(path, "r+", 438)
+    if not fd then
+        return false, tostring(open_err)
+    end
+    local truncated, truncate_err = vim.uv.fs_ftruncate(fd, size)
+    local closed, close_err = vim.uv.fs_close(fd)
+    if not truncated then
+        return false, tostring(truncate_err)
+    end
+    if not closed then
+        return false, tostring(close_err)
+    end
+    return true, nil
+end
+
+--- @param path string
 --- @param line string
 --- @return boolean success
 --- @return string|nil err
@@ -459,6 +488,18 @@ local function append_line_sync(path, line)
         local ok, err = file:write("\n")
         if not ok then
             file:close()
+            local rolled_back, rollback_err = restore_file_size_sync(
+                path,
+                baseline_size,
+                baseline_stat ~= nil
+            )
+            if not rolled_back then
+                return false,
+                    "write failed: "
+                        .. tostring(err or "unknown error")
+                        .. "; rollback failed: "
+                        .. tostring(rollback_err)
+            end
             return false, "write failed: " .. tostring(err or "unknown error")
         end
     end
@@ -466,6 +507,15 @@ local function append_line_sync(path, line)
     local ok, err = file:write(line)
     if not ok then
         file:close()
+        local rolled_back, rollback_err =
+            restore_file_size_sync(path, baseline_size, baseline_stat ~= nil)
+        if not rolled_back then
+            return false,
+                "write failed: "
+                    .. tostring(err or "unknown error")
+                    .. "; rollback failed: "
+                    .. tostring(rollback_err)
+        end
         return false, "write failed: " .. tostring(err or "unknown error")
     end
 
@@ -485,6 +535,15 @@ local function append_line_sync(path, line)
             if committed then
                 return true, nil
             end
+        end
+        local rolled_back, rollback_err =
+            restore_file_size_sync(path, baseline_size, baseline_stat ~= nil)
+        if not rolled_back then
+            return false,
+                "close failed: "
+                    .. tostring(close_err or "unknown error")
+                    .. "; rollback failed: "
+                    .. tostring(rollback_err)
         end
         return false, "close failed: " .. tostring(close_err or "unknown error")
     end
