@@ -72,6 +72,50 @@ describe("agentic.ui.ChatWidget", function()
                 Config.windows.position = original_position
             end)
 
+            it(
+                "pastes asynchronously into the originating prompt after switching tabs",
+                function()
+                    local Clipboard = require("agentic.ui.clipboard")
+                    local finish
+                    local paste_stub = spy.stub(Clipboard, "paste_image_async")
+                    paste_stub:invokes(function(callback)
+                        finish = callback
+                    end)
+                    local ok, err = pcall(function()
+                        widget:show()
+                        vim.api.nvim_set_current_win(widget.win_nrs.input)
+                        get_keymap_in_buf(
+                            widget.buf_nrs.input,
+                            "<localleader>p"
+                        ).callback()
+                        assert.is_true(vim.wait(1000, function()
+                            return finish ~= nil
+                        end))
+                        vim.cmd("tabnew")
+                        local other_buf = vim.api.nvim_get_current_buf()
+                        finish("/tmp/pasted_image.png")
+                        assert.equal(
+                            "",
+                            vim.api.nvim_buf_get_lines(other_buf, 0, 1, false)[1]
+                        )
+                        assert.equal(
+                            "/tmp/pasted_image.png",
+                            vim.api.nvim_buf_get_lines(
+                                widget.buf_nrs.input,
+                                0,
+                                1,
+                                false
+                            )[1]
+                        )
+                        vim.cmd("tabclose")
+                    end)
+                    paste_stub:revert()
+                    if not ok then
+                        error(err)
+                    end
+                end
+            )
+
             it("creates widget with valid buffer IDs", function()
                 assert.is_true(vim.api.nvim_buf_is_valid(widget.buf_nrs.chat))
                 assert.is_true(vim.api.nvim_buf_is_valid(widget.buf_nrs.input))

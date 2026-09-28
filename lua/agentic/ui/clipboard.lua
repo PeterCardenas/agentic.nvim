@@ -73,14 +73,8 @@ local function is_dir_writable(dir)
     return false
 end
 
---- Paste image from clipboard using img-clip plugin
---- @return string|nil file path of saved image or nil on failure
-function M.paste_image()
-    if not M.is_img_clip_installed() then
-        M.show_img_clip_not_installed_message()
-        return
-    end
-
+--- @return string file_path
+local function image_path()
     --- @type string|nil
     local tmp_dir
 
@@ -108,8 +102,18 @@ function M.paste_image()
         .. vim.fn.strftime("%Y%m%d_%H%M%S")
         .. ".png"
 
-    local file_path = vim.fs.joinpath(tmp_dir, file_name)
+    return vim.fs.joinpath(tmp_dir, file_name)
+end
 
+--- Paste image from clipboard using img-clip plugin
+--- @return string|nil file path of saved image or nil on failure
+function M.paste_image()
+    if not M.is_img_clip_installed() then
+        M.show_img_clip_not_installed_message()
+        return nil
+    end
+
+    local file_path = image_path()
     Logger.debug("clipboard: saving image to", file_path)
 
     local ok, ImgClipClipboard = pcall(require, "img-clip.clipboard")
@@ -131,6 +135,36 @@ function M.paste_image()
     end
 
     return file_path
+end
+
+--- @param callback fun(file_path: string|nil)
+function M.paste_image_async(callback)
+    if not M.is_img_clip_installed() then
+        M.show_img_clip_not_installed_message()
+        callback(nil)
+        return
+    end
+
+    local ok, img_clip = pcall(require, "img-clip.clipboard")
+    if not ok or not img_clip.save_image_async then
+        Logger.notify(
+            "img-clip.nvim does not support asynchronous image pasting",
+            vim.log.levels.ERROR
+        )
+        callback(nil)
+        return
+    end
+
+    local file_path = image_path()
+    img_clip.save_image_async(file_path, function(success)
+        if not success then
+            Logger.notify(
+                "Failed to paste image from clipboard, not an image",
+                vim.log.levels.ERROR
+            )
+        end
+        callback(success and file_path or nil)
+    end)
 end
 
 --- Setup image paste/drag-and-drop support via vim.paste override

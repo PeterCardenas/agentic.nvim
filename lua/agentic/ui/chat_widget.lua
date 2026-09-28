@@ -755,12 +755,20 @@ function ChatWidget:_bind_keymaps()
         function()
             vim.schedule(function()
                 local Clipboard = require("agentic.ui.clipboard")
-                local res = Clipboard.paste_image()
-
-                if res ~= nil then
-                    -- call vim.paste directly to avoid coupling to the file list logic
-                    vim.paste({ res }, -1)
-                end
+                local input_bufnr = self.buf_nrs.input
+                Clipboard.paste_image_async(function(path)
+                    if
+                        not path
+                        or self.buf_nrs.input ~= input_bufnr
+                        or not vim.api.nvim_buf_is_valid(input_bufnr)
+                    then
+                        return
+                    end
+                    -- The user may have switched tabs while the clipboard command runs.
+                    vim.api.nvim_buf_call(input_bufnr, function()
+                        vim.paste({ path }, -1)
+                    end)
+                end)
             end)
         end,
         { desc = "Agentic: Paste image from clipboard" }
