@@ -1296,6 +1296,26 @@ function ChatWidget:open_left_window(bufnr)
     return winid
 end
 
+--- Returns the editor window for navigation from this widget, restoring a
+--- maximized layout first. Callers can retain the returned winid across an
+--- asynchronous lookup without depending on the then-current window.
+--- @return number|nil winid
+function ChatWidget:editor_window_for_navigation()
+    if self._maximize_state ~= nil then
+        self:_clear_maximize_state("navigation", {
+            restore_layout = true,
+            keep_widget = true,
+        })
+    end
+
+    --- @type number|nil
+    local winid = self:_get_preferred_editor_focus_winid()
+    if not winid or self:_classify_editor_window(winid) ~= "preferred" then
+        winid = self:find_first_non_widget_window()
+    end
+    return winid or self:open_left_window()
+end
+
 --- Displays a buffer in the user's main editor window. When `preferred_winid`
 --- is a still-valid, `"preferred"`-classified window (see
 --- `_classify_editor_window`) it is reused first (e.g. `gf` wants the

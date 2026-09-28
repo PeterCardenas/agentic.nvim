@@ -302,20 +302,9 @@ function M.attach(ChatWidget)
             return
         end
 
-        if self._maximize_state ~= nil then
-            self:_clear_maximize_state("gf", {
-                restore_layout = true,
-                keep_widget = true,
-            })
-        end
-
-        -- Resolved after any maximize restore above so it reflects the
-        -- freshly refocused editor leaf; when not maximized, the current
-        -- window is still the widget window `gf` was pressed in, so this
-        -- falls through to `winnr('#')` -- the split the user came from.
-        -- `open_buf_in_editor_window` independently re-validates this
-        -- winid (see `_classify_editor_window`) before ever touching it.
-        local preferred_winid = self:_get_preferred_editor_focus_winid()
+        -- Resolve after loading the buffer so a failed file does not disturb
+        -- a maximized layout. Other navigators use this same window policy.
+        local preferred_winid = self:editor_window_for_navigation()
 
         local target_winid =
             self:open_buf_in_editor_window(target_bufnr, preferred_winid)

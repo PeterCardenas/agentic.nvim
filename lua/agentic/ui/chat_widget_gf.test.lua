@@ -564,6 +564,15 @@ describe("agentic.ui.chat_widget_gf", function()
             vim.api.nvim_win_set_cursor(widget.win_nrs.chat, { 1, 0 })
         end
 
+        it("exposes the same editor target to external navigation", function()
+            widget:show()
+            focus_chat_from_editor()
+            local target = widget:editor_window_for_navigation()
+
+            assert.equal(original_winid, target)
+            assert.equal(widget.win_nrs.chat, vim.api.nvim_get_current_win())
+        end)
+
         it(
             "opens a real file in the previously-focused editor window and moves focus there",
             function()

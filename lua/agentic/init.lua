@@ -10,6 +10,18 @@ local ChatHistory = require("agentic.ui.chat_history")
 --- @class agentic.Agentic
 local Agentic = {}
 
+--- Returns an editor window suitable for navigation out of the current
+--- tab's chat widget. Restores a maximized widget layout if necessary.
+--- @return number|nil winid
+function Agentic.editor_window_for_navigation()
+    local tab_page_id = vim.api.nvim_get_current_tabpage()
+    local session = SessionRegistry.sessions[tab_page_id]
+    if not session or not session.widget:is_open() then
+        return nil
+    end
+    return session.widget:editor_window_for_navigation()
+end
+
 --- Opens the chat widget for the current tab page
 --- Safe to call multiple times
 --- @param opts agentic.ui.ChatWidget.ShowOpts|nil

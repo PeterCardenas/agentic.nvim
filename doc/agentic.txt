@@ -368,6 +368,13 @@ agentic.open({opts})
 agentic.close()
   Close the chat sidebar for the current tabpage.
 
+                            *agentic.editor_window_for_navigation()*
+agentic.editor_window_for_navigation()
+  Return an editor window ID for navigation from the current tab's widget,
+  or nil if the widget is closed. Restores a maximized layout if necessary.
+  External navigators can keep this ID across asynchronous lookups and
+  open their results in that window instead of the fixed widget window.
+
                                                *agentic.add_selection()*
 agentic.add_selection({opts})
   Add the current visual selection to the chat context and open
