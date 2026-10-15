@@ -40,6 +40,7 @@ local ToolCallBody = require("agentic.utils.tool_call_body")
 --- @field created_at integer
 --- @field updated_at integer
 --- @field message_count? integer
+--- @field starting_cwd? string
 
 --- @class agentic.ui.ChatHistory.ReplaySource
 --- @field kind "jsonl"|"messages"
@@ -58,6 +59,7 @@ local ToolCallBody = require("agentic.utils.tool_call_body")
 --- @class agentic.ui.ChatHistory
 --- @field session_id? string
 --- @field acp_session_id? string
+--- @field starting_cwd? string
 --- @field created_at integer
 --- @field updated_at integer
 --- @field messages agentic.ui.ChatHistory.Message[] Compatibility field; live sessions keep this empty.
@@ -88,12 +90,14 @@ end
 
 --- @return agentic.ui.ChatHistory history
 --- @param sessions_folder? string
-function ChatHistory:new(sessions_folder)
+--- @param starting_cwd? string
+function ChatHistory:new(sessions_folder, starting_cwd)
     local now = os.time()
     --- @type agentic.ui.ChatHistory
     local instance = setmetatable({
         session_id = nil,
         acp_session_id = nil,
+        starting_cwd = starting_cwd,
         created_at = now,
         updated_at = now,
         messages = {},
@@ -132,6 +136,12 @@ function ChatHistory:has_user_messages()
         end
     end
     return false
+end
+
+--- @param tab_page_id integer|nil
+--- @return string cwd
+function ChatHistory.get_tab_cwd(tab_page_id)
+    return get_valid_tab_cwd(tab_page_id)
 end
 
 --- @param tab_page_id integer|nil
@@ -341,6 +351,9 @@ local function decode_session_metadata(content, session_id)
     local metadata = {
         session_id = resolve_session_id(record, session_id),
         acp_session_id = record.acp_session_id,
+        starting_cwd = type(record.starting_cwd) == "string"
+                and record.starting_cwd
+            or nil,
         title = record.title,
         created_at = created_at,
         updated_at = updated_at,
@@ -570,6 +583,7 @@ function ChatHistory:_meta_record()
     local record = {
         session_id = self.session_id,
         acp_session_id = self.acp_session_id,
+        starting_cwd = self.starting_cwd,
         title = self.title,
         created_at = self.created_at,
         updated_at = self.updated_at,
@@ -771,6 +785,9 @@ local function apply_metadata(history, metadata, requested_session_id)
     end
     history.session_id = requested_session_id
     history.acp_session_id = metadata.acp_session_id
+    history.starting_cwd = type(metadata.starting_cwd) == "string"
+            and metadata.starting_cwd
+        or nil
     history.title = metadata.title or ""
     history.created_at, history.updated_at = normalize_session_times(metadata)
     if type(metadata.message_count) == "number" then

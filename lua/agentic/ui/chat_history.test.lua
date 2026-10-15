@@ -53,6 +53,24 @@ describe("ChatHistory", function()
     end)
 
     describe("paths", function()
+        it("persists a starting cwd in session metadata", function()
+            local folder = ChatHistory.get_sessions_folder()
+            local history = ChatHistory:new(folder, TEST_CWD)
+            history.session_id = "cwd-session"
+            history.has_user_message = true
+            history:add_message({
+                type = "user",
+                text = "hello",
+                timestamp = 1,
+                provider_name = "test",
+            })
+            history:save()
+
+            local loaded =
+                assert.not_nil(ChatHistory.load_sync("cwd-session", folder))
+            assert.equal(TEST_CWD, loaded.starting_cwd)
+        end)
+
         it("uses JSONL as the runtime session file", function()
             local path = ChatHistory.get_file_path("session-abc")
             local project_folder = ChatHistory.get_project_folder()

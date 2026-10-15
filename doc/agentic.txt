@@ -473,7 +473,10 @@ agentic.switch_config_option()
 
                                              *agentic.restore_session()*
 agentic.restore_session()
-  Show the session picker to restore a previous JSONL session.
+  Show the session picker to restore a previous JSONL session. It starts
+  with sessions from the entire Git repository (including worktrees). Press
+  |Ctrl-G| in fzf-lua to toggle the current working directory. With
+  |vim.ui.select|, cancel the repository list to choose the directory scope.
 
                                         *agentic.migrate_sessions_to_jsonl()*
 agentic.migrate_sessions_to_jsonl()

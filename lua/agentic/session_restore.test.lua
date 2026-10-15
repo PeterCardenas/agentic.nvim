@@ -25,12 +25,14 @@ describe("SessionRestore", function()
             title = "First chat",
             created_at = 1704067200,
             updated_at = 1704067200,
+            starting_cwd = vim.fn.getcwd(),
         },
         {
             session_id = "session-2",
             title = "Second chat",
             created_at = 1704153600,
             updated_at = 1704153600,
+            starting_cwd = vim.fn.getcwd(),
         },
     }
 
@@ -76,7 +78,7 @@ describe("SessionRestore", function()
     --- Get callback and items from vim.ui.select call at given index
     local function get_ui_select_call(index)
         local call = assert.not_nil(vim_ui_select_stub.calls[index])
-        --- @type fun(choice: table|nil): nil
+        --- @type fun(choice: table|string|nil): nil
         local callback = call[3]
         local items = call[1]
         return callback, items
@@ -153,11 +155,10 @@ describe("SessionRestore", function()
 
             SessionRestore.show_picker(1)
 
-            assert.spy(logger_notify_stub).was.called(1)
-            local first_call = assert.not_nil(logger_notify_stub.calls[1])
-            assert.equal("No saved sessions found", first_call[1])
-            assert.equal(vim.log.levels.INFO, first_call[2])
-            assert.spy(vim_ui_select_stub).was.called(0)
+            assert.spy(logger_notify_stub).was.called(0)
+            assert.spy(vim_ui_select_stub).was.called(1)
+            local first_call = assert.not_nil(vim_ui_select_stub.calls[1])
+            assert.equal(0, #first_call[1])
         end)
 
         it("displays formatted sessions with date and title", function()
@@ -172,12 +173,46 @@ describe("SessionRestore", function()
             assert.equal(2, #items)
             assert.equal("session-1", items[1].session_id)
             assert.truthy(items[1].display:match("First chat"))
-            assert.equal("Select session to restore:", opts.prompt)
+            assert.equal(
+                "Select session to restore (entire repository):",
+                opts.prompt
+            )
             assert.equal(items[1].display, opts.format_item(items[1]))
         end)
 
+        it(
+            "defaults to repository scope in the vim.ui.select fallback",
+            function()
+                local sessions = vim.deepcopy(test_sessions)
+                sessions[2].starting_cwd = "/another/directory"
+                setup_list_stub(sessions)
+
+                SessionRestore.show_picker(vim.api.nvim_get_current_tabpage())
+                local callback, repository_items = get_ui_select_call(1)
+                assert.equal(2, #repository_items)
+                callback(nil)
+                local scope_callback, scopes = get_ui_select_call(2)
+                assert.equal("Current directory", scopes[1])
+                scope_callback("Current directory")
+
+                local directory_callback, directory_items =
+                    get_ui_select_call(3)
+                assert.equal(1, #directory_items)
+                local directory_call =
+                    assert.not_nil(vim_ui_select_stub.calls[3])
+                assert.equal(
+                    "Select session to restore (current directory):",
+                    directory_call[2].prompt
+                )
+                directory_callback(nil)
+                assert.spy(vim_ui_select_stub).was.called(3)
+            end
+        )
+
         it("handles sessions with missing title", function()
-            setup_list_stub({ { session_id = "s1" } })
+            setup_list_stub({
+                { session_id = "s1", starting_cwd = vim.fn.getcwd() },
+            })
 
             SessionRestore.show_picker(1)
 
@@ -194,7 +229,7 @@ describe("SessionRestore", function()
             select_session(nil)
 
             -- No restore attempted when session selection is cancelled
-            assert.spy(vim_ui_select_stub).was.called(1)
+            assert.spy(vim_ui_select_stub).was.called(2)
             assert.spy(chat_history_load_stub).was.called(0)
         end)
 
@@ -375,6 +410,36 @@ describe("SessionRestore", function()
             local first_call = assert.not_nil(fzf_exec_spy.calls[1])
             assert.equal("function", type(first_call[1]))
         end)
+
+        it(
+            "toggles between current-directory and repository sessions",
+            function()
+                local sessions = vim.deepcopy(test_sessions)
+                sessions[2].starting_cwd = "/another/directory"
+                setup_list_stub(sessions)
+
+                SessionRestore.show_picker(vim.api.nvim_get_current_tabpage())
+                local opts = get_fzf_opts()
+                local entries = populate_items()
+                assert.equal(2, #entries)
+                assert.is_table(opts.actions["ctrl-g"])
+                assert.is_true(opts.actions["ctrl-g"].reload)
+                assert.truthy(
+                    opts.fzf_opts["--header"]:match("Scope: entire repository")
+                )
+                assert.equal(
+                    "[entire repository] Select session to restore> ",
+                    opts.prompt
+                )
+                assert.equal(2, #populate_items())
+
+                opts.actions["ctrl-g"].fn()
+                entries = populate_items()
+                assert.equal(1, #entries)
+                opts.actions["ctrl-g"].fn()
+                assert.equal(2, #populate_items())
+            end
+        )
 
         it(
             "loads preview content through the asynchronous history callback",

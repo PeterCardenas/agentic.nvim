@@ -41,7 +41,10 @@ interface, your colors, and your keymaps.
 - **🔀 Switch Providers** - Switch between ACP providers mid-conversation
   without losing chat history (`<leader>ax` for the current tabpage session)
 - **♻️ Session Restore** - Restore your session and chat history at any time,
-  for all providers
+  for all providers. The picker starts with sessions from the entire Git
+  repository (including worktrees); press `Ctrl-G` to toggle the current
+  working directory. The `vim.ui.select` fallback offers the same scope
+  switch after cancelling the repository list.
 - **📝 Context Control** - Add files and text selections to conversation context
   with one keypress
 - **🏞️ Image Support** - Drag-and-drop or paste images and screenshots directly

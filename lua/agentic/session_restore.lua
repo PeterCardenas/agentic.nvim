@@ -234,7 +234,7 @@ local function create_session_previewer(fixed_session_id, sessions_folder)
 end
 
 --- Show session picker using fzf-lua (with fallback to vim.ui.select)
---- @param build_items fun(callback: fun(items: table[])) Function that builds current session items
+--- @param build_items fun(repository_scope: boolean, callback: fun(items: table[])) Function that builds current session items
 --- @param on_choice fun(choice: table|nil) Callback when user selects an item
 --- @param on_delete fun(choice: table)|nil Callback when user requests deletion
 --- @param initial_items table[]|nil Items already loaded for the first render
@@ -251,26 +251,41 @@ local function show_fzf_picker(
     local has_used_initial_items = false
 
     if not fzf then
-        -- Fallback to vim.ui.select if fzf-lua is not available
-        local function select(items)
-            vim.ui.select(items, {
-                prompt = "Select session to restore:",
-                format_item = function(item)
-                    return item.display
-                end,
-            }, on_choice)
+        -- Fallback picker starts with the same repository scope and can switch.
+        local function select_scope(repository_scope)
+            build_items(repository_scope, function(items)
+                vim.ui.select(items, {
+                    prompt = repository_scope
+                            and "Select session to restore (entire repository):"
+                        or "Select session to restore (current directory):",
+                    format_item = function(item)
+                        return item.display
+                    end,
+                }, function(choice)
+                    if choice then
+                        on_choice(choice)
+                    elseif repository_scope then
+                        vim.ui.select(
+                            { "Current directory", "Entire repository" },
+                            { prompt = "Select session scope:" },
+                            function(scope)
+                                if scope then
+                                    select_scope(scope == "Entire repository")
+                                end
+                            end
+                        )
+                    end
+                end)
+            end)
         end
-        if first_items then
-            return select(first_items)
-        else
-            build_items(select)
-        end
+        select_scope(true)
         return
     end
 
     -- Shared state: rebuilt each time the content function runs (initial + reload)
     local current_items_by_session_id = {}
     local contents_generation = 0
+    local repository_scope = true
 
     --- @param fzf_cb fun(entry: string|nil)
     local function contents(fzf_cb)
@@ -287,7 +302,7 @@ local function show_fzf_picker(
 
         contents_generation = contents_generation + 1
         local generation = contents_generation
-        build_items(function(current_items)
+        build_items(repository_scope, function(current_items)
             if generation ~= contents_generation then
                 return
             end
@@ -326,6 +341,12 @@ local function show_fzf_picker(
     end
 
     local actions = {
+        ["ctrl-g"] = {
+            fn = function()
+                repository_scope = not repository_scope
+            end,
+            reload = true,
+        },
         ["default"] = function(selected)
             local item = get_selected(selected)
             if item then
@@ -354,6 +375,7 @@ local function show_fzf_picker(
     end
 
     local header_lines = {
+        "Scope: entire repository (Ctrl-G: toggle current directory)",
         "enter: continue selected session",
     }
 
@@ -364,7 +386,7 @@ local function show_fzf_picker(
     fzf_opts["--header"] = table.concat(header_lines, "\n")
 
     fzf.fzf_exec(contents, {
-        prompt = "Select session to restore> ",
+        prompt = "[entire repository] Select session to restore> ",
         winopts = {
             height = 0.85,
             width = 0.9,
@@ -382,17 +404,28 @@ end
 --- Build session items from disk.
 --- @param sessions_folder string
 --- @return table[] items
-local function build_session_items(sessions_folder)
+local function build_session_items(
+    sessions_folder,
+    current_cwd,
+    repository_scope
+)
     local items = {}
     ChatHistory.list_sessions(function(sessions)
         for _, s in ipairs(sessions) do
-            local date = os.date("%Y-%m-%d %H:%M", s.updated_at or 0)
-            local title = (s.title or "(no title)"):gsub("\n", " ")
+            local session_cwd = s.starting_cwd
+                    and vim.fn.fnamemodify(s.starting_cwd, ":p")
+                or nil
+            session_cwd = session_cwd and session_cwd:gsub("/$", "") or nil
+            local picker_cwd = current_cwd:gsub("/$", "")
+            if repository_scope or session_cwd == picker_cwd then
+                local date = os.date("%Y-%m-%d %H:%M", s.updated_at or 0)
+                local title = (s.title or "(no title)"):gsub("\n", " ")
 
-            table.insert(items, {
-                display = string.format("%s - %s", date, title),
-                session_id = s.session_id,
-            })
+                table.insert(items, {
+                    display = string.format("%s - %s", date, title),
+                    session_id = s.session_id,
+                })
+            end
         end
     end, sessions_folder)
     return items
@@ -405,14 +438,15 @@ function SessionRestore.show_picker(tab_page_id)
         return
     end
     local sessions_folder = ChatHistory.get_sessions_folder(tab_page_id)
-    local initial_items = build_session_items(sessions_folder)
-    if #initial_items == 0 then
-        Logger.notify("No saved sessions found", vim.log.levels.INFO)
-        return
-    end
+    local current_cwd =
+        vim.fn.fnamemodify(ChatHistory.get_tab_cwd(tab_page_id), ":p")
+    local initial_items =
+        build_session_items(sessions_folder, current_cwd, true)
 
-    show_fzf_picker(function(callback)
-        callback(build_session_items(sessions_folder))
+    show_fzf_picker(function(repository_scope, callback)
+        callback(
+            build_session_items(sessions_folder, current_cwd, repository_scope)
+        )
     end, function(choice)
         if not choice then
             return
