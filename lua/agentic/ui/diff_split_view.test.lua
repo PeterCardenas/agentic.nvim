@@ -5,7 +5,10 @@ describe("DiffSplitView", function()
     local DiffSplitView = require("agentic.ui.diff_split_view")
     local FileSystem = require("agentic.utils.file_system")
 
-    local test_file_path = "/tmp/test_diff_split_view_fake.lua"
+    --- @type string
+    local test_file_path
+    --- @type string|nil
+    local previous_test_file_path
     --- @type integer|nil
     local test_tabpage
     --- @type TestStub
@@ -19,6 +22,7 @@ describe("DiffSplitView", function()
     end
 
     before_each(function()
+        test_file_path = vim.fn.tempname() .. ".lua"
         read_stub = spy_module.stub(FileSystem, "read_from_buffer_or_disk")
         stub_file_content({ "local x = 1", "print(x)", "" })
         original_hidden = vim.o.hidden
@@ -27,11 +31,16 @@ describe("DiffSplitView", function()
     end)
 
     after_each(function()
+        previous_test_file_path = test_file_path
         read_stub:revert()
         vim.o.hidden = original_hidden
         if test_tabpage and vim.api.nvim_tabpage_is_valid(test_tabpage) then
             pcall(DiffSplitView.clear_split_diff, test_tabpage)
             pcall(vim.api.nvim_tabpage_del, test_tabpage)
+        end
+        local fixture_bufnr = vim.fn.bufnr(test_file_path)
+        if fixture_bufnr ~= -1 then
+            vim.api.nvim_buf_delete(fixture_bufnr, { force = true })
         end
     end)
 
@@ -123,6 +132,15 @@ describe("DiffSplitView", function()
                     )
                     assert.same({ "local y = 2" }, new_lines)
                 end
+            end
+        )
+
+        it(
+            "uses a fresh fixture and removes the previous fixture buffer",
+            function()
+                local previous_path = assert.not_nil(previous_test_file_path)
+                assert.are_not.equal(previous_path, test_file_path)
+                assert.equal(-1, vim.fn.bufnr(previous_path))
             end
         )
 
